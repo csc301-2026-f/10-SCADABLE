@@ -42,18 +42,50 @@ This directly supports SCADABLE’s broader goals. Keeping track of competitors'
 
 #### Q4: What are the user stories that make up the Minumum Viable Product (MVP)?
 
- * At least 5 user stories concerning the main features of the application - note that this can broken down further
- * You must follow proper user story format (as taught in lecture) ```As a <user of the app>, I want to <do something in the app> in order to <accomplish some goal>```
- * User stories must contain acceptance criteria. Examples of user stories with different formats can be found here: https://www.justinmind.com/blog/user-story-examples/. **It is important that you provide a link to an artifact containing your user stories**.
- * If you have a partner, these must be reviewed and accepted by them. You need to include the evidence of partner approval (e.g., screenshot from email) or at least communication to the partner (e.g., email you sent)
+Add a competitor
+- As a founder, I want to add a competitor by entering its name and website in order to track it in one place.
+- Acceptance criteria: The name and website are required. After submission, the competitor appears in the list with a pending research status. The app prevents duplicate websites.
+
+Research a competitor
+- As a founder, I want the app to research a competitor in order to build a profile without collecting information manually.
+- Acceptance criteria: Adding a competitor starts a research run. The app saves a company summary, findings, source links, and the research date. If research fails, the app shows the error and keeps any information already collected.
+
+View the overall SWOT
+- As a founder, I want to see a SWOT overview of all tracked competitors in order to understand the competitive landscape.
+- Acceptance criteria: The overview separates strengths, weaknesses, opportunities, and threats. Each finding names the relevant competitor and links to its profile. The page shows when the information was last updated.
+
+View a competitor profile
+- As a sales team member, I want to open a competitor’s profile in order to prepare for customer conversations.
+- Acceptance criteria: The profile shows the competitor’s website, summary, SWOT findings, sources, and latest research date. A finding selected from the overview can be found on the profile.
+
+Compare competitive signals
+- As a founder, I want to compare competitors’ product updates, automation, hiring, and announcements in order to spot changes that matter to our company.
+- Acceptance criteria: The app groups findings by category and shows the supporting source. Where a finding has a score, it uses the same 0–10 scale across competitors. Missing information is shown as unavailable, not as a score of zero.
+
+Refresh research weekly
+- As a founder, I want competitor research to refresh weekly in order to keep the SWOT current.
+- Acceptance criteria: Each tracked competitor is researched at least once every seven days while the scheduled process is running. A successful run updates the profile and overview. A failed run is visible and does not delete the last successful findings.
+
+See what changed
+- As a sales team member, I want to see new or changed findings after a refresh in order to update our talking points.
+- Acceptance criteria: New or changed findings are marked on the competitor profile with their source and detection date. Findings from the first research run are labelled as initial findings.
+
 
 #### Q5: Have you decided on how you will build it? Share what you know now or tell us the options you are considering.
 
-> Short (1-2 min' read max)
- * What is the technology stack? Specify languages, frameworks, libraries, PaaS products or tools to be used or being considered. 
- * How will you deploy the application?
- * Describe the architecture - what are the high level components or patterns you will use? Diagrams are useful here. 
- * Will you be using third party applications or APIs? If so, what are they?
+We have a proposed stack based on the kickoff discussion, but have not finalized every tool. We plan to use Next.js with TypeScript for the web app, Python for the research and AI workflows, and PostgreSQL to store competitors, sources, findings, scores, and research history. This matches the industry partner’s preferred frontend and backend languages and their requirement to use Postgres.
+
+We plan to deploy the Next.js app on Vercel. The Python service and PostgreSQL database will need separate hosting; we are still deciding on a provider. A scheduled job will trigger research for each tracked competitor once a week.
+
+The app will have three main parts:
+- Web app: lets users add competitors, view the overall SWOT, and open individual competitor profiles.
+- Research service: gathers public information, uses an AI model to summarize and classify findings, and records the sources behind them.
+- Database: stores competitor profiles, findings, scores, source links, and past research runs.
+
+The web app will request data from the backend, which will read and write to Postgres. When a user adds a competitor, the backend will queue an initial research run. The weekly scheduled job will use the same research workflow to update existing competitors.
+
+We expect to use the OpenAI API for summarizing research and generating SWOT findings. The industry partner has offered to provide an API key when we are ready to test. We may also use third-party search or news APIs to find public updates, but have not selected one yet. We will review costs and source quality before making that decision. Gemini credits were discussed as a possibility, but Gemini is not currently part of the planned MVP stack.
+
 
 ----
 ## Intellectual Property Confidentiality Agreement 

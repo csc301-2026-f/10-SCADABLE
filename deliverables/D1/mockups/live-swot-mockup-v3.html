@@ -1,0 +1,1757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Live SWOT — SCADABLE</title>
+<link rel="icon" href="data:,">
+
+<style>
+:root{
+  --ink:#171329;
+  --sub:#6f6974;
+  --muted:#77717b;
+  --line:#e7e2df;
+  --line-strong:#d9d3d0;
+  --canvas:#fbf8f4;
+  --panel:#fffefd;
+  --rail:#fffdfb;
+  --accent:#160b3f;
+  --accent-hover:#241457;
+  --accent-soft:#eeeaf8;
+  --mint-soft:#edf8f1;
+  --orange:#a9541d;
+  --orange-soft:#fff8f2;
+  --s:#4d64b9;
+  --w:#da7902;
+  --o:#31855f;
+  --t:#b8292b;
+  --shadow:0 8px 28px rgba(30,20,40,.11);
+}
+
+*{box-sizing:border-box;}
+
+html,body{
+  margin:0;
+  min-height:100%;
+}
+
+body{
+  min-width:320px;
+  font-family:Geist,"Helvetica Neue",Arial,sans-serif;
+  background:var(--canvas);
+  color:var(--ink);
+  font-size:14px;
+  -webkit-font-smoothing:antialiased;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+
+button,input{font:inherit;}
+button{color:inherit;}
+::selection{background:#dcd5ef;color:var(--accent);}
+:focus-visible{outline:2px solid #5a4b86;outline-offset:2px;}
+*{scrollbar-width:thin;scrollbar-color:#c9c2bf transparent;}
+*::-webkit-scrollbar{width:9px;height:9px;}
+*::-webkit-scrollbar-thumb{
+  background:#c9c2bf;
+  border:3px solid transparent;
+  background-clip:padding-box;
+}
+
+.app{
+  display:grid;
+  grid-template-columns:48px minmax(0,1fr);
+  grid-template-rows:52px minmax(calc(100vh - 52px),auto);
+  min-height:100vh;
+}
+
+.topbar{
+  grid-column:1 / -1;
+  grid-row:1;
+  display:grid;
+  grid-template-columns:48px minmax(0,1fr);
+  align-items:center;
+  height:52px;
+  background:rgba(255,253,251,.96);
+  border-bottom:1px solid var(--line);
+  position:sticky;
+  top:0;
+  z-index:30;
+}
+
+.brand-mark{
+  width:48px;
+  height:52px;
+  display:grid;
+  place-items:center;
+  color:#141218;
+  border-right:1px solid var(--line);
+}
+
+.brand-mark svg{
+  width:26px;
+  height:26px;
+}
+
+.topbar-title{
+  font-size:13px;
+  font-weight:650;
+  padding:0 16px;
+  letter-spacing:-.01em;
+}
+
+.sidebar{
+  grid-column:1;
+  grid-row:2;
+  min-height:calc(100vh - 52px);
+  background:var(--rail);
+  border-right:1px solid var(--line);
+  padding:14px 7px 10px;
+  display:flex;
+  flex-direction:column;
+  position:sticky;
+  top:52px;
+  align-self:start;
+  height:calc(100vh - 52px);
+  z-index:20;
+}
+
+.nav-item{
+  width:34px;
+  height:34px;
+  padding:0;
+  border:0;
+  border-radius:3px;
+  background:transparent;
+  color:#393445;
+  cursor:pointer;
+  display:grid;
+  place-items:center;
+  margin:0 auto 4px;
+  position:relative;
+}
+
+.nav-item svg{
+  width:17px;
+  height:17px;
+  stroke-width:1.7;
+}
+
+.nav-item:hover{
+  background:#f3efeb;
+  color:var(--ink);
+}
+
+.nav-item.active{
+  background:var(--mint-soft);
+  color:#376d55;
+}
+
+.nav-item .label{
+  position:absolute;
+  left:44px;
+  top:50%;
+  transform:translateY(-50%);
+  padding:5px 7px;
+  background:var(--ink);
+  color:#fff;
+  border-radius:3px;
+  font-size:11px;
+  white-space:nowrap;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .12s ease-out;
+}
+
+.nav-item:hover .label,
+.nav-item:focus-visible .label{
+  opacity:1;
+}
+
+.main{
+  grid-column:2;
+  grid-row:2;
+  min-width:0;
+  padding:33px 23px 40px 27px;
+  overflow-x:auto;
+  background-color:var(--canvas);
+  background-image:linear-gradient(
+    to right,
+    rgba(54,43,47,.035) 1px,
+    transparent 1px
+  );
+  background-size:122px 100%;
+}
+
+.view{
+  display:none;
+  min-width:0;
+}
+
+.view.active{
+  display:block;
+}
+
+.page-head{
+  min-height:76px;
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:24px;
+  margin-bottom:16px;
+  position:relative;
+}
+
+.page-head h1,
+.detail-hero h1{
+  font-size:22px;
+  line-height:1.15;
+  letter-spacing:-.025em;
+  margin:0 0 8px;
+  font-weight:690;
+}
+
+.page-head p,
+.detail-hero p{
+  color:var(--sub);
+  margin:0;
+  font-size:12px;
+  line-height:1.5;
+}
+
+.head-actions{
+  position:absolute;
+  right:0;
+  top:8px;
+}
+
+.filter-tabs{
+  display:inline-flex;
+  align-items:center;
+  background:#fff;
+  border:1px solid var(--line-strong);
+  border-radius:6px;
+  padding:2px;
+}
+
+.filter-tabs button{
+  height:25px;
+  padding:0 13px;
+  border:0;
+  border-radius:4px;
+  background:transparent;
+  color:var(--sub);
+  cursor:pointer;
+  font-size:11px;
+  font-weight:550;
+}
+
+.filter-tabs button.active{
+  background:var(--accent);
+  color:#fff;
+}
+
+.btn{
+  min-height:30px;
+  background:var(--accent);
+  color:#fff;
+  border:1px solid var(--accent);
+  padding:0 13px;
+  border-radius:6px;
+  font-size:11px;
+  font-weight:650;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  white-space:nowrap;
+}
+
+.btn:hover{
+  background:var(--accent-hover);
+  border-color:var(--accent-hover);
+}
+
+.btn.secondary{
+  background:#fff;
+  color:var(--ink);
+  border-color:var(--line-strong);
+}
+
+.btn.secondary:hover{
+  background:#f8f5f2;
+  border-color:#bfb7b3;
+}
+
+.btn svg{
+  width:13px;
+  height:13px;
+}
+
+.list-controls{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  margin-bottom:14px;
+}
+
+.search-group{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.search-wrap{
+  position:relative;
+  display:block;
+}
+
+.search-wrap svg{
+  position:absolute;
+  left:10px;
+  top:50%;
+  transform:translateY(-50%);
+  width:13px;
+  height:13px;
+  color:var(--muted);
+  pointer-events:none;
+}
+
+.search-wrap input{
+  width:152px;
+  height:30px;
+  border:1px solid var(--line-strong);
+  border-radius:6px;
+  background:rgba(255,255,255,.83);
+  color:var(--ink);
+  padding:0 10px 0 29px;
+  font-size:11px;
+}
+
+.search-wrap input::placeholder{
+  color:#77717b;
+}
+
+.result-count{
+  font-size:11px;
+  color:var(--sub);
+  white-space:nowrap;
+  font-variant-numeric:tabular-nums;
+}
+
+.swot-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  border:1px solid var(--line);
+  background:var(--line);
+  gap:1px;
+}
+
+.swot-card{
+  background:rgba(255,254,253,.9);
+  padding:18px 20px;
+  min-height:174px;
+}
+
+.swot-card h2{
+  margin:0 0 12px;
+  font-size:13px;
+  display:flex;
+  align-items:center;
+  gap:9px;
+}
+
+.swot-card h2::before{
+  content:'';
+  width:8px;
+  height:8px;
+  border-radius:2px;
+}
+
+.swot-card.s h2::before{background:var(--s);}
+.swot-card.w h2::before{background:var(--w);}
+.swot-card.o h2::before{background:var(--o);}
+.swot-card.t h2::before{background:var(--t);}
+
+.swot-item{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:14px;
+  padding:9px 8px;
+  border-top:1px solid var(--line);
+  font-size:12px;
+  line-height:1.45;
+  cursor:pointer;
+}
+
+.swot-item:hover{
+  background:#f9f6f2;
+}
+
+.swot-tag{
+  font-size:11px;
+  color:var(--sub);
+  white-space:nowrap;
+}
+
+.table-wrap{
+  background:rgba(255,254,253,.88);
+  border:1px solid var(--line);
+  overflow:hidden;
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:12px;
+}
+
+th{
+  text-align:left;
+  height:32px;
+  padding:0 12px;
+  color:#716b75;
+  font-weight:650;
+  border-bottom:1px solid var(--line);
+  font-size:11px;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+}
+
+td{
+  height:37px;
+  padding:0 12px;
+  border-bottom:1px solid var(--line);
+  white-space:nowrap;
+}
+
+tr:last-child td{
+  border-bottom:none;
+}
+
+tr.clickable{
+  transition:background-color .12s ease-out;
+}
+
+tr.clickable:hover{
+  background:#f3f1ef;
+  cursor:pointer;
+}
+
+.company-cell{
+  font-weight:580;
+  color:#282333;
+}
+
+.website-cell{
+  color:#4f4956;
+}
+
+.relationship{
+  display:inline-flex;
+  align-items:center;
+  height:20px;
+  padding:0 9px;
+  border:1px solid #eccab2;
+  border-radius:9px;
+  background:var(--orange-soft);
+  color:var(--orange);
+  font-size:11px;
+  font-weight:650;
+}
+
+.pill{
+  display:inline-flex;
+  align-items:center;
+  height:22px;
+  padding:0 9px;
+  border-radius:10px;
+  background:var(--accent-soft);
+  color:var(--accent);
+  font-size:11px;
+  font-weight:650;
+}
+
+.trend{
+  font-size:11px;
+  font-weight:600;
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+}
+
+.trend.up{color:#a64f45;}
+.trend.down{color:#3e7f61;}
+.trend.flat{color:var(--sub);}
+
+.row-arrow{
+  color:var(--muted);
+  font-size:13px;
+  text-align:right;
+}
+
+.empty-row td{
+  text-align:center;
+  color:var(--sub);
+  padding:32px 12px;
+  height:auto;
+}
+
+.detail-back{
+  color:#55466f;
+  font-size:11px;
+  font-weight:600;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  margin-bottom:25px;
+}
+
+.detail-back:hover{
+  text-decoration:underline;
+  text-underline-offset:3px;
+}
+
+.detail-hero{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  margin-bottom:20px;
+  gap:12px;
+}
+
+.detail-grid{
+  display:grid;
+  grid-template-columns:2fr 1fr;
+  gap:16px;
+}
+
+.card{
+  background:rgba(255,254,253,.9);
+  border:1px solid var(--line);
+  padding:18px 20px;
+  margin-bottom:16px;
+}
+
+.card h2{
+  margin:0 0 13px;
+  font-size:13px;
+}
+
+.feature-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:10px 0;
+  border-bottom:1px solid var(--line);
+  font-size:12px;
+}
+
+.feature-row:last-child{
+  border-bottom:none;
+}
+
+.score{
+  font-weight:700;
+  color:#55466f;
+  font-variant-numeric:tabular-nums;
+}
+
+.stat-row{
+  display:flex;
+  justify-content:space-between;
+  padding:8px 0;
+  font-size:11px;
+  color:var(--sub);
+  border-bottom:1px solid var(--line);
+}
+
+.stat-row:last-child{
+  border-bottom:0;
+}
+
+.stat-row b{
+  color:var(--ink);
+}
+
+.news-item{
+  font-size:12px;
+  padding:10px 0;
+  border-bottom:1px solid var(--line);
+  line-height:1.4;
+}
+
+.news-item:last-child{
+  border-bottom:none;
+}
+
+.news-date{
+  color:var(--sub);
+  font-size:11px;
+  display:block;
+  margin-top:4px;
+}
+
+.overlay{
+  display:none;
+  position:fixed;
+  inset:0;
+  background:rgba(23,19,41,.32);
+  align-items:center;
+  justify-content:center;
+  z-index:50;
+  padding:20px;
+}
+
+.overlay.active{
+  display:flex;
+}
+
+.modal{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:6px;
+  padding:24px;
+  width:380px;
+  max-width:100%;
+  box-shadow:var(--shadow);
+}
+
+.modal h2{
+  margin:0 0 6px;
+  font-size:17px;
+  letter-spacing:-.015em;
+}
+
+.modal p{
+  margin:0 0 21px;
+  color:var(--sub);
+  font-size:11px;
+  line-height:1.5;
+}
+
+.field{
+  margin-bottom:14px;
+}
+
+.field label{
+  display:block;
+  font-size:11px;
+  font-weight:650;
+  margin-bottom:6px;
+}
+
+.field input{
+  width:100%;
+  height:36px;
+  padding:0 10px;
+  border:1px solid var(--line-strong);
+  border-radius:4px;
+  background:#fff;
+  font-size:12px;
+  color:var(--ink);
+}
+
+.field input::placeholder{
+  color:#77717b;
+}
+
+.modal-actions{
+  display:flex;
+  gap:8px;
+  justify-content:flex-end;
+  margin-top:20px;
+}
+
+.toast{
+  position:fixed;
+  bottom:22px;
+  left:50%;
+  transform:translateX(-50%) translateY(12px);
+  background:var(--ink);
+  color:#fff;
+  padding:10px 15px;
+  border-radius:4px;
+  font-size:11px;
+  opacity:0;
+  transition:opacity .18s ease-out,transform .18s ease-out;
+  z-index:60;
+  pointer-events:none;
+  box-shadow:0 5px 18px rgba(23,19,41,.18);
+}
+
+.toast.show{
+  opacity:1;
+  transform:translateX(-50%) translateY(0);
+}
+
+.section-title{
+  font-size:11px;
+  color:var(--sub);
+  font-weight:650;
+  margin:24px 0 10px;
+}
+
+.profile-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+}
+
+.profile-list{
+  margin:0;
+  padding-left:17px;
+  font-size:12px;
+  line-height:1.75;
+}
+
+@media (max-width:720px){
+  .app{
+    grid-template-columns:1fr;
+    grid-template-rows:52px minmax(calc(100vh - 52px),auto);
+    padding-bottom:58px;
+  }
+
+  .topbar{
+    grid-template-columns:48px 1fr;
+  }
+
+  .sidebar{
+    grid-column:1;
+    grid-row:auto;
+    position:fixed;
+    top:auto;
+    bottom:0;
+    left:0;
+    right:0;
+    width:100%;
+    height:58px;
+    min-height:0;
+    padding:7px 18px;
+    background:rgba(255,253,251,.97);
+    border-right:0;
+    border-top:1px solid var(--line);
+    flex-direction:row;
+    justify-content:center;
+    gap:18px;
+    z-index:40;
+  }
+
+  .nav-item{
+    margin:0;
+  }
+
+  .nav-item .label{
+    display:none;
+  }
+
+  .main{
+    grid-column:1;
+    grid-row:2;
+    padding:24px 16px 30px;
+    background-size:96px 100%;
+  }
+
+  .page-head{
+    min-height:auto;
+    margin-bottom:24px;
+  }
+
+  .head-actions{
+    position:static;
+    margin-left:auto;
+    gap:12px;
+  }
+
+  .list-controls{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+
+  .search-group{
+    width:100%;
+  }
+
+  .search-wrap{
+    flex:1;
+  }
+
+  .search-wrap input{
+    width:100%;
+  }
+
+  .table-wrap{
+    overflow-x:auto;
+  }
+
+  table{
+    min-width:690px;
+  }
+
+  .swot-grid,
+  .detail-grid,
+  .profile-grid{
+    grid-template-columns:1fr;
+  }
+
+  .swot-item{
+    align-items:flex-start;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+
+    <div class="brand-mark" aria-label="SCADABLE">
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M16 3 6.5 8.5v6L16 20l5-2.9v3.8L16 24l-9.5-5.5v5L16 29l9.5-5.5v-12L16 6l-5 2.9V5.1L16 3Z" fill="currentColor"/>
+        <path d="m11 12 5-3 5 3-5 3-5-3Z" fill="white"/>
+      </svg>
+    </div>
+
+    <div class="topbar-title" id="page-context">
+      Competitors
+    </div>
+
+  </header>
+
+  <nav class="sidebar" aria-label="Primary navigation">
+
+    <button
+      class="nav-item"
+      type="button"
+      data-view="overview"
+      aria-label="SWOT overview"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+        <rect x="4" y="4" width="6" height="6" rx="1"/>
+        <rect x="14" y="4" width="6" height="6" rx="1"/>
+        <rect x="4" y="14" width="6" height="6" rx="1"/>
+        <rect x="14" y="14" width="6" height="6" rx="1"/>
+      </svg>
+
+      <span class="label">Overview</span>
+    </button>
+
+    <button
+      class="nav-item active"
+      type="button"
+      data-view="competitors"
+      aria-label="Competitors"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+        <circle cx="9" cy="8" r="3"/>
+        <circle cx="17" cy="9" r="2.5"/>
+        <path d="M3.5 19c.5-3.2 2.4-5 5.5-5s5 1.8 5.5 5M14.5 14.5c3.2-.7 5.2.8 6 3.5" stroke-linecap="round"/>
+      </svg>
+
+      <span class="label">Competitors</span>
+    </button>
+
+    <button
+      class="nav-item"
+      type="button"
+      data-view="profile"
+      aria-label="Our company"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+        <path d="M5 20V5h9v15M14 10h5v10M8 8h3M8 12h3M8 16h3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+
+      <span class="label">Our Company</span>
+    </button>
+
+  </nav>
+
+  <div class="main">
+
+    <!-- SWOT OVERVIEW -->
+
+    <div class="view" id="view-overview">
+
+      <div class="page-head">
+
+        <div>
+          <h1>SWOT Overview</h1>
+          <p>Aggregated view across all tracked competitors · updated weekly · sample data</p>
+        </div>
+
+        <button class="btn secondary" onclick="showView('competitors')">
+          View all competitors
+        </button>
+
+      </div>
+
+      <div class="swot-grid">
+
+        <div class="swot-card s">
+
+          <h2>Strengths</h2>
+
+          <div class="swot-item" onclick="openDetail('northstarlabs')">
+            <span>Strong automation capabilities compared with tracked competitors</span>
+            <span class="swot-tag">Northstar Labs</span>
+          </div>
+
+          <div class="swot-item" onclick="openDetail('northstarlabs')">
+            <span>Product reduces manual work through automated workflows</span>
+            <span class="swot-tag">Northstar Labs</span>
+          </div>
+
+        </div>
+
+        <div class="swot-card w">
+
+          <h2>Weaknesses</h2>
+
+          <div class="swot-item" onclick="openDetail('northstarlabs')">
+            <span>Smaller market presence compared with established competitors</span>
+            <span class="swot-tag">Northstar Labs</span>
+          </div>
+
+        </div>
+
+        <div class="swot-card o">
+
+          <h2>Opportunities</h2>
+
+          <div class="swot-item" onclick="openDetail('harborai')">
+            <span>Growing demand for automated competitor intelligence tools</span>
+            <span class="swot-tag">Harbor AI</span>
+          </div>
+
+          <div class="swot-item" onclick="openDetail('northstarlabs')">
+            <span>Northstar Labs still relies heavily on manual review workflows</span>
+            <span class="swot-tag">Northstar Labs</span>
+          </div>
+
+        </div>
+
+        <div class="swot-card t">
+
+          <h2>Threats</h2>
+
+          <div class="swot-item" onclick="openDetail('orbitworks')">
+            <span>OrbitWorks recently expanded into automated market analysis</span>
+            <span class="swot-tag">OrbitWorks</span>
+          </div>
+
+          <div class="swot-item" onclick="openDetail('brightpath')">
+            <span>BrightPath is increasing hiring for AI and automation roles</span>
+            <span class="swot-tag">BrightPath</span>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- COMPETITORS -->
+
+    <div class="view active" id="view-competitors">
+
+      <div class="page-head">
+
+        <div>
+          <h1>Competitors</h1>
+          <p>Everyone you compete with, and how their activity is changing · sample data</p>
+        </div>
+
+        <div class="head-actions">
+
+          <button class="btn" type="button" onclick="openAddModal()">
+
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" stroke-linecap="round"/>
+            </svg>
+
+            Add competitor
+
+          </button>
+
+        </div>
+
+      </div>
+
+      <div class="list-controls">
+
+        <div class="filter-tabs" aria-label="Filter competitors">
+
+          <button
+            type="button"
+            class="active"
+            data-filter="all"
+          >
+            All
+          </button>
+
+          <button
+            type="button"
+            data-filter="up"
+          >
+            Active
+          </button>
+
+          <button
+            type="button"
+            data-filter="flat"
+          >
+            Stable
+          </button>
+
+          <button
+            type="button"
+            data-filter="down"
+          >
+            Quiet
+          </button>
+
+        </div>
+
+        <div class="search-group">
+
+          <label class="search-wrap">
+
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <circle cx="11" cy="11" r="6"/>
+              <path d="m16 16 4 4" stroke-linecap="round"/>
+            </svg>
+
+            <input
+              id="competitor-search"
+              type="search"
+              placeholder="Search by name..."
+              aria-label="Search competitors"
+            >
+
+          </label>
+
+          <span class="result-count" id="comp-count">
+            12 of 12
+          </span>
+
+        </div>
+
+      </div>
+
+      <div class="table-wrap">
+
+        <table>
+
+          <thead>
+
+            <tr>
+              <th>Name</th>
+              <th>Website</th>
+              <th>Relationship</th>
+              <th>Activity</th>
+              <th>Last checked</th>
+              <th></th>
+            </tr>
+
+          </thead>
+
+          <tbody id="comp-table-body"></tbody>
+
+        </table>
+
+      </div>
+
+    </div>
+
+    <!-- COMPETITOR DETAIL -->
+
+    <div class="view" id="view-detail">
+
+      <div
+        class="detail-back"
+        onclick="showView('competitors')"
+      >
+        &larr; Back to competitors
+      </div>
+
+      <div class="detail-hero">
+
+        <div>
+          <h1 id="d-name">Northstar Labs</h1>
+          <p id="d-site">northstarlabs.example</p>
+        </div>
+
+        <span class="pill" id="d-status">
+          Competitor
+        </span>
+
+      </div>
+
+      <div class="detail-grid">
+
+        <div>
+
+          <div class="card">
+
+            <h2>Feature &amp; automation score</h2>
+
+            <div class="feature-row">
+              <span>Automated data collection</span>
+              <span class="score">8/10</span>
+            </div>
+
+            <div class="feature-row">
+              <span>Automated workflow execution</span>
+              <span class="score">5/10</span>
+            </div>
+
+            <div class="feature-row">
+              <span>Analytics &amp; reporting</span>
+              <span class="score">9/10</span>
+            </div>
+
+            <div class="feature-row">
+              <span>AI-generated recommendations</span>
+              <span class="score">6/10</span>
+            </div>
+
+          </div>
+
+          <div class="card">
+
+            <h2>
+              Recent activity
+              <span style="font-weight:400;color:var(--sub);font-size:11px;">
+                (sample data)
+              </span>
+            </h2>
+
+            <div class="news-item">
+              Announced a new automated analytics feature
+              <span class="news-date">1 week ago</span>
+            </div>
+
+            <div class="news-item">
+              Added integrations with three new software platforms
+              <span class="news-date">2 weeks ago</span>
+            </div>
+
+            <div class="news-item">
+              Posted four new AI and automation engineering roles
+              <span class="news-date">3 weeks ago</span>
+            </div>
+
+            <div class="news-item">
+              Published a product update focused on workflow automation
+              <span class="news-date">1 month ago</span>
+            </div>
+
+          </div>
+
+        </div>
+
+        <div>
+
+          <div class="card">
+
+            <h2>At a glance</h2>
+
+            <div class="stat-row">
+              <span>Trend</span>
+              <b>
+                <span class="trend up">
+                  &uarr; More active
+                </span>
+              </b>
+            </div>
+
+            <div class="stat-row">
+              <span>Open roles</span>
+              <b>4</b>
+            </div>
+
+            <div class="stat-row">
+              <span>Last checked</span>
+              <b>3 days ago</b>
+            </div>
+
+            <div class="stat-row">
+              <span>Next refresh</span>
+              <b>in 4 days</b>
+            </div>
+
+          </div>
+
+          <div class="card">
+
+            <h2>Why it matters</h2>
+
+            <p style="font-size:0.86rem;color:var(--sub);margin:0;line-height:1.6;">
+              The competitor appears to be investing more heavily in automation.
+              This could indicate a shift in product strategy and may affect how
+              our company positions its own features.
+            </p>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- OUR COMPANY -->
+
+    <div class="view" id="view-profile">
+
+      <div class="page-head">
+
+        <div>
+          <h1>Our Company</h1>
+
+          <p>
+            Our own strengths &amp; weaknesses — used as the baseline for every comparison
+          </p>
+        </div>
+
+      </div>
+
+      <div class="profile-grid">
+
+        <div class="card">
+
+          <h2>Service offerings</h2>
+
+          <ul class="profile-list">
+            <li>Automated competitor monitoring across multiple sources</li>
+            <li>AI-assisted analysis of competitor activity</li>
+            <li>Continuous tracking of product, hiring, and company updates</li>
+            <li>Centralized competitor intelligence and reporting</li>
+          </ul>
+
+        </div>
+
+        <div class="card">
+
+          <h2>Positioning notes</h2>
+
+          <ul class="profile-list">
+            <li>Designed to reduce manual competitor research</li>
+            <li>Combines information from multiple sources into one dashboard</li>
+            <li>Focuses on turning competitor activity into actionable insights</li>
+          </ul>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+<!-- ADD COMPETITOR MODAL -->
+
+<div class="overlay" id="add-overlay">
+
+  <div
+    class="modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="add-title"
+  >
+
+    <h2 id="add-title">
+      Add a competitor
+    </h2>
+
+    <p>
+      We'll queue this company for automated research across sources.
+    </p>
+
+    <div class="field">
+
+      <label for="add-name">
+        Company name
+      </label>
+
+      <input
+        type="text"
+        id="add-name"
+        placeholder="e.g. Acme Analytics"
+      >
+
+    </div>
+
+    <div class="field">
+
+      <label for="add-site">
+        Website
+      </label>
+
+      <input
+        type="text"
+        id="add-site"
+        placeholder="e.g. acme.example"
+      >
+
+    </div>
+
+    <div class="modal-actions">
+
+      <button
+        class="btn secondary"
+        onclick="closeAddModal()"
+      >
+        Cancel
+      </button>
+
+      <button
+        class="btn"
+        onclick="submitAdd()"
+      >
+        Add &amp; queue research
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+
+const competitors = [
+  {
+    name:"Northstar Labs",
+    site:"northstarlabs.example",
+    trend:"up",
+    updated:"3 days ago"
+  },
+  {
+    name:"OrbitWorks",
+    site:"orbitworks.example",
+    trend:"up",
+    updated:"2 days ago"
+  },
+  {
+    name:"Harbor AI",
+    site:"harborai.example",
+    trend:"flat",
+    updated:"5 days ago"
+  },
+  {
+    name:"BrightPath",
+    site:"brightpath.example",
+    trend:"up",
+    updated:"1 day ago"
+  },
+  {
+    name:"Vertex Systems",
+    site:"vertexsystems.example",
+    trend:"flat",
+    updated:"6 days ago"
+  },
+  {
+    name:"Summit Analytics",
+    site:"summitanalytics.example",
+    trend:"down",
+    updated:"4 days ago"
+  },
+  {
+    name:"BluePeak",
+    site:"bluepeak.example",
+    trend:"flat",
+    updated:"5 days ago"
+  },
+  {
+    name:"NovaFlow",
+    site:"novaflow.example",
+    trend:"down",
+    updated:"3 days ago"
+  },
+  {
+    name:"SignalStack",
+    site:"signalstack.example",
+    trend:"flat",
+    updated:"4 days ago"
+  },
+  {
+    name:"Atlas Intelligence",
+    site:"atlasintel.example",
+    trend:"flat",
+    updated:"6 days ago"
+  },
+  {
+    name:"ClearView AI",
+    site:"clearviewai.example",
+    trend:"flat",
+    updated:"5 days ago"
+  },
+  {
+    name:"Momentum Labs",
+    site:"momentumlabs.example",
+    trend:"up",
+    updated:"2 days ago"
+  }
+];
+
+const trendLabel = {
+  up:"&uarr; More active",
+  down:"&darr; Less active",
+  flat:"&mdash; Stable"
+};
+
+let currentFilter = "all";
+
+function key(name){
+  return name
+    .toLowerCase()
+    .replace(/\s+/g,"");
+}
+
+function escapeHTML(value){
+
+  return String(value).replace(
+    /[&<>'"]/g,
+    char => ({
+      "&":"&amp;",
+      "<":"&lt;",
+      ">":"&gt;",
+      "'":"&#39;",
+      '"':"&quot;"
+    })[char]
+  );
+
+}
+
+function renderTable(){
+
+  const body =
+    document.getElementById("comp-table-body");
+
+  const search =
+    document.getElementById("competitor-search");
+
+  const query =
+    search
+      ? search.value.trim().toLowerCase()
+      : "";
+
+  const visible =
+    competitors.filter(c => {
+
+      const matchesFilter =
+        currentFilter === "all" ||
+        c.trend === currentFilter;
+
+      const matchesSearch =
+        !query ||
+        c.name.toLowerCase().includes(query) ||
+        c.site.toLowerCase().includes(query);
+
+      return matchesFilter && matchesSearch;
+
+    });
+
+  body.innerHTML = "";
+
+  visible.forEach(c => {
+
+    const tr =
+      document.createElement("tr");
+
+    tr.className =
+      "clickable";
+
+    tr.onclick =
+      () => openDetail(key(c.name), c);
+
+    tr.innerHTML = `
+
+      <td class="company-cell">
+        ${escapeHTML(c.name)}
+      </td>
+
+      <td class="website-cell">
+        ${escapeHTML(c.site)}
+      </td>
+
+      <td>
+        <span class="relationship">
+          Competitor
+        </span>
+      </td>
+
+      <td>
+        <span class="trend ${c.trend}">
+          ${trendLabel[c.trend]}
+        </span>
+      </td>
+
+      <td style="color:var(--sub);font-size:11px;">
+        ${escapeHTML(c.updated)}
+      </td>
+
+      <td class="row-arrow" aria-hidden="true">
+
+        <svg
+          viewBox="0 0 24 24"
+          width="13"
+          height="13"
+          fill="none"
+          stroke="currentColor"
+        >
+          <path
+            d="m9 5 7 7-7 7"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+
+      </td>
+
+    `;
+
+    body.appendChild(tr);
+
+  });
+
+  if(!visible.length){
+
+    const tr =
+      document.createElement("tr");
+
+    tr.className =
+      "empty-row";
+
+    tr.innerHTML =
+      '<td colspan="6">No competitors match this view.</td>';
+
+    body.appendChild(tr);
+
+  }
+
+  document
+    .getElementById("comp-count")
+    .textContent =
+      visible.length +
+      " of " +
+      competitors.length;
+
+}
+
+function showView(id){
+
+  document
+    .querySelectorAll(".view")
+    .forEach(v =>
+      v.classList.remove("active")
+    );
+
+  document
+    .getElementById("view-" + id)
+    .classList.add("active");
+
+  document
+    .querySelectorAll(".nav-item")
+    .forEach(n =>
+      n.classList.remove("active")
+    );
+
+  const navView =
+    id === "detail"
+      ? "competitors"
+      : id;
+
+  const nav =
+    document.querySelector(
+      `.nav-item[data-view="${navView}"]`
+    );
+
+  if(nav){
+    nav.classList.add("active");
+  }
+
+  const labels = {
+    overview:"SWOT Overview",
+    competitors:"Competitors",
+    detail:"Competitor details",
+    profile:"Our Company"
+  };
+
+  document
+    .getElementById("page-context")
+    .textContent =
+      labels[id] || "Live SWOT";
+
+}
+
+function openDetail(k, data){
+
+  let c =
+    data ||
+    competitors.find(
+      x => key(x.name) === k
+    );
+
+  if(!c){
+    c = competitors[0];
+  }
+
+  document
+    .getElementById("d-name")
+    .textContent =
+      c.name;
+
+  document
+    .getElementById("d-site")
+    .textContent =
+      c.site;
+
+  showView("detail");
+
+}
+
+document
+  .querySelectorAll(".nav-item[data-view]")
+  .forEach(item => {
+
+    item.addEventListener(
+      "click",
+      () => showView(item.dataset.view)
+    );
+
+  });
+
+document
+  .getElementById("competitor-search")
+  .addEventListener(
+    "input",
+    renderTable
+  );
+
+document
+  .querySelectorAll(".filter-tabs button")
+  .forEach(button => {
+
+    button.addEventListener(
+      "click",
+      () => {
+
+        currentFilter =
+          button.dataset.filter;
+
+        document
+          .querySelectorAll(".filter-tabs button")
+          .forEach(item =>
+            item.classList.remove("active")
+          );
+
+        button.classList.add("active");
+
+        renderTable();
+
+      }
+    );
+
+  });
+
+function openAddModal(){
+
+  document
+    .getElementById("add-overlay")
+    .classList.add("active");
+
+}
+
+function closeAddModal(){
+
+  document
+    .getElementById("add-overlay")
+    .classList.remove("active");
+
+}
+
+function submitAdd(){
+
+  const name =
+    document
+      .getElementById("add-name")
+      .value
+      .trim();
+
+  const site =
+    document
+      .getElementById("add-site")
+      .value
+      .trim();
+
+  if(!name || !site){
+
+    showToast(
+      "Enter a name and website to continue"
+    );
+
+    return;
+
+  }
+
+  competitors.unshift({
+    name,
+    site,
+    trend:"flat",
+    updated:"Just added"
+  });
+
+  renderTable();
+
+  closeAddModal();
+
+  document
+    .getElementById("add-name")
+    .value = "";
+
+  document
+    .getElementById("add-site")
+    .value = "";
+
+  showToast(
+    `${name} added — queued for research`
+  );
+
+}
+
+function showToast(msg){
+
+  const t =
+    document.getElementById("toast");
+
+  t.textContent =
+    msg;
+
+  t.classList.add("show");
+
+  setTimeout(
+    () => t.classList.remove("show"),
+    2400
+  );
+
+}
+
+renderTable();
+
+</script>
+
+</body>
+</html>
