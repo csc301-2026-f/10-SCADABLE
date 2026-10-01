@@ -113,6 +113,13 @@ Do a team-building activity in-person or online. This can be playing an online g
 * Provide a few sentences on what you did and share a picture or other evidence of your team building activity.
 * Share at least three fun facts from members of you team (total not 3 for each member).
 
+Yes, we have met multiple times as a team. We have also participated in a team building activity. We decided to spend some time in a discord call and playing a few online games. We first played wordle and had some fun with that. Then, we decided to play Gartic Phone online as well. This was a really fun time as we got to know each other better and also got to laugh at each others drawings and descriptions of those drawings in Gartic Phone. 
+
+Here are a few fun facts about members of this team:
+* Sukhman is a fan of the UFC and enjoys watching UFC events.
+* Saad is a big soccer fan and enjoys watching Real Madrid games.
+* Jaynik enjoys playing badminton.
+
 
 #### Q7: What are the roles & responsibilities on the team?
 
@@ -135,7 +142,12 @@ Describe meetings (and other events) you are planning to have.
  * Other events could be coding sessions, code reviews, quick weekly sync meeting online, etc.
  * You should have 2 meetings with your project partner (if you have one) before D1 is due. Describe them here:
    * You must keep track of meeting minutes and add them to your repo under "deliverables/minutes" folder
-   * You must have a regular meeting schedule established for the rest of the term.  
+   * You must have a regular meeting schedule established for the rest of the term.
+ 
+ We plan to meet on discord calls as needed. So far, we have met a few times to discuss responsibilities and divide work amongst ourselves. We also use to discord as a way to contact one another via text. The purposes of the meetings is to discuss next steps on the project, what we are going to do, how we are going to divide work, etc.   
+ 
+ We have currently only been able to meet with our partner once due to limited availability. In this meeting, we went over the project and their expectations. We also covered suggestions, the tech stack they wanted to use, and some ideas on how to get started. Our regular meeting schedule at the moment is about once a week when our partner is available. Our preferred meeting time slot is Friday from 6pm to 7pm but this can change based on our partners availability.
+  
   
 #### Q9: How will you organize your team?
 
