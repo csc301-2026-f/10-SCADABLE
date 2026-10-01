@@ -119,6 +119,7 @@ Here are a few fun facts about members of this team:
 * Sukhman is a fan of the UFC and enjoys watching UFC events.
 * Saad is a big soccer fan and enjoys watching Real Madrid games.
 * Jaynik enjoys playing badminton.
+* Yash is a massive F1 fan and supports Lando Norris.
 
 
 #### Q7: What are the roles & responsibilities on the team?
