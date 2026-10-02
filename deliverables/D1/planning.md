@@ -108,11 +108,6 @@ Briefly describe which option you have agreed to.
 
 #### Q6: Have you met with your team?
 
-Do a team-building activity in-person or online. This can be playing an online game, meeting for bubble tea, lunch, or any other activity you all enjoy.
-* Get to know each other on a more personal level.
-* Provide a few sentences on what you did and share a picture or other evidence of your team building activity.
-* Share at least three fun facts from members of you team (total not 3 for each member).
-
 Yes, we have met multiple times as a team. We have also participated in a team building activity. We decided to spend some time in a discord call and playing a few online games. We first played wordle and had some fun with that. Then, we decided to play Gartic Phone online as well. This was a really fun time as we got to know each other better and also got to laugh at each others drawings and descriptions of those drawings in Gartic Phone. 
 
 Here are a few fun facts about members of this team:
@@ -121,33 +116,41 @@ Here are a few fun facts about members of this team:
 * Jaynik enjoys playing badminton.
 * Yash is a massive F1 fan and supports Lando Norris.
 
+Here are some images of us participating in a team building activity. 
+
+<img width="1590" height="801" alt="image" src="https://github.com/user-attachments/assets/3686cb29-62cf-46b0-8a7b-4ad3e4ccaa69" />
+
+<img width="512" height="280" alt="preview" src="https://github.com/user-attachments/assets/82f7c42a-7ec5-4f8c-a79b-5ebd3d0d7a7d" />
+
 
 #### Q7: What are the roles & responsibilities on the team?
 
-Describe the different roles on the team and the responsibilities associated with each role (e.g., frontend, database). 
- * Roles should reflect the structure of your team and be appropriate for your project. One person may have multiple roles.  
- * Add role(s) to your Team-[Team_Number]-[Team_Name].csv file on the main folder.
- * At least one person must be identified as the dedicated partner liaison. They need to have great organization and communication skills.
- * Everyone must contribute to code. Students who don't contribute to code enough will receive a lower mark at the end of the term.
+Our team will use broad development roles so that responsibilities are clear while still allowing members to help across different parts of the project when needed. Everyone will contribute to code.
 
-List each team member and:
- * A description of their role(s) and responsibilities including the components they'll work on and non-software related work
- * Why did you choose them to take that role? Specify if they are interested in learning that part, experienced in it, or any other reasons. Do no make things up. This part is not graded but may be reviewed later.
+| Role | Responsibilities |
+|---|---|
+| **Frontend Developer** | - Implement the user interface in Next.js/TypeScript<br>- Build pages and reusable UI components<br>- Connect frontend components to backend APIs<br>- Help maintain usability and consistency across the application |
+| **Backend Developer** | - Develop backend APIs and application logic<br>- Work with PostgreSQL and data persistence<br>- Support scheduled competitor research workflows and integrations<br>- Handle communication between the frontend, database, and external services |
+| **LLM Integration Developer** | - Integrate AI/LLM services into research and SWOT workflows<br>- Develop structured prompts and outputs<br>- Help process and summarize competitor information<br>- Work with backend developers on agent workflows and monitoring |
+| **Full-stack Developer** | - Contribute across both frontend and backend components<br>- Help integrate APIs, database functionality, and user-facing features<br>- Support development wherever additional work is needed |
+| **Partner Liaison** | - Communicate with the industry partner and coordinate meetings<br>- Share questions, progress, and decisions between the partner and team<br>- Keep track of partner feedback and make sure important requirements are communicated to the team |
+
+| Team Member | Role(s) | Responsibilities and Reason |
+|---|---|---|
+| **Saad** | Full-stack Developer, Partner Liaison, Team Coordinator | Saad will contribute across frontend and backend development and act as the main point of contact with the partner. He has experience leading a five-person software project, delegating tasks, tracking milestones, and building full-stack applications using React, Flask, Java, Python, JavaScript, and SQL. |
+| **Houssam** | Backend Developer | Houssam will focus on backend development and API architecture. He has experience with Python, PostgreSQL, networking, AI APIs, system design, and Clean Architecture, which are relevant to building and organizing the application’s backend services. |
+| **Sukhman** | Backend Developer | Sukhman will focus primarily on backend development, database integration, and automated workflows. He has experience building REST APIs with Python, working with PostgreSQL, Celery, Redis, Docker, cloud services, and data pipelines. |
+| **Essam** | Backend Developer | Essam will contribute mainly to backend development while remaining available to support other areas when needed. He has experience with FastAPI, Docker, JavaScript, React, PHP, and machine learning projects. |
+| **Yash** | LLM Integration Developer, Backend Developer | Yash will focus on LLM integration and support backend development. His previous AI integration internship involved using the Claude API, Microsoft Power Automate, Azure AD, and Microsoft Graph API to automate workflows. |
+| **Jaynik** | Full-stack Developer, LLM Integration Developer | Jaynik will work across the stack and contribute to LLM integration. He has professional experience building full-stack internal tools, backend APIs, cloud integrations, and automation using React, TypeScript, FastAPI, Spring Boot, PostgreSQL, AWS, and Azure. |
+| **Ibraheem** | Frontend Developer | Ibraheem will focus primarily on frontend development while helping with integrations when needed. He has professional experience developing React applications and integrating AI workflows into production applications, along with experience in JavaScript and TypeScript. |
 
 
 #### Q8: How will you work as a team?
-
-Describe meetings (and other events) you are planning to have. 
- * When and where? Recurring or ad hoc? In-person or online?
- * What's the purpose of each meeting?
- * Other events could be coding sessions, code reviews, quick weekly sync meeting online, etc.
- * You should have 2 meetings with your project partner (if you have one) before D1 is due. Describe them here:
-   * You must keep track of meeting minutes and add them to your repo under "deliverables/minutes" folder
-   * You must have a regular meeting schedule established for the rest of the term.
  
  We plan to meet on discord calls as needed. So far, we have met a few times to discuss responsibilities and divide work amongst ourselves. We also use to discord as a way to contact one another via text. The purposes of the meetings is to discuss next steps on the project, what we are going to do, how we are going to divide work, etc.   
  
- We have currently only been able to meet with our partner once due to limited availability. In this meeting, we went over the project and their expectations. We also covered suggestions, the tech stack they wanted to use, and some ideas on how to get started. Our regular meeting schedule at the moment is about once a week when our partner is available. Our preferred meeting time slot is Friday from 6pm to 7pm but this can change based on our partners availability.
+ We have currently only been able to meet with our partner once due to limited availability. In this meeting, we went over the project and their expectations. We also covered suggestions, the tech stack they wanted to use, and some ideas on how to get started. Our regular meeting schedule at the moment is about once a week when our partner is available. Our preferred meeting time slot is Friday from 6pm to 7pm but this can change based on our partners availability. We are also in active contact with the partner via a WhatsApp group chat. 
   
   
 #### Q9: How will you organize your team?
