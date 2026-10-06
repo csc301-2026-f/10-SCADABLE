@@ -85,7 +85,8 @@ For D2, we want to get the main workflow working:
 - Contribution:
   - Mockup cosmetic adjustments prior to meeting with partner
   - Worked on questions 13 and 14 from the planning.md
-  - Looked into Firecrawl (web crawler suggested by Ali in last week's partner meeting)
+  - Looked into Firecrawl (web crawler suggested by Ali in last week's partner meeting) and 
+  currently looking into Opencrawl as a possible web crawler.
 
 ### Jaynik
 - Contribution:
