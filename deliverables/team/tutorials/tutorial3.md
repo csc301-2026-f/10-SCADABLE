@@ -79,7 +79,10 @@ For D2, we want to get the main workflow working:
     
 ### Essam
 - Contribution:
-  - type here
+  - Worked on questions 4 and 5 in the planning.md file
+  - Helped create the slides
+  - Updates the User stories to better align with the project goal
+  - Contributed to project design
 
 ### Yash
 - Contribution:
