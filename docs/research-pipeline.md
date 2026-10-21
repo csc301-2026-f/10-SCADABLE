@@ -91,7 +91,40 @@ the scraper's model requests. Downstream analysis still uses OpenAI.
 
 The example prints a JSON array of research results. Page Markdown and `crawl_summary.json`
 keep the scraper's existing output structure; analysis does not rewrite those files.
-Progress logs go to stderr; stdout remains the JSON result.
+Progress logs and a final estimated API cost summary go to stderr; stdout remains the
+JSON result. The summary separates Decisions API costs, downstream LLM costs, and their
+total in USD. Run the same command as before; no extra flags are needed for supported
+models. Redirect stdout to save the analysis while keeping costs visible:
+
+```powershell
+python examples/research_pipeline.py https://competitor.example/ --max-pages 3 |
+    Out-File -Encoding utf8 research-results.json
+```
+
+Decisions costs reuse the scraper's `decision_usage.estimated_cost_usd`, including its
+conservative allowance for unreported tokens. `--export` incurs zero new Decisions cost;
+the historical crawl cost remains in the saved summary. LLM estimates use token usage
+returned by Responses, across extraction and analysis, including cached reads and the
+default 30-minute cache writes. Output usage already includes reasoning tokens.
+
+Built-in standard rates cover `gpt-6-luna`, `gpt-6.1-sol`, `gpt-6-astra`, and `gpt-4o-mini`,
+including dated snapshots. Rates were checked on 2026-10-20 against OpenAI's
+[pricing](https://developers.openai.com/api/docs/pricing),
+[GPT-4o mini pricing](https://developers.openai.com/api/docs/models/gpt-4o-mini), and
+[cache-write billing](https://developers.openai.com/api/docs/guides/prompt-caching).
+For another model or different effective rates, supply four USD-per-million values in
+input, cached-input, output, cache-write order:
+
+```powershell
+python examples/research_pipeline.py https://competitor.example/ --max-pages 3 --llm-rates 0.10 0.01 0.50 0.125
+```
+
+Missing usage, failed requests, unsupported models/tiers, or GPT-6 prompts above 272,000
+input tokens make the affected estimate and total `unavailable`, rather than reporting
+zero. Custom rates can resolve unsupported pricing, but cannot replace missing usage.
+Interrupted runs report incomplete Decisions totals. Estimates are not invoice totals:
+SDK retries whose usage was not returned, regional premiums, or subsequent price changes
+can change billing. The script does not make extra API calls to calculate costs.
 
 ## Python interfaces
 
@@ -107,6 +140,7 @@ llm/
   inputs.py        Markdown bundle loader
   analyzer.py      Extraction, company analysis, and comparison
   client.py        OpenAI structured-output client
+  usage.py         Observed token usage and model-specific cost estimates
   schemas.py       Analysis input and output contracts
   swot_entries.py  Source-linked SWOT rows
   prompts/         Extraction, analysis, and comparison instructions

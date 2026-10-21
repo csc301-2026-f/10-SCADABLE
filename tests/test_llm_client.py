@@ -35,7 +35,8 @@ def test_output_urls_use_supported_json_schema_strings(schema):
 
 
 @pytest.mark.parametrize("has_output", [True, False])
-def test_responses_structured_output(monkeypatch, has_output):
+@pytest.mark.parametrize("has_usage", [True, False])
+def test_responses_structured_output(monkeypatch, has_output, has_usage):
     expected = SWOTAnalysis(
         strengths=["Example evidence"],
         weaknesses=[],
@@ -76,6 +77,18 @@ def test_responses_structured_output(monkeypatch, has_output):
                 "parallel_tool_calls": False,
                 "tool_choice": "auto",
                 "tools": [],
+                "usage": {
+                    "input_tokens": 1000,
+                    "input_tokens_details": {
+                        "cached_tokens": 200,
+                        "cache_write_tokens": 300,
+                    },
+                    "output_tokens": 400,
+                    "output_tokens_details": {"reasoning_tokens": 100},
+                    "total_tokens": 1400,
+                }
+                if has_usage
+                else None,
             },
         )
 
@@ -113,6 +126,15 @@ def test_responses_structured_output(monkeypatch, has_output):
         finally:
             await client.close()
         assert client.sdk.is_closed()
+        assert client.usage.request_count == 1
+        assert len(client.usage.responses) == int(has_usage)
+        if has_usage:
+            record = client.usage.responses[0]
+            assert record.model == "test-model"
+            assert (record.input_tokens, record.cached_input_tokens) == (1000, 200)
+            assert (record.cache_write_tokens, record.output_tokens) == (300, 400)
+        else:
+            assert client.usage.estimated_cost_usd() is None
 
     asyncio.run(run())
     assert len(requests) == 1

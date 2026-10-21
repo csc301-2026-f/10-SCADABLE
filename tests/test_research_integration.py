@@ -1,6 +1,7 @@
 """Real service, Decisions, exporter, loader and Responses parsing; network boundaries mocked."""
 
 import json
+from decimal import Decimal
 
 import httpx
 import httpx2
@@ -138,7 +139,7 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
                 "object": "response",
                 "created_at": 0,
                 "status": "completed",
-                "model": "offline-model",
+                "model": "gpt-6-luna",
                 "output": [
                     {
                         "id": "msg_offline",
@@ -157,6 +158,16 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
                 "parallel_tool_calls": False,
                 "tool_choice": "auto",
                 "tools": [],
+                "usage": {
+                    "input_tokens": 1000,
+                    "input_tokens_details": {
+                        "cached_tokens": 200,
+                        "cache_write_tokens": 300,
+                    },
+                    "output_tokens": 400,
+                    "output_tokens_details": {"reasoning_tokens": 100},
+                    "total_tokens": 1400,
+                },
             },
         )
 
@@ -183,7 +194,7 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
     client = client_module.OpenAIClient(
         Settings(
             openai_api_key="offline-test-key",
-            openai_model="offline-model",
+            openai_model="gpt-6-luna",
             _env_file=None,
         )
     )
@@ -209,7 +220,14 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
         assert result.crawl_summary.pages[1].markdown_file == "pages/pricing.md"
         assert "/v1/decisions" in [path for path, _ in api_requests]
         decision_count = sum(path == "/v1/decisions" for path, _ in api_requests)
+        assert result.crawl_summary.decision_usage.estimated_cost_usd == pytest.approx(
+            decision_count * 0.00001
+        )
+        assert client.usage.request_count == 2
+        assert client.usage.estimated_cost_usd() == Decimal("0.000579")
         replay = await analyze_export(index, analyzer=analyzer)
+        assert client.usage.request_count == 4
+        assert client.usage.estimated_cost_usd() == Decimal("0.001158")
         assert replay == result
         assert rendered == ["https://example.com/", "https://example.com/pricing"]
         assert (
