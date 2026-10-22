@@ -200,7 +200,7 @@ it does not start a nested event loop or close an injected analysis client.
 | `ScraperConfig` / `SelectionConfig`, including TOML overrides | Collection policy, limits, Decisions model, and estimated Decisions budget |
 | `OPENAI_API_KEY` | Shared credential for Decisions and downstream analysis |
 | `OPENAI_MODEL` | Downstream analysis model; does not change the Decisions model |
-| `OPENAI_TIMEOUT_SECONDS` | Analysis SDK request timeout; default 30 seconds |
+| `OPENAI_TIMEOUT_SECONDS` | Analysis SDK timeout per attempt; default 120 seconds |
 
 `Settings()` and `load_environment()` use the same repository-root `.env` by default.
 The resolver identifies the checkout from its `pyproject.toml`, `scraper/pyproject.toml`,
@@ -238,11 +238,33 @@ completion markers, provenance, and no-overwrite behavior.
 - A batch fails fast when a company has no usable content or export/analysis raises.
   The crawl iterator is closed when supported, including on cancellation. Published exports
   remain available for `analyze_export()` retries; cancellation does not roll back files.
+- Each analysis request has a 120-second default timeout per attempt. Explicit environment
+  or `.env` values override this, including an older setting of 30 seconds. The SDK retries
+  timeouts twice, so one logical request can take three attempts; no extra application
+  retry loop is added. A longer timeout allows slower requests but cannot guarantee API
+  availability. See the [OpenAI Python SDK documentation](https://developers.openai.com/api/reference/python).
+- Progress logs identify the company, extraction/analysis stage, and saved export. A
+  timeout keeps its SDK exception type for library callers, with company/stage/replay
+  information attached. The example exits with an error and recovery instructions.
+  Failed requests without usage leave the cost estimate incomplete. Completed company
+  analyses remain in memory until the batch returns; they are not checkpointed to disk.
 - Browser startup and close complete their bounded SDK work before caller cancellation
   propagates. Startup uses `page_timeout_seconds`; close has a 10-second deadline.
   Hosts should await cancellation so owned browser drivers finish before loop shutdown.
 - Full Markdown is supplied without chunking or truncation. Model context-limit errors
   propagate. The Decisions allowance applies only to selection, not downstream analysis costs.
+
+To retry an existing crawl without fetching pages or calling Decisions again:
+
+```powershell
+$env:OPENAI_TIMEOUT_SECONDS = "180"
+python examples/research_pipeline.py --export "scraper/output/<run>/<company>/crawl_summary.json" |
+    Out-File -Encoding utf8 company-research-retry.json
+```
+
+This reruns extraction and company analysis for that company, including fresh LLM calls.
+The timeout environment override lasts for the current PowerShell session; put it in the
+root `.env` for a persistent setting. Replay each saved company bundle separately.
 
 ## Verification
 

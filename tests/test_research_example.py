@@ -125,3 +125,37 @@ def test_failed_run_reports_unknown_cost_instead_of_zero(monkeypatch, capsys):
     assert "Decisions API: unavailable" in captured.err
     assert "LLM analysis: unavailable" in captured.err
     assert "Total: unavailable" in captured.err
+
+
+def test_sdk_timeout_exits_cleanly_with_recovery_instructions(monkeypatch, capsys):
+    import httpx2
+    from openai import APITimeoutError
+
+    from examples import research_pipeline as example
+    from llm.usage import LLMUsage
+
+    client = SimpleNamespace(usage=LLMUsage(request_count=1))
+
+    async def fail(args, owned_client):
+        error = APITimeoutError(
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses")
+        )
+        error.add_note(
+            "LLM extraction for Example; saved export: saved/crawl_summary.json"
+        )
+        raise error
+
+    monkeypatch.setattr(example, "load_environment", lambda *a, **kw: None)
+    monkeypatch.setattr(example, "OpenAIClient", lambda settings: client)
+    monkeypatch.setattr(example, "_run", fail)
+    with pytest.raises(SystemExit) as raised:
+        example.main(["https://example.com/"])
+    assert raised.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "OPENAI_TIMEOUT_SECONDS" in captured.err
+    assert "--export" in captured.err
+    assert "saved/crawl_summary.json" in captured.err
+    assert "Example" in captured.err
+    assert "Traceback" not in captured.err
+    assert "Total: unavailable" in captured.err

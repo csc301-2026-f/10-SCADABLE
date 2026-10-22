@@ -142,3 +142,47 @@ def test_responses_structured_output(monkeypatch, has_output, has_usage):
     payload = json.loads(requests[0].content)
     assert payload["model"] == "test-model"
     assert payload["text"]["format"]["type"] == "json_schema"
+
+
+def test_read_timeout_keeps_usage_unknown_and_closes_client(monkeypatch):
+    from openai import APITimeoutError
+
+    observed_timeouts = []
+
+    def respond(request):
+        observed_timeouts.append(request.extensions["timeout"]["read"])
+        raise httpx2.ReadTimeout("offline simulated slow response", request=request)
+
+    def offline_sdk(**kwargs):
+        return AsyncOpenAI(
+            **kwargs,
+            max_retries=0,
+            http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond)),
+        )
+
+    monkeypatch.setattr(client_module, "AsyncOpenAI", offline_sdk)
+
+    async def run():
+        client = client_module.OpenAIClient(
+            Settings(
+                openai_api_key="offline-test-key",
+                openai_model="test-model",
+                openai_timeout_seconds=75.0,
+                _env_file=None,
+            )
+        )
+        try:
+            with pytest.raises(APITimeoutError):
+                await client.generate_structured(
+                    instructions="Test",
+                    input_text="Test",
+                    output_schema=SWOTAnalysis,
+                )
+        finally:
+            await client.close()
+        assert client.sdk.is_closed()
+        assert client.usage.request_count == 1
+        assert client.usage.estimated_cost_usd() is None
+
+    asyncio.run(run())
+    assert observed_timeouts == [75.0]

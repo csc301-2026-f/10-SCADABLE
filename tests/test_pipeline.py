@@ -2,7 +2,9 @@
 
 import asyncio
 
+import httpx2
 import pytest
+from openai import APITimeoutError
 
 from llm import pipeline
 from scraper import CompetitorInput, ScraperConfig
@@ -98,6 +100,34 @@ async def test_analysis_failure_closes_scraper_iterator_and_keeps_export_for_rep
     index = tmp_path / "example.com/crawl_summary.json"
     result = await pipeline.analyze_export(index, analyzer=StubAnalyzer())
     assert result.analysis.company_name == "Example"
+
+
+@pytest.mark.parametrize("stage", ["extraction", "company analysis"])
+async def test_timeout_preserves_sdk_error_and_identifies_saved_export(tmp_path, stage):
+    index = write_export(tmp_path)
+    timeout = APITimeoutError(
+        request=httpx2.Request("POST", "https://api.openai.com/v1/responses")
+    )
+
+    class TimeoutAnalyzer(StubAnalyzer):
+        async def extract_information(self, data):
+            if stage == "extraction":
+                raise timeout
+            return await super().extract_information(data)
+
+        async def analyze_competitor(self, data):
+            raise timeout
+
+    with pytest.raises(APITimeoutError) as raised:
+        await pipeline.analyze_export(index, analyzer=TimeoutAnalyzer())
+    assert raised.value is timeout
+    notes = "\n".join(getattr(raised.value, "__notes__", []))
+    assert stage in notes
+    assert "Example" in notes
+    assert str(index.resolve()) in notes
+    assert "--export" in notes
+    replay = await pipeline.analyze_export(index, analyzer=StubAnalyzer())
+    assert replay.analysis.company_name == "Example"
 
 
 async def test_cancelling_analysis_closes_scraper_iterator(tmp_path):

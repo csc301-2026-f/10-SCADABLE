@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 
+from openai import APITimeoutError
 from scraper.environment import load_environment
 
 from llm.analyzer import Analyzer
@@ -101,6 +102,13 @@ def _print_cost_summary(results, usage: LLMUsage, *, replay: bool, rates) -> Non
             f"{sum(r.output_tokens for r in usage.responses):,} output",
             file=sys.stderr,
         )
+    missing_usage = usage.request_count - len(usage.responses)
+    if missing_usage:
+        print(
+            f"  Usage unavailable for {missing_usage} LLM call(s); "
+            "token counts cover only responses with reported usage.",
+            file=sys.stderr,
+        )
     print(f"Total: {amount(total)}", file=sys.stderr)
     if total is None:
         print(
@@ -172,6 +180,14 @@ def main(argv=None) -> int:
             flush=True,
         )
         return 0
+    except APITimeoutError as error:
+        details = "\n".join(getattr(error, "__notes__", []))
+        parser.exit(
+            1,
+            "Error: LLM request timed out after SDK retries. "
+            "Increase OPENAI_TIMEOUT_SECONDS if needed and retry saved Markdown with --export.\n"
+            + (f"{details}\n" if details else ""),
+        )
     except (OSError, ValueError) as error:
         parser.exit(1, f"Error: {error}\n")
     except KeyboardInterrupt:

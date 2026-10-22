@@ -1,10 +1,12 @@
 """Async orchestration over the scraper's published Markdown and structured LLM analysis."""
 
 import asyncio
+import logging
 from collections.abc import Sequence
 from contextlib import AsyncExitStack
 from pathlib import Path
 
+from openai import APITimeoutError
 from scraper.interfaces import ScraperService
 from scraper.service import CompetitorScraper
 
@@ -13,6 +15,8 @@ from llm.inputs import load_analysis_input
 from llm.schemas import ComparisonInput, CompetitorResearchResult, SWOTAnalysis
 from scraper import CompetitorInput, ScraperConfig
 from scraper.output import competitor_directory, export_competitor
+
+logger = logging.getLogger(__name__)
 
 
 async def analyze_export(
@@ -23,12 +27,30 @@ async def analyze_export(
 ) -> CompetitorResearchResult:
     """Analyze an existing bundle without crawling. The caller owns the LLM client."""
     data = await asyncio.to_thread(load_analysis_input, summary_path)
-    facts = await analyzer.extract_information(data)
-    analysis = (
-        await analyzer.analyze_scadable(facts)
-        if is_scadable
-        else await analyzer.analyze_competitor(facts)
+    index = Path(summary_path).resolve()
+    stage = "extraction"
+    logger.info(
+        "LLM extraction for %s: %d pages, %d Markdown characters; export: %s",
+        data.company_name,
+        len(data.pages),
+        sum(len(page.markdown) for page in data.pages),
+        index,
     )
+    try:
+        facts = await analyzer.extract_information(data)
+        stage = "company analysis"
+        logger.info("LLM company analysis for %s", data.company_name)
+        analysis = (
+            await analyzer.analyze_scadable(facts)
+            if is_scadable
+            else await analyzer.analyze_competitor(facts)
+        )
+    except APITimeoutError as error:
+        error.add_note(
+            f"LLM {stage} timed out for {data.company_name} ({data.crawl_summary.homepage_url}). "
+            f'Saved Markdown remains available. Resume with --export "{index}".'
+        )
+        raise
     return CompetitorResearchResult(
         crawl_summary=data.crawl_summary,
         extracted_information=facts,
