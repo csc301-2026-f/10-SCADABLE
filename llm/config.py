@@ -14,4 +14,4 @@ class Settings(BaseSettings):
 
     openai_api_key: SecretStr | None = None
     openai_model: str = ""
-    openai_timeout_seconds: float = Field(default=30.0, gt=0)
+    openai_timeout_seconds: float = Field(default=120.0, gt=0)

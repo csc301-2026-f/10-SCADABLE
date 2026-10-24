@@ -70,7 +70,7 @@ override precedence remains unchanged.
 | --- | --- |
 | `mode` | `llm`; alternative `structural` |
 | `model` | `gpt-6-luna` |
-| `objective` | Company-specific offerings, customers, differentiation, commercial activity, and observable expansion/contraction evidence |
+| `objective` | Products/services, target customers, pricing, integrations, differentiators, commercial activity, and careers/hiring; concrete company evidence for competitor analysis |
 | `budget_usd` | `0.03` per competitor |
 | `exploration_fraction` | `0.20` |
 | `trace_enabled` | `false` |

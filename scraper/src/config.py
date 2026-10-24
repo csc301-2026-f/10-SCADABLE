@@ -29,11 +29,11 @@ class SelectionConfig(ContractModel):
     mode: Literal["llm", "structural"] = "llm"
     model: Literal["gpt-6-luna"] = "gpt-6-luna"
     objective: Annotated[NonEmptyText, Field(max_length=4000)] = (
-        "Understand the company's offerings, customers, differentiation, commercial activity, "
-        "and observable evidence of expansion or contraction. Favor company-specific evidence; "
-        "include general industry articles when they reveal the company's capabilities "
-        "or strategy. "
-        "Collect evidence rather than predicting growth."
+        "Find company-specific evidence about products and services, target customers, pricing, "
+        "integrations, differentiators, commercial activity, and careers or hiring. Favor "
+        "concrete capabilities, stated limitations, customer evidence, and company developments "
+        "that support factual competitor analysis. Include articles when they reveal the "
+        "company's capabilities or strategy."
     )
     budget_usd: Annotated[float, Field(strict=True, ge=0)] = 0.03
     exploration_fraction: Annotated[float, Field(strict=True, ge=0, le=1)] = 0.20

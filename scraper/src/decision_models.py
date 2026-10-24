@@ -10,7 +10,7 @@ UnitScore = Annotated[float, Field(strict=True, ge=0, le=1)]
 TokenCount = Annotated[int, Field(strict=True, ge=0)]
 CandidateId = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")]
 MODEL = "gpt-6-luna"
-PROMPT_VERSION = "company-research-v1"
+PROMPT_VERSION = "company-research-v2"
 
 
 class CandidateObservation(ContractModel):
