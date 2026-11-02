@@ -16,6 +16,8 @@ from scraper import CompetitorCrawlResult, ScrapedPage
 from scraper.output import competitor_directory, export_competitor
 
 NOW = datetime(2026, 10, 19, 12, tzinfo=UTC)
+# make_result() finishes one second after NOW; extraction formats that time like this.
+CRAWL_TIME = (NOW + timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S")
 MARKDOWN = "  # Example\n\nEvidence collection.  \n\n    code\n\n"
 
 
@@ -105,7 +107,8 @@ class StubAnalyzer(Analyzer):
         self.calls.append(("extract", data.company_name))
         self.inputs.append(data)
         return ExtractedInformationByURL(
-            company_name=data.company_name, summary="facts", summary_page_urls=[], job_postings=[], claims_cited=[]
+            company_name=data.company_name, summary="facts", summary_page_urls=[], job_postings=[], claims_cited=[],
+            crawl_time_string=CRAWL_TIME,
         )
 
     async def analyze_company(self, data: ExtractedInformationByURL):
@@ -118,6 +121,7 @@ class StubAnalyzer(Analyzer):
             summary_page_urls=[],
             claims_cited=[],
             features=[],
+            crawl_time_string=data.crawl_time_string,
         )
 
     async def compare(self, data):

@@ -24,18 +24,25 @@ Use Python 3.12. From the repository root, install both local packages together:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install ./scraper -e ".[dev]"
+python -m pip install ./scraper -e "./llm[dev]"
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 On macOS/Linux, activate with `source .venv/bin/activate` and create `.env` from
-`.env.example` if absent. The root project's uv source configuration also points to the
-local `scraper/` package. The documented pip command supplies that local package explicitly.
+`.env.example` if absent.
 
-The combined environment installs the scraper as a regular package to avoid an editable
-import collision with the outer `scraper/` directory. Reinstall `./scraper` after changing
-its source. Its independent, editable development setup remains in
-[scraper/README.md](../scraper/README.md).
+Each layer is its own package: `scraper/pyproject.toml` builds `scraper`, and
+`llm/pyproject.toml` builds `scadable-llm` (imported as `llm`). The root `pyproject.toml`
+packages nothing; it depends on both and holds the pytest settings. Neither package is on
+PyPI, so pip must be given both folders in one command. To also install the root project,
+add it to the same command (`python -m pip install ./scraper -e "./llm[dev]" -e ".[dev]"`).
+The root's uv source configuration points to both local folders.
+
+The scraper is installed as a regular package to avoid an editable import collision with
+the outer `scraper/` directory. Reinstall `./scraper` after changing its source. The `llm`
+package is editable, so its changes apply without reinstalling. The scraper's independent,
+editable development setup remains in [scraper/README.md](../scraper/README.md). The LLM
+layer's own guide is [llm/README.md](../llm/README.md).
 
 Both layers default to the same repository-root `.env`, even when launched from `scraper/`
 or another nested directory. `scraper/.env` is no longer used. Set `OPENAI_API_KEY` and
@@ -97,12 +104,13 @@ Progress logs go to stderr; stdout remains the JSON result.
 ## Python interfaces
 
 The top-level `scraper/` and `llm/` directories keep collection and analysis separate.
-The root project packages `llm/` directly; analysis imports use `llm.*`, including
-`llm.config` for settings and `llm.pipeline` for orchestration.
+`llm/` is packaged by its own `pyproject.toml` as `scadable-llm`; analysis imports use
+`llm.*`, including `llm.config` for settings and `llm.pipeline` for orchestration.
 
 ```text
 scraper/           Standalone collection package and documentation
 llm/
+  pyproject.toml   Package definition (scadable-llm)
   config.py        Analysis environment settings
   pipeline.py      Scraper export and analysis orchestration
   inputs.py        Markdown bundle loader
@@ -169,6 +177,8 @@ it does not start a nested event loop or close an injected analysis client.
 | `OPENAI_API_KEY` | Shared credential for Decisions and downstream analysis |
 | `OPENAI_MODEL` | Downstream analysis model; does not change the Decisions model |
 | `OPENAI_TIMEOUT_SECONDS` | Analysis SDK request timeout; default 30 seconds |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Optional analysis cost tracking; on only when both are set |
+| `LANGFUSE_BASE_URL` | Langfuse region URL, e.g. `https://us.cloud.langfuse.com` |
 
 `Settings()` and `load_environment()` use the same repository-root `.env` by default.
 The resolver identifies the checkout from its `pyproject.toml`, `scraper/pyproject.toml`,
@@ -200,7 +210,9 @@ completion markers, provenance, and no-overwrite behavior.
 - `competitor_notes`: one note per competitor, in input order.
 
 Each company costs two model calls (extraction and analysis); the comparison adds one call over
-all companies.
+all companies. With Langfuse keys set, `OpenAIClient` records each of these calls as a Langfuse
+generation with its token usage, and Langfuse computes the cost in USD. The scraper's
+Decisions calls do not go through this client and are not included.
 
 ## Failure handling and current limits
 
