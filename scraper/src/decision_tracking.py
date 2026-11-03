@@ -144,3 +144,10 @@ class DecisionTracker:
             observation.end()
         except Exception:
             self._warn("Decisions tracking cleanup failed; crawling continues.")
+
+    def finish(self) -> None:
+        if self._parent is not None:
+            self._end(self._parent)
+            self._parent = None
+        if self.reference is not None:
+            self.reference = self.reference.model_copy(update={"finished_at": utc_now()})

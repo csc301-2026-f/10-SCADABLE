@@ -2,10 +2,15 @@
 
 import sys
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+import httpx2
 import pytest
+from openai import APIConnectionError, APIStatusError
 
 from scraper import decision_tracking as tracking
+from scraper.config import SelectionConfig
+from scraper.decisions import DecisionAccessError, OpenAIDecisionProvider
 
 
 class FakeObservation:
@@ -118,3 +123,116 @@ def test_parent_and_generation_use_explicit_context(telemetry):
     assert recorder.reference.crawl_id == context.crawl_id
     assert recorder.reference.trace_id == parent.trace_id
     assert tracking.DecisionTrackingContext().crawl_id != context.crawl_id
+
+
+PAYLOAD = {"input": "private-page-excerpt", "questions": [{"name": "q", "type": "score"}]}
+ANSWER = {"name": "q", "type": "score", "score": 2.0, "confidence": 0.9}
+
+
+def sdk(replies):
+    return SimpleNamespace(
+        decisions=SimpleNamespace(create=AsyncMock(side_effect=replies)), close=AsyncMock()
+    )
+
+
+@pytest.mark.parametrize("operation", ["candidates", "content"])
+@pytest.mark.parametrize("tokens", [0, 123])
+async def test_provider_records_only_reported_usage_and_metadata(
+    monkeypatch, telemetry, operation, tokens
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
+    client, _ = telemetry
+    openai = sdk([{"answers": [ANSWER], "usage": {"input_tokens": tokens}}])
+    async with OpenAIDecisionProvider(
+        SelectionConfig(), client_factory=lambda **_: openai
+    ) as provider:
+        result = await provider._request(PAYLOAD, operation)
+    assert result["q"]["type"] == "score"
+    parent, generation = client.observations
+    assert generation.updates[-1]["usage_details"] == {"input": tokens}
+    assert generation.updates[-1]["status_message"] == "success"
+    assert generation.options["metadata"]["request_sequence"] == 1
+    assert parent.ended and generation.ended
+    assert "private-page-excerpt" not in repr(client.observations[1].options)
+    assert "output" not in generation.updates[-1]
+    openai.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize("body,tokens", [
+    ({"answers": "invalid", "usage": {"input_tokens": 12}}, 12),
+    ({"answers": [{}], "usage": {"input_tokens": 12}}, 12),
+    ({"answers": [ANSWER]}, None),
+    ({"answers": [ANSWER], "usage": {"input_tokens": -1}}, None),
+    ({"answers": [ANSWER], "usage": {"input_tokens": True}}, None),
+])
+async def test_invalid_response_preserves_known_usage(monkeypatch, telemetry, body, tokens):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
+    openai = sdk([body])
+    async with OpenAIDecisionProvider(
+        SelectionConfig(), client_factory=lambda **_: openai
+    ) as provider:
+        await provider._request(PAYLOAD, "content")
+    values = telemetry[0].observations[-1].updates[-1]
+    assert values["status_message"] == "invalid_response"
+    assert values.get("usage_details") == ({"input": tokens} if tokens is not None else None)
+
+
+async def test_retry_records_each_dispatch_without_changing_budget(monkeypatch, telemetry):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
+    error = APIConnectionError(request=httpx2.Request("POST", "https://api.openai.com"))
+    openai = sdk([error, {"answers": [ANSWER], "usage": {"input_tokens": 12}}])
+    async with OpenAIDecisionProvider(
+        SelectionConfig(), client_factory=lambda **_: openai, sleep=AsyncMock()
+    ) as provider:
+        await provider._request(PAYLOAD, "candidates")
+    first, second = telemetry[0].observations[1:]
+    assert first.updates[-1]["status_message"] == "api_error"
+    assert "usage_details" not in first.updates[-1]
+    assert [o.options["metadata"]["attempt"] for o in (first, second)] == [1, 2]
+    assert [o.options["metadata"]["request_sequence"] for o in (first, second)] == [1, 2]
+    assert provider.summary.request_count == 2
+    assert provider.summary.reported_input_tokens == 12
+    assert provider.summary.uncertain_input_tokens > 0
+
+
+@pytest.mark.parametrize("kind", ["auth", "timeout", "cancelled"])
+async def test_failed_attempts_end_and_do_not_invent_usage(monkeypatch, telemetry, kind):
+    import asyncio
+
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
+    if kind == "auth":
+        response = httpx2.Response(
+            401, request=httpx2.Request("POST", "https://api.openai.com")
+        )
+        error = APIStatusError("sensitive-body", response=response, body=None)
+        expected = DecisionAccessError
+    else:
+        error = asyncio.CancelledError() if kind == "cancelled" else TimeoutError()
+        expected = asyncio.CancelledError if kind == "cancelled" else None
+    openai = sdk([error])
+    async with OpenAIDecisionProvider(
+        SelectionConfig(max_retries=0), client_factory=lambda **_: openai
+    ) as provider:
+        if expected:
+            with pytest.raises(expected):
+                await provider._request(PAYLOAD, "content")
+        else:
+            assert await provider._request(PAYLOAD, "content") is None
+    generation = telemetry[0].observations[-1]
+    assert generation.ended
+    assert generation.updates[-1]["status_message"] == {
+        "auth": "http_401", "timeout": "timeout", "cancelled": "cancelled",
+    }[kind]
+    assert "usage_details" not in generation.updates[-1]
+
+
+@pytest.mark.parametrize("budget,payload", [(0.0, PAYLOAD), (0.03, {"input": "x" * 50000})])
+async def test_undispatched_requests_have_no_generations(monkeypatch, telemetry, budget, payload):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
+    openai = sdk([])
+    async with OpenAIDecisionProvider(
+        SelectionConfig(budget_usd=budget), client_factory=lambda **_: openai
+    ) as provider:
+        assert await provider._request(payload, "candidates") is None
+    assert len(telemetry[0].observations) == 1
+    openai.decisions.create.assert_not_awaited()
