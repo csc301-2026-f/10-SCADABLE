@@ -47,6 +47,7 @@ class UrlFrontier:
         self._mode = settings.selection.mode
         self._section_attempts = Counter()
         self._section_novelty: dict[tuple, list[float]] = {}
+        self._final_urls: dict[str, str] = {}
         self.discover(homepage, depth=0, source="homepage", depth_basis="homepage")
 
     @property
@@ -67,6 +68,9 @@ class UrlFrontier:
         disposition, reason = decision.disposition, decision.reason
         if disposition == UrlDisposition.PENDING and record.depth > self.settings.max_depth:
             disposition, reason = UrlDisposition.DEFERRED, "depth_limit"
+        if disposition == UrlDisposition.PENDING and str(record.normalized_url) in self._final_urls:
+            disposition = UrlDisposition.SKIPPED
+            reason = "duplicate_redirect:" + self._final_urls[str(record.normalized_url)]
         self._replace(
             entry,
             disposition=disposition,
@@ -342,6 +346,16 @@ class UrlFrontier:
             disposition=UrlDisposition.CRAWLED if success else UrlDisposition.FAILED,
             reason=None if success else (error or "fetch_failed"),
         )
+
+    def register_final_url(self, final_url: str, representative: str) -> None:
+        """Record observed successful targets; never infer aliases from host/canonical tags."""
+        normalized = normalize_url(final_url)
+        if not self.settings.deduplicate_pages or normalized is None:
+            return
+        self._final_urls.setdefault(normalized.normalized, representative)
+        entry = self._entries.get(normalized.normalized)
+        if entry is not None:
+            self._refresh_policy(entry)
 
     def finalize(self, *, reason: str | None = None) -> None:
         reason = reason or (

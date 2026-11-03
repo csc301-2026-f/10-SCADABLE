@@ -1,6 +1,7 @@
 """Coordinate bounded decision cycles and feedback without owning fetch resources."""
 
 from ..config import ScraperConfig
+from ..content_identity import markdown_fingerprint
 from ..decision_models import SelectionDiagnostics
 from ..interfaces import DecisionProvider
 from ..models import DiscoveredUrl, FetchedPage
@@ -13,6 +14,7 @@ class AdaptiveSelection:
         self.frontier, self.settings, self.provider = frontier, settings, provider
         self.ledger = EvidenceLedger()
         self._last_evaluation_attempt = -5
+        self._bodies: dict[str, FetchedPage] = {}
 
     def _mode(self):
         mode = self.provider.summary.effective_mode
@@ -69,10 +71,39 @@ class AdaptiveSelection:
         )
 
     async def assess(self, page: FetchedPage, record: DiscoveredUrl) -> FetchedPage:
+        fingerprint = (
+            markdown_fingerprint(page.raw_markdown)
+            if self.settings.deduplicate_pages and page.crawl_status == "success"
+            else None
+        )
+        if fingerprint:
+            representative = self._bodies.get(fingerprint)
+            metadata = {**page.metadata, "content_fingerprint": fingerprint}
+            if representative is not None:
+                assessment = representative.content_assessment
+                if assessment is not None:
+                    assessment = assessment.model_copy(
+                        update={"novelty": 0.0, "novelty_confidence": None}
+                    )
+                return self.attach(
+                    page.model_copy(
+                        update={
+                            "metadata": {
+                                **metadata,
+                                "duplicate_of": str(representative.source_url),
+                            },
+                            "content_assessment": assessment,
+                        }
+                    ),
+                    record,
+                )
+            page = page.model_copy(update={"metadata": metadata})
         if page.crawl_status == "success" and self._mode() == "llm":
             assessment = await self.provider.assess_content(page, self.ledger.excerpts)
             page = page.model_copy(update={"content_assessment": assessment})
             self.frontier.note_assessment(str(record.normalized_url), assessment)
             self.ledger.add(page)
             self._mode()
+        if fingerprint:
+            self._bodies[fingerprint] = page
         return self.attach(page, record)

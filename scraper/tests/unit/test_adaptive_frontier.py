@@ -181,3 +181,30 @@ def test_configured_exploration_endpoints(fraction, method):
     value.discover("/opaque")
     score_all(value)
     assert value.pop_next().selection_method == method
+
+
+def test_observed_alias_does_not_collapse_variants_or_policy_exclusions():
+    value = frontier(excluded_url_patterns=["blocked"])
+    for url in ("/target", "/target/", "/target?q=1", "/blocked", "http://example.com/target"):
+        value.discover(url)
+    value.register_final_url("https://example.com/target", "https://example.com/")
+    value.register_final_url("https://example.com/blocked", "https://example.com/")
+    assert value.get("https://example.com/target").reason.startswith("duplicate_redirect:")
+    assert (
+        value.get("https://example.com/blocked").reason != "duplicate_redirect:https://example.com/"
+    )
+    for url in ("/target/", "/target?q=1", "http://example.com/target"):
+        assert (
+            value.get(url if url.startswith("http") else "https://example.com" + url).disposition
+            == "pending"
+        )
+
+
+def test_in_flight_alias_remains_an_attempt_and_first_representative_wins():
+    value = frontier()
+    value.discover("/alias")
+    reserved = value.pop_next()
+    value.register_final_url("https://example.com/alias", "https://example.com/")
+    value.complete(str(reserved.normalized_url), success=True)
+    assert value.attempted_pages == 2
+    assert value.get("https://example.com/alias").disposition == "crawled"

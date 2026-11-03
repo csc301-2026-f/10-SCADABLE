@@ -103,6 +103,7 @@ class ScraperConfig(ContractModel):
     )
     markdown_remove_navigation_and_footer: StrictBool = True
     markdown_remove_boilerplate: StrictBool = True
+    deduplicate_pages: StrictBool = True
     markdown_excluded_selectors: list[NonEmptyText] = Field(default_factory=list)
     dynamic: DynamicSettings = Field(default_factory=DynamicSettings)
     dynamic_rules: list[DynamicRule] = Field(default_factory=list)

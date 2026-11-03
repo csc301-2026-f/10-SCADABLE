@@ -549,3 +549,87 @@ async def test_cancelling_a_decision_closes_provider_and_fetcher():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert fetcher.closed and decisions.closed
+
+
+@pytest.mark.parametrize("enabled, expected_calls", [(True, 1), (False, 3)])
+async def test_exact_duplicate_assessments_preserve_pages_links_and_attempt_cap(
+    enabled, expected_calls
+):
+    home = page(links=("/a", "/b"))
+    duplicate = page("/a", links=("/extra",)).model_copy(
+        update={"raw_markdown": "\n" + home.raw_markdown.replace("\n", "\r\n") + "\n"}
+    )
+    fetcher = Fetcher(
+        {
+            "https://example.com/": home,
+            "https://example.com/a": duplicate,
+            "https://example.com/b": page("/b").model_copy(
+                update={"raw_markdown": home.raw_markdown}
+            ),
+        }
+    )
+    decisions = Decisions(fetcher)
+    run = await DiscoveryCrawler(
+        fetcher, Sitemaps(), robots_guard=Guard(), decision_provider=decisions
+    ).run(
+        CompetitorInput(homepage_url="https://example.com"),
+        ScraperConfig(
+            max_pages=3,
+            deduplicate_pages=enabled,
+            max_concurrency=3,
+            per_domain_concurrency=3,
+            request_delay_seconds=(0.0, 0.0),
+        ),
+    )
+    assert len(decisions.assessed) == expected_calls
+    assert len(run.fetched_pages) == run.attempted_pages == 3
+    assert any(str(item.url).endswith("/extra") for item in run.discovered_urls)
+    if enabled:
+        assert all(
+            p.metadata["duplicate_of"] == "https://example.com/" for p in run.fetched_pages[1:]
+        )
+        assert all(p.content_assessment.novelty == 0 for p in run.fetched_pages[1:])
+        assert len(decisions.ledgers) == 1
+
+
+@pytest.mark.parametrize(
+    "status, body, skip",
+    [("success", "Evidence", True), ("failed", "Evidence", False), ("success", "   ", False)],
+)
+async def test_only_successful_nonempty_observed_redirects_suppress_pending_target(
+    status, body, skip
+):
+    home = page(links=("/target",)).model_copy(
+        update={
+            "final_url": "https://example.com/target",
+            "raw_markdown": body,
+            "crawl_status": status,
+            "error_message": "failed" if status == "failed" else None,
+        }
+    )
+    fetcher = Fetcher({"https://example.com/": home, "https://example.com/target": page("/target")})
+    from scraper.models import DiscoveredUrl
+
+    class TargetSitemap:
+        async def discover(self, *args):
+            return DiscoveryBatch(
+                urls=[
+                    DiscoveredUrl(
+                        url="https://example.com/target",
+                        normalized_url="https://example.com/target",
+                        discovery_source="sitemap",
+                        depth=1,
+                    )
+                ]
+            )
+
+    decisions = Decisions(fetcher)
+    run = await DiscoveryCrawler(
+        fetcher, TargetSitemap(), robots_guard=Guard(), decision_provider=decisions
+    ).run(
+        CompetitorInput(homepage_url="https://example.com"),
+        ScraperConfig(max_pages=2, request_delay_seconds=(0.0, 0.0)),
+    )
+    target = next(item for item in run.discovered_urls if str(item.url).endswith("/target"))
+    assert (target.reason == "duplicate_redirect:https://example.com/") is skip
+    assert len(fetcher.requested) == (1 if skip else 2)
