@@ -80,9 +80,9 @@ def test_cost_for_name_sums_every_page_and_ignores_other_names():
         _page([("run-1:analysis", 0.002), ("run-10:analysis", 5.0)], cursor="next"),
         _page([("run-1:analysis", 0.001)]),
     ])
-    client = SimpleNamespace(async_api=SimpleNamespace(observations=observations))
+    api = SimpleNamespace(observations=observations)
 
-    cost = asyncio.run(_cost_for_name(client, "run-1:analysis"))
+    cost = asyncio.run(_cost_for_name(api, "run-1:analysis"))
 
     assert cost == CallCost(found=2, usd=pytest.approx(0.003))
     assert observations.calls[0]["name"] == "run-1:analysis"
@@ -91,15 +91,45 @@ def test_cost_for_name_sums_every_page_and_ignores_other_names():
 
 def test_cost_for_name_is_unknown_when_a_call_has_no_price():
     observations = FakeObservations([_page([("run-1:analysis", 0.002), ("run-1:analysis", None)])])
-    client = SimpleNamespace(async_api=SimpleNamespace(observations=observations))
+    api = SimpleNamespace(observations=observations)
 
-    assert asyncio.run(_cost_for_name(client, "run-1:analysis")) == CallCost(found=2, usd=None)
+    assert asyncio.run(_cost_for_name(api, "run-1:analysis")) == CallCost(found=2, usd=None)
 
 
 def test_fetch_call_costs_is_none_without_langfuse_keys(monkeypatch):
     monkeypatch.setattr(costs, "_langfuse_settings", lambda: None)
 
     assert asyncio.run(costs.fetch_call_costs(run_call_names(1))) is None
+
+
+def test_fetch_call_costs_keeps_the_shared_langfuse_recorder_running(monkeypatch):
+    langfuse = pytest.importorskip("langfuse")
+    langfuse_api = pytest.importorskip("langfuse.api")
+    from langfuse._client.resource_manager import LangfuseResourceManager
+
+    settings = SimpleNamespace(
+        langfuse_public_key="pk-lf-test",
+        langfuse_secret_key=SimpleNamespace(get_secret_value=lambda: "sk-lf-test"),
+        langfuse_base_url="http://127.0.0.1:9",
+    )
+    monkeypatch.setattr(costs, "_langfuse_settings", lambda: settings)
+    pages = FakeObservations([_page([("run-1:extraction", 0.01)])] + [_page([])] * 2)
+    monkeypatch.setattr(
+        langfuse_api, "AsyncLangfuseAPI", lambda **kwargs: SimpleNamespace(observations=pages)
+    )
+
+    # The recorder the analyzer's OpenAIClient uses for this key
+    recorder = langfuse.Langfuse(
+        public_key="pk-lf-test", secret_key="sk-lf-test", base_url="http://127.0.0.1:9"
+    )
+    try:
+        result = asyncio.run(costs.fetch_call_costs(run_call_names(1)))
+
+        assert result["run-1:extraction"] == CallCost(found=1, usd=0.01)
+        assert not LangfuseResourceManager._instances["pk-lf-test"]._shutdown
+    finally:
+        recorder.shutdown()
+        LangfuseResourceManager._instances.pop("pk-lf-test", None)
 
 
 # --- Saving a run's cost -----------------------------------------------------

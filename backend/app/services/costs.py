@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 RUN_STEPS = ("extraction", "analysis", "comparison")
 REQUEST_TIMEOUT_SECONDS = 30.0
 MAX_PAGES_PER_NAME = 10
+DEFAULT_BASE_URL = "https://cloud.langfuse.com"  # the Langfuse SDK's default
 
 
 @dataclass
@@ -49,14 +50,14 @@ def is_cost_tracking_configured() -> bool:
     return _langfuse_settings() is not None
 
 
-async def _cost_for_name(client: Any, name: str) -> CallCost:
+async def _cost_for_name(api: Any, name: str) -> CallCost:
     found = 0
     total = 0.0
     priced = True
     cursor = None
     for _ in range(MAX_PAGES_PER_NAME):
         page = await asyncio.wait_for(
-            client.async_api.observations.get_many(
+            api.observations.get_many(
                 name=name,
                 type="GENERATION",
                 fields="basic,usage",
@@ -85,16 +86,18 @@ async def fetch_call_costs(names: list[str]) -> dict[str, CallCost] | None:
     if settings is None:
         return None
 
-    from langfuse import Langfuse
+    import httpx
+    from langfuse.api import AsyncLangfuseAPI
 
-    client = Langfuse(
-        public_key=settings.langfuse_public_key,
-        secret_key=settings.langfuse_secret_key.get_secret_value(),
-        base_url=settings.langfuse_base_url,
-        # Read-only client: don't start tracing for these lookups
-        tracing_enabled=False,
-    )
-    try:
-        return {name: await _cost_for_name(client, name) for name in names}
-    finally:
-        client.shutdown()
+    # A plain API client, not Langfuse(): Langfuse() shares one recorder per key
+    # across the process, and shutting it down would stop the analyzer's calls
+    # from being recorded.
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as http:
+        api = AsyncLangfuseAPI(
+            base_url=settings.langfuse_base_url or DEFAULT_BASE_URL,
+            username=settings.langfuse_public_key,
+            password=settings.langfuse_secret_key.get_secret_value(),
+            x_langfuse_public_key=settings.langfuse_public_key,
+            httpx_client=http,
+        )
+        return {name: await _cost_for_name(api, name) for name in names}
