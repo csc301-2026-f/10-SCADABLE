@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Sequence
+from copy import deepcopy
 
 from cssselect import ExpressionError
 from lxml import etree, html
@@ -9,6 +10,91 @@ from lxml.cssselect import CSSSelector, LxmlHTMLTranslator
 
 _CONTENT_CONTAINERS = {"main", "article", "section", "aside"}
 logger = logging.getLogger(__name__)
+
+_CONSENT_IDS = {
+    "onetrust-consent-sdk",
+    "onetrust-banner-sdk",
+    "onetrust-pc-sdk",
+    "CybotCookiebotDialog",
+    "CookiebotWidget",
+}
+_COOKIE_LABELS = {"cookie consent", "cookie preferences", "cookie settings"}
+_CLONE_CLASSES = {"slick-cloned", "swiper-slide-duplicate"}
+_CAROUSEL_CLASSES = {"slick-slider", "swiper", "swiper-container"}
+_PROTECTED = {"main", "article", "pre", "code", "table"}
+
+
+def _protected(node) -> bool:
+    return any(
+        item.tag in _PROTECTED or item.get("role", "").lower() == "main"
+        for item in (node, *node.iterancestors())
+    )
+
+
+def _carousel(node):
+    return next(
+        (
+            ancestor
+            for ancestor in node.iterancestors()
+            if ancestor.get("aria-roledescription", "").lower() == "carousel"
+            or set(ancestor.get("class", "").split()) & _CAROUSEL_CLASSES
+        ),
+        None,
+    )
+
+
+def _slide_identity(node):
+    """Ignore only presentation/lifecycle attributes on the slide root."""
+    slide = deepcopy(node)
+    for attribute in ("id", "class", "aria-hidden", "tabindex", "style"):
+        slide.attrib.pop(attribute, None)
+
+    # Structural comparison keeps child attributes, text, links and meaningful data.
+    def identity(item):
+        return (
+            item.tag,
+            tuple(sorted(item.attrib.items())),
+            item.text,
+            tuple((identity(child), child.tail) for child in item),
+        )
+
+    return identity(slide)
+
+
+def boilerplate_nodes(document) -> set:
+    """Identify only explicit consent UI and corroborated carousel clones."""
+    matches = set()
+    for node in document.iter():
+        if not isinstance(node.tag, str) or _protected(node):
+            continue
+        label = node.get("aria-label", "")
+        if not label and node.get("aria-labelledby"):
+            ids = node.get("aria-labelledby").split()
+            label = " ".join(
+                item.text_content() for item in document.iter() if item.get("id") in ids
+            )
+        if node.get("id") in _CONSENT_IDS or (
+            (node.tag == "dialog" or node.get("role", "").lower() == "dialog")
+            and " ".join(label.lower().split()) in _COOKIE_LABELS
+        ):
+            matches.add(node)
+            continue
+        if not set(node.get("class", "").split()) & _CLONE_CLASSES:
+            continue
+        carousel = _carousel(node)
+        if carousel is None:
+            continue
+        signature = _slide_identity(node)
+        if any(
+            other is not node
+            and _carousel(other) is carousel
+            and not set(other.get("class", "").split()) & _CLONE_CLASSES
+            and _slide_identity(other) == signature
+            for other in carousel.iterdescendants()
+            if isinstance(other.tag, str)
+        ):
+            matches.add(node)
+    return matches
 
 
 class _HtmlSelectorTranslator(LxmlHTMLTranslator):
