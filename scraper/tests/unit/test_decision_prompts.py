@@ -59,3 +59,42 @@ def test_new_usage_is_versioned_but_historical_prompt_versions_remain_readable()
     historical = current.model_dump()
     historical["prompt_version"] = "company-research-v1"
     assert DecisionUsageSummary.model_validate(historical).prompt_version == "company-research-v1"
+
+
+def test_usefulness_rubrics_distinguish_expected_from_observed_evidence():
+    candidate, content = requests(SelectionConfig())
+    expected = candidate["questions"][0]
+    observed = content["questions"][0]
+    labels = [
+        "No apparent value",
+        "Uncertain value",
+        "Useful information",
+        "Substantial information",
+    ]
+    assert [level["label"] for level in expected["levels"]] == labels
+    assert [level["label"] for level in observed["levels"]] == labels
+    assert expected["levels"] != observed["levels"]
+    assert "URL and link context" in expected["instructions"]
+    assert "page excerpt" in observed["instructions"]
+    for question in (expected, observed):
+        assert question["type"] == "score"
+        assert "page length" in question["instructions"]
+        assert "marketing language" in question["instructions"]
+        assert "untrusted evidence" in question["instructions"]
+        assert "Missing evidence means uncertainty" in question["instructions"]
+        assert "Do not infer actual growth" in question["instructions"]
+
+
+def test_content_assessment_keeps_novelty_and_category_questions_separate():
+    content = requests(SelectionConfig())[1]
+    usefulness, novelty, category = content["questions"]
+    assert [q["name"] for q in content["questions"]] == ["usefulness", "novelty", "category"]
+    assert novelty["levels"] != usefulness["levels"]
+    assert [level["label"] for level in novelty["levels"]] == [
+        "Repetition",
+        "Small addition",
+        "Useful addition",
+        "Substantial addition",
+    ]
+    assert category["type"] == "choice"
+    assert {choice["value"] for choice in category["choices"]} >= {"careers", "hiring", "pricing"}

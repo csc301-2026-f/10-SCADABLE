@@ -21,13 +21,46 @@ POLICY = (
     "means uncertainty, not proof of irrelevance. Favor company-specific evidence over "
     "generic industry commentary. Do not infer actual growth from marketing claims. "
 )
-VALUE_LEVELS = [
-    {"label": "No apparent value", "description": "Little evidence of company information."},
-    {"label": "Uncertain value", "description": "Possibly useful, but evidence is weak."},
-    {"label": "Useful information", "description": "Likely useful company-specific information."},
+USEFULNESS_POLICY = (
+    "Favor extractable facts; page length or marketing language alone does not establish value. "
+)
+CANDIDATE_VALUE_LEVELS = [
+    {
+        "label": "No apparent value",
+        "description": "Evidence suggests unrelated content or generic commentary without "
+        "company-specific relevance.",
+    },
+    {
+        "label": "Uncertain value",
+        "description": "URL and link context are insufficient to judge likely value.",
+    },
+    {
+        "label": "Useful information",
+        "description": "URL or link context indicates relevant company-specific information.",
+    },
     {
         "label": "Substantial information",
-        "description": "Strong direct evidence about the company.",
+        "description": "Strong signals of detailed capabilities, terms, stated limitations, "
+        "customer evidence, or hiring details.",
+    },
+]
+CONTENT_VALUE_LEVELS = [
+    {
+        "label": "No apparent value",
+        "description": "No meaningful company-specific evidence relevant to the objective.",
+    },
+    {
+        "label": "Uncertain value",
+        "description": "Excerpt is inconclusive or contains only vague company claims.",
+    },
+    {
+        "label": "Useful information",
+        "description": "Concrete facts support at least one research topic.",
+    },
+    {
+        "label": "Substantial information",
+        "description": "Specific capabilities, terms, stated limitations, customer evidence, "
+        "or hiring details support cited factual analysis.",
     },
 ]
 NOVELTY_LEVELS = [
@@ -59,8 +92,10 @@ def candidate_request(candidates: Sequence[DecisionCandidate], settings: Selecti
                 "type": "score",
                 "name": f"candidate_{index}",
                 "instructions": POLICY
-                + f"Rate the expected usefulness of candidate {item.candidate_id}.",
-                "levels": VALUE_LEVELS,
+                + USEFULNESS_POLICY
+                + f"Rate the expected usefulness of candidate {item.candidate_id} "
+                "using only its URL and link context; do not assume page contents.",
+                "levels": CANDIDATE_VALUE_LEVELS,
             }
             for index, item in enumerate(candidates)
         ],
@@ -117,8 +152,10 @@ def content_request(
             {
                 "type": "score",
                 "name": "usefulness",
-                "instructions": POLICY + "Rate the observed usefulness of the fetched page.",
-                "levels": VALUE_LEVELS,
+                "instructions": POLICY
+                + USEFULNESS_POLICY
+                + "Rate the observed usefulness using only the supplied page excerpt.",
+                "levels": CONTENT_VALUE_LEVELS,
             },
             {
                 "type": "score",
