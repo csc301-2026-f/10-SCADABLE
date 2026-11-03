@@ -33,8 +33,12 @@ class FakeClient:
     def __init__(self, responses):
         self.responses = responses
         self.closed = False
+        self.observation_names = []
 
-    async def generate_structured(self, *, instructions, input_text, output_schema):
+    async def generate_structured(
+        self, *, instructions, input_text, output_schema, observation_name="openai-api-call"
+    ):
+        self.observation_names.append(observation_name)
         return self.responses[output_schema.__name__]
 
     async def close(self):
@@ -73,7 +77,9 @@ def test_analyze_uses_real_llm_schemas(fake_client):
         "pages": [{"url": "https://vanta.com/features", "title": "Features", "text": "Evidence collection"}],
     }
 
-    result = asyncio.run(OpenAIAdapter().analyze(scraped, get_scadable_baseline()))
+    result = asyncio.run(
+        OpenAIAdapter().analyze(scraped, get_scadable_baseline(), trace_prefix="run-42")
+    )
 
     # A schema mismatch makes analyze() fall back to the mock, which has no "mode"
     assert result.get("mode") == "real"
@@ -83,7 +89,34 @@ def test_analyze_uses_real_llm_schemas(fake_client):
         "content": "Many integrations",
         "source_url": "https://vanta.com/features",
     } in result["swot_entries"]
+    # Calls are named for cost lookups, and the run records which ones it made
+    assert client.observation_names == ["run-42:extraction", "run-42:analysis"]
+    assert result["llm_calls"] == ["run-42:extraction", "run-42:analysis"]
     assert client.closed
+
+
+def test_analyze_fallback_keeps_paid_calls(fake_client):
+    # Extraction succeeds (and is paid for), then analysis has no canned response and fails
+    fake_client({
+        "PartialExtractedInformationByIndex": PartialExtractedInformationByIndex(
+            summary="Vanta automates compliance.",
+            summary_page_indexes=[0],
+            job_postings=[],
+            claims_cited=[],
+        ),
+    })
+    scraped = {
+        "competitor_name": "Vanta",
+        "base_url": "https://vanta.com",
+        "pages": [{"url": "https://vanta.com/features", "title": "Features", "text": "Evidence"}],
+    }
+
+    result = asyncio.run(
+        OpenAIAdapter().analyze(scraped, get_scadable_baseline(), trace_prefix="run-42")
+    )
+
+    assert result.get("mode") is None  # fell back to the mock
+    assert result["llm_calls"] == ["run-42:extraction", "run-42:analysis"]
 
 
 def test_compare_uses_real_llm_schemas(fake_client):
@@ -123,8 +156,11 @@ def test_compare_uses_real_llm_schemas(fake_client):
         ],
     }]
 
-    result = asyncio.run(OpenAIAdapter().compare(get_scadable_baseline(), competitors))
+    result = asyncio.run(
+        OpenAIAdapter().compare(get_scadable_baseline(), competitors, trace_prefix="run-42")
+    )
 
+    assert client.observation_names == ["run-42:comparison"]
     assert result["swot_entries"] == [
         # The competitor page is preferred over SCADABLE's homepage
         {"category": "strength", "content": "Native EU CRA tracking Vanta lacks.", "source_url": "https://vanta.com/features"},
