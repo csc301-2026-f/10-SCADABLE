@@ -66,7 +66,7 @@ output:
 </SWOT_ANALYSIS_BY_INDEX>
 
 <SCORING_CRITERIA>
-Score each feature from 0 to 10 based on any statistics from the provided inputs that indicate how much this feature can compete with, or is currently competing with SCADABLE's existing features (0 means no competition, 10 means maximum competition).
+Score each feature from 0 to 10 based on any info from the provided inputs, understanding how much the features may be overlapping with SCADABLE's existing features. As a bonus, make the score higher if those features are stronger in terms of user count, pricing, or performance statistics.
 </SCORING_CRITERIA>
 
 You must follow these rules:
