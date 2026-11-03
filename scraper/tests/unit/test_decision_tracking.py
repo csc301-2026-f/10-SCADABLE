@@ -1,6 +1,8 @@
 """Optional telemetry must never affect Decisions or expose their payloads."""
 
+import asyncio
 import sys
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -94,6 +96,33 @@ def test_initialization_failure_is_optional_and_sanitized(monkeypatch, telemetry
     assert recorder.reference is None
     assert "secret-server-response" not in caplog.text
     assert len(caplog.records) == 1
+
+
+def test_disabled_sdk_does_not_expose_nonrecording_reference(monkeypatch, telemetry):
+    original = telemetry[0].start_observation
+
+    def noop(**options):
+        observation = original(**options)
+        observation.id = "0" * 16
+        observation.trace_id = "0" * 32
+        return observation
+
+    monkeypatch.setattr(telemetry[0], "start_observation", noop)
+    recorder = tracking.DecisionTracker(mode="llm", model="test")
+    recorder.start()
+    assert recorder.reference is None
+
+
+@pytest.mark.parametrize("context", [
+    tracking.DecisionTrackingContext(trace_id="invalid"),
+    tracking.DecisionTrackingContext(trace_id="0" * 32),
+    tracking.DecisionTrackingContext(parent_observation_id="a" * 16),
+])
+def test_invalid_parent_context_disables_tracking_instead_of_misattributing(telemetry, context):
+    recorder = tracking.DecisionTracker(mode="llm", model="test", context=context)
+    recorder.start()
+    assert recorder.reference is None
+    assert telemetry[0].observations == []
 
 
 def test_parent_and_generation_use_explicit_context(telemetry):
@@ -307,3 +336,181 @@ async def test_service_propagates_context_and_separates_concurrent_crawls(monkey
         assert "decision_tracking" not in result.model_json_schema()["properties"]
         assert result.summary.successful == 1
     assert all(c.close.await_count == 1 for c in clients)
+
+
+async def test_exit_flushes_once_off_event_loop_without_shutting_down(monkeypatch, telemetry):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
+    client, _ = telemetry
+    threads = []
+    original = client.flush
+
+    def flush():
+        threads.append(threading.get_ident())
+        original()
+
+    monkeypatch.setattr(client, "flush", flush)
+    openai = sdk([])
+    async with OpenAIDecisionProvider(
+        SelectionConfig(), client_factory=lambda **_: openai
+    ) as provider:
+        pass
+    assert client.flush_count == 1
+    assert threads[0] != threading.get_ident()
+    assert client.observations[0].ended
+    assert provider.decision_tracking.finished_at is not None
+    await provider.__aexit__(None, None, None)
+    assert client.flush_count == 1
+
+
+async def test_slow_flush_has_bounded_wait(monkeypatch, telemetry, caplog):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
+    monkeypatch.setattr(tracking, "FLUSH_TIMEOUT_SECONDS", 0.01)
+    client, _ = telemetry
+    release = threading.Event()
+    monkeypatch.setattr(client, "flush", lambda: release.wait(1))
+    openai = sdk([])
+    try:
+        async with asyncio.timeout(0.5):
+            async with OpenAIDecisionProvider(
+                SelectionConfig(), client_factory=lambda **_: openai
+            ):
+                pass
+        assert "flush" in caplog.text
+        openai.close.assert_awaited_once()
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize("failure", ["disabled", "start", "update", "end", "flush"])
+async def test_telemetry_failure_does_not_change_results_or_budgets(
+    monkeypatch, telemetry, failure, caplog
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
+    client, _ = telemetry
+
+    async def run():
+        openai = sdk([{"answers": [ANSWER], "usage": {"input_tokens": 12}}])
+        async with OpenAIDecisionProvider(
+            SelectionConfig(), client_factory=lambda **_: openai
+        ) as provider:
+            result = await provider._request(PAYLOAD, "candidates")
+        openai.close.assert_awaited_once()
+        return result, provider.summary.model_dump()
+
+    baseline = await run()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("sensitive-telemetry-details")
+
+    if failure == "disabled":
+        monkeypatch.delenv("LANGFUSE_PUBLIC_KEY")
+    elif failure in ("start", "flush"):
+        monkeypatch.setattr(client, "start_observation" if failure == "start" else "flush", fail)
+    else:
+        monkeypatch.setattr(FakeObservation, failure, fail)
+    assert await run() == baseline
+    assert "sensitive-telemetry-details" not in caplog.text
+
+
+async def test_task_cancellation_closes_all_resources(monkeypatch, telemetry):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
+    dispatched = asyncio.Event()
+
+    async def wait(**_):
+        dispatched.set()
+        await asyncio.Event().wait()
+
+    openai = sdk([])
+    openai.decisions.create = AsyncMock(side_effect=wait)
+
+    provider = OpenAIDecisionProvider(SelectionConfig(), client_factory=lambda **_: openai)
+
+    async def run():
+        async with provider:
+            await provider._request(PAYLOAD, "content")
+
+    task = asyncio.create_task(run())
+    await dispatched.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert all(o.ended for o in telemetry[0].observations)
+    assert telemetry[0].flush_count == 1
+    assert telemetry[0].observations[-1].updates[-1]["status_message"] == "cancelled"
+    openai.close.assert_awaited_once()
+
+
+async def test_cancellation_waiting_for_capacity_has_no_generation(monkeypatch, telemetry):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
+    openai = sdk([])
+    async with OpenAIDecisionProvider(
+        SelectionConfig(), client_factory=lambda **_: openai, request_limiter=asyncio.Semaphore(0)
+    ) as provider:
+        task = asyncio.create_task(provider._request(PAYLOAD, "content"))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert len(telemetry[0].observations) == 1
+    assert provider.summary.request_count == 0
+
+
+async def test_real_langfuse_sdk_exports_usage_and_parentage_in_memory(monkeypatch):
+    from uuid import uuid4
+
+    langfuse = pytest.importorskip("langfuse")
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", f"pk-lf-{uuid4().hex}")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-offline")
+    exporter = InMemorySpanExporter()
+    tracer = TracerProvider()
+    real_factory = langfuse.Langfuse
+    clients = []
+
+    def factory(**options):
+        client = real_factory(**options, tracer_provider=tracer, span_exporter=exporter)
+        clients.append(client)
+        return client
+
+    def reject_http(*args, **kwargs):
+        raise AssertionError("External HTTP is forbidden in this test")
+
+    monkeypatch.setattr(httpx.Client, "send", reject_http)
+    monkeypatch.setattr(langfuse, "Langfuse", factory)
+    openai = sdk([{"answers": [ANSWER], "usage": {"input_tokens": 12}}])
+    try:
+        async with OpenAIDecisionProvider(
+            SelectionConfig(), client_factory=lambda **_: openai
+        ) as provider:
+            await provider._request(PAYLOAD, "candidates")
+        spans = {s.name: s for s in exporter.get_finished_spans()}
+        parent = spans["scraper.decisions"]
+        generation = spans["scraper.decisions.candidates"]
+        assert generation.parent.span_id == parent.context.span_id
+        assert generation.context.trace_id == parent.context.trace_id
+        assert f"{parent.context.trace_id:032x}" == provider.decision_tracking.trace_id
+        assert generation.attributes["langfuse.observation.usage_details"] == '{"input": 12}'
+        assert not any(k.endswith(("input", "output")) for k in generation.attributes)
+    finally:
+        for client in clients:
+            client.shutdown()
+
+
+async def test_flush_failure_preserves_original_access_error(monkeypatch, telemetry):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
+    response = httpx2.Response(403, request=httpx2.Request("POST", "https://api.openai.com"))
+    openai = sdk([APIStatusError("private-body", response=response, body=None)])
+
+    def fail():
+        raise RuntimeError("telemetry-failure")
+
+    monkeypatch.setattr(telemetry[0], "flush", fail)
+    with pytest.raises(DecisionAccessError, match="HTTP 403"):
+        async with OpenAIDecisionProvider(
+            SelectionConfig(), client_factory=lambda **_: openai
+        ) as provider:
+            await provider._request(PAYLOAD, "content")
+    openai.close.assert_awaited_once()

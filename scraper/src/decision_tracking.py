@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -13,6 +14,16 @@ from .decision_models import PROMPT_VERSION
 from .types import ContractModel, UtcTimestamp, utc_now
 
 logger = logging.getLogger(__name__)
+FLUSH_TIMEOUT_SECONDS = 2.0
+
+
+def _valid_id(value: str, length: int) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == length
+        and set(value) <= set("0123456789abcdef")
+        and value != "0" * length
+    )
 
 
 @dataclass(frozen=True)
@@ -49,6 +60,8 @@ class DecisionTracker:
         self._client: Any = None
         self._parent: Any = None
         self._warned = False
+        self._finished = False
+        self._flushed = False
 
     def _warn(self, message: str) -> None:
         if not self._warned:
@@ -77,7 +90,17 @@ class DecisionTracker:
         except ImportError:
             self._warn("Decisions tracking unavailable; install scraper[langfuse].")
             return
+        except Exception:
+            self._warn("Decisions tracking initialization failed; crawling continues.")
+            return
         try:
+            if self.context.trace_id is not None and not _valid_id(self.context.trace_id, 32):
+                raise ValueError("Invalid trace identifier")
+            if self.context.parent_observation_id is not None and (
+                self.context.trace_id is None
+                or not _valid_id(self.context.parent_observation_id, 16)
+            ):
+                raise ValueError("Parent observation requires a valid trace")
             options = {"public_key": public, "secret_key": secret}
             base_url = os.environ.get("LANGFUSE_BASE_URL", "").strip()
             if base_url:
@@ -94,6 +117,8 @@ class DecisionTracker:
                 as_type="span", name="scraper.decisions", trace_context=trace_context,
                 metadata=self._metadata(),
             )
+            if not _valid_id(self._parent.trace_id, 32) or not _valid_id(self._parent.id, 16):
+                raise ValueError("SDK did not create a recording observation")
             self.reference = DecisionTrackingReference(
                 crawl_id=self.context.crawl_id, trace_id=self._parent.trace_id,
                 observation_id=self._parent.id, model=self.model, started_at=started,
@@ -146,8 +171,24 @@ class DecisionTracker:
             self._warn("Decisions tracking cleanup failed; crawling continues.")
 
     def finish(self) -> None:
+        if self._finished:
+            return
+        self._finished = True
         if self._parent is not None:
             self._end(self._parent)
             self._parent = None
         if self.reference is not None:
             self.reference = self.reference.model_copy(update={"finished_at": utc_now()})
+
+    async def aclose(self) -> None:
+        self.finish()
+        if self._client is None or self._flushed:
+            return
+        self._flushed = True
+        try:
+            # A timed-out SDK flush can finish in its worker; never block the event loop.
+            await asyncio.wait_for(
+                asyncio.to_thread(self._client.flush), timeout=FLUSH_TIMEOUT_SECONDS
+            )
+        except Exception:
+            self._warn("Decisions tracking flush failed or timed out; crawling continues.")

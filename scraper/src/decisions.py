@@ -155,7 +155,7 @@ class OpenAIDecisionProvider:
         finally:
             self._client = None
             self._opened = False
-            self._tracker.finish()
+            await self._tracker.aclose()
 
     @property
     def decision_tracking(self) -> DecisionTrackingReference | None:
