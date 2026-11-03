@@ -1,18 +1,20 @@
 """Look up what a research run's OpenAI calls cost, as recorded in Langfuse.
 
-The analyzer records each call in Langfuse under "run-{id}:{step}". The
-Observations V2 API reads them back in real time, but Langfuse can take a few
-minutes to ingest a call's cost, so callers wait before looking it up.
+The analyzer names each call "{prefix}:{step}" and the backend picks the prefix,
+so run 42 for Vanta records "run-42:vanta:extraction", "run-42:vanta:analysis"
+and "run-42:comparison". The Observations V2 API reads them back in real time,
+but Langfuse can take a few minutes to ingest a call's cost, so callers wait
+before looking it up.
 """
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-RUN_STEPS = ("extraction", "analysis", "comparison")
 REQUEST_TIMEOUT_SECONDS = 30.0
 MAX_PAGES_PER_NAME = 10
 DEFAULT_BASE_URL = "https://cloud.langfuse.com"  # the Langfuse SDK's default
@@ -27,8 +29,25 @@ class CallCost:
     usd: float | None
 
 
-def run_call_names(run_id: int) -> list[str]:
-    return [f"run-{run_id}:{step}" for step in RUN_STEPS]
+def company_slug(company_name: str) -> str:
+    """Lowercase, with anything but letters and digits as "-" ("Vanta Inc." -> "vanta-inc")."""
+    return re.sub(r"[^a-z0-9]+", "-", company_name.lower()).strip("-") or "company"
+
+
+def run_trace_prefix(run_id: int, company_name: str | None = None) -> str:
+    """"run-42:vanta" for a competitor's own calls; "run-42" for the comparison of all of them."""
+    if company_name is None:
+        return f"run-{run_id}"
+    return f"run-{run_id}:{company_slug(company_name)}"
+
+
+def run_call_names(run_id: int, company_name: str) -> list[str]:
+    competitor_prefix = run_trace_prefix(run_id, company_name)
+    return [
+        f"{competitor_prefix}:extraction",
+        f"{competitor_prefix}:analysis",
+        f"{run_trace_prefix(run_id)}:comparison",
+    ]
 
 
 def _langfuse_settings() -> Any | None:

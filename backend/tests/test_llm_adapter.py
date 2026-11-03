@@ -78,7 +78,7 @@ def test_analyze_uses_real_llm_schemas(fake_client):
     }
 
     result = asyncio.run(
-        OpenAIAdapter().analyze(scraped, get_scadable_baseline(), trace_prefix="run-42")
+        OpenAIAdapter().analyze(scraped, get_scadable_baseline(), trace_prefix="run-42:vanta")
     )
 
     # A schema mismatch makes analyze() fall back to the mock, which has no "mode"
@@ -90,8 +90,8 @@ def test_analyze_uses_real_llm_schemas(fake_client):
         "source_url": "https://vanta.com/features",
     } in result["swot_entries"]
     # Calls are named for cost lookups, and the run records which ones it made
-    assert client.observation_names == ["run-42:extraction", "run-42:analysis"]
-    assert result["llm_calls"] == ["run-42:extraction", "run-42:analysis"]
+    assert client.observation_names == ["run-42:vanta:extraction", "run-42:vanta:analysis"]
+    assert result["llm_calls"] == ["run-42:vanta:extraction", "run-42:vanta:analysis"]
     assert client.closed
 
 
@@ -112,11 +112,11 @@ def test_analyze_fallback_keeps_paid_calls(fake_client):
     }
 
     result = asyncio.run(
-        OpenAIAdapter().analyze(scraped, get_scadable_baseline(), trace_prefix="run-42")
+        OpenAIAdapter().analyze(scraped, get_scadable_baseline(), trace_prefix="run-42:vanta")
     )
 
     assert result.get("mode") is None  # fell back to the mock
-    assert result["llm_calls"] == ["run-42:extraction", "run-42:analysis"]
+    assert result["llm_calls"] == ["run-42:vanta:extraction", "run-42:vanta:analysis"]
 
 
 def test_compare_uses_real_llm_schemas(fake_client):

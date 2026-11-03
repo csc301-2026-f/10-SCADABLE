@@ -47,6 +47,7 @@ from app.services.costs import (
     fetch_call_costs,
     is_cost_tracking_configured,
     run_call_names,
+    run_trace_prefix,
 )
 from app.services.crawler import CrawlerProtocol, get_default_crawler
 from app.services.diff import has_content_changed
@@ -58,10 +59,6 @@ logger = logging.getLogger(__name__)
 COST_LOOKUP_DELAY_SECONDS = float(os.getenv("LANGFUSE_COST_DELAY_SECONDS", "300"))
 COST_LOOKUP_ATTEMPTS = 2
 
-
-def _trace_prefix(run_id: int) -> str:
-    """Names a run's OpenAI calls in Langfuse ("run-42:analysis") so their cost can be found."""
-    return f"run-{run_id}"
 
 
 def _get_previous_completed_run(
@@ -302,7 +299,7 @@ async def execute_research_run(
                 active_analyzer,
                 timeout_seconds,
                 only_if_missing=True,
-                trace_prefix=_trace_prefix(run_id),
+                trace_prefix=run_trace_prefix(run_id),
             )
             return completed_run
 
@@ -311,7 +308,9 @@ async def execute_research_run(
         logger.info("Invoking LLM SWOT synthesis for %s", competitor.name)
         analysis_result = await asyncio.wait_for(
             active_analyzer.analyze(
-                scraped_data, baseline_profile, trace_prefix=_trace_prefix(run_id)
+                scraped_data,
+                baseline_profile,
+                trace_prefix=run_trace_prefix(run_id, competitor.name),
             ),
             timeout=timeout_seconds,
         )
@@ -337,7 +336,7 @@ async def execute_research_run(
 
         # Step 9: Refresh SCADABLE's overall SWOT now that this competitor changed
         await refresh_overall_swot(
-            db, active_analyzer, timeout_seconds, trace_prefix=_trace_prefix(run_id)
+            db, active_analyzer, timeout_seconds, trace_prefix=run_trace_prefix(run_id)
         )
         return updated_run
 
@@ -373,12 +372,15 @@ async def record_run_cost(db: Session, run_id: int, final: bool = True) -> bool:
         # Deleted with its competitor before the lookup
         return True
 
-    costs = await fetch_call_costs(run_call_names(run_id))
+    analysis = run.analysis_result if isinstance(run.analysis_result, dict) else {}
+    made = [name for name in analysis.get("llm_calls", []) if isinstance(name, str)]
+    # The names the run recorded, plus rebuilt ones for runs that failed before recording any
+    names = list(dict.fromkeys(made + run_call_names(run_id, run.competitor.name)))
+
+    costs = await fetch_call_costs(names)
     if costs is None:
         return True
 
-    analysis = run.analysis_result if isinstance(run.analysis_result, dict) else {}
-    made = [name for name in analysis.get("llm_calls", []) if isinstance(name, str)]
     missing = [name for name in made if name not in costs or costs[name].found == 0]
     if missing and not final:
         logger.info("Cost for run %s not in Langfuse yet (%s); retrying later", run_id, missing)
