@@ -7,8 +7,9 @@ Add Competitor -> Trigger Crawler -> Diff Snapshot -> Invoke LLM -> Persist to D
 
 import asyncio
 import logging
+import os
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import BackgroundTasks
@@ -42,11 +43,25 @@ from app.db.repository import (
     save_swot_entries,
     update_research_run_status,
 )
+from app.services.costs import (
+    fetch_call_costs,
+    is_cost_tracking_configured,
+    run_call_names,
+)
 from app.services.crawler import CrawlerProtocol, get_default_crawler
 from app.services.diff import has_content_changed
 from app.services.llm import AnalyzerProtocol, get_default_analyzer
 
 logger = logging.getLogger(__name__)
+
+# Langfuse can take a few minutes to ingest a call's cost
+COST_LOOKUP_DELAY_SECONDS = float(os.getenv("LANGFUSE_COST_DELAY_SECONDS", "300"))
+COST_LOOKUP_ATTEMPTS = 2
+
+
+def _trace_prefix(run_id: int) -> str:
+    """Names a run's OpenAI calls in Langfuse ("run-42:analysis") so their cost can be found."""
+    return f"run-{run_id}"
 
 
 def _get_previous_completed_run(
@@ -104,8 +119,11 @@ async def refresh_overall_swot(
     analyzer: AnalyzerProtocol,
     timeout_seconds: float = 90.0,
     only_if_missing: bool = False,
+    trace_prefix: str | None = None,
 ) -> None:
     """Compare SCADABLE against every researched competitor and save the overall SWOT.
+
+    trace_prefix names the comparison's OpenAI call for cost lookups ("run-42").
 
     Uses each competitor's latest stored strengths and weaknesses, so it makes
     one LLM call and never re-crawls. The comparison also scores each competitor's
@@ -163,7 +181,7 @@ async def refresh_overall_swot(
 
         logger.info("Comparing SCADABLE against %d competitors", len(profiles))
         comparison = await asyncio.wait_for(
-            analyzer.compare(get_scadable_baseline(), profiles),
+            analyzer.compare(get_scadable_baseline(), profiles, trace_prefix=trace_prefix),
             timeout=timeout_seconds,
         )
         overall_entries = comparison.get("swot_entries", [])
@@ -280,7 +298,11 @@ async def execute_research_run(
             completed_run = update_research_run_status(db, run_id, ResearchStatus.COMPLETED)
             # Nothing changed, so only compare if no overall SWOT exists yet
             await refresh_overall_swot(
-                db, active_analyzer, timeout_seconds, only_if_missing=True
+                db,
+                active_analyzer,
+                timeout_seconds,
+                only_if_missing=True,
+                trace_prefix=_trace_prefix(run_id),
             )
             return completed_run
 
@@ -288,7 +310,9 @@ async def execute_research_run(
         baseline_profile = get_scadable_baseline()
         logger.info("Invoking LLM SWOT synthesis for %s", competitor.name)
         analysis_result = await asyncio.wait_for(
-            active_analyzer.analyze(scraped_data, baseline_profile),
+            active_analyzer.analyze(
+                scraped_data, baseline_profile, trace_prefix=_trace_prefix(run_id)
+            ),
             timeout=timeout_seconds,
         )
 
@@ -312,7 +336,9 @@ async def execute_research_run(
         logger.info("Successfully completed research run %s for %s", run_id, competitor.name)
 
         # Step 9: Refresh SCADABLE's overall SWOT now that this competitor changed
-        await refresh_overall_swot(db, active_analyzer, timeout_seconds)
+        await refresh_overall_swot(
+            db, active_analyzer, timeout_seconds, trace_prefix=_trace_prefix(run_id)
+        )
         return updated_run
 
     except asyncio.TimeoutError:
@@ -333,6 +359,66 @@ async def execute_research_run(
             ResearchStatus.FAILED,
             error_message="Research failed due to an internal error.",
         )
+
+
+async def record_run_cost(db: Session, run_id: int, final: bool = True) -> bool:
+    """Save the cost of a run's OpenAI calls from Langfuse on its analysis_result.
+
+    Looks up the run's extraction, analysis and comparison calls. Returns False,
+    without saving, if a call the run made isn't in Langfuse yet and this isn't
+    the final attempt; the final attempt saves what it found as incomplete.
+    """
+    run = get_research_run(db, run_id)
+    if run is None:
+        # Deleted with its competitor before the lookup
+        return True
+
+    costs = await fetch_call_costs(run_call_names(run_id))
+    if costs is None:
+        return True
+
+    analysis = run.analysis_result if isinstance(run.analysis_result, dict) else {}
+    made = [name for name in analysis.get("llm_calls", []) if isinstance(name, str)]
+    missing = [name for name in made if name not in costs or costs[name].found == 0]
+    if missing and not final:
+        logger.info("Cost for run %s not in Langfuse yet (%s); retrying later", run_id, missing)
+        return False
+
+    found = {name: cost for name, cost in costs.items() if cost.found}
+    unpriced = [name for name, cost in found.items() if cost.usd is None]
+
+    # Re-read so scores saved by a comparison in the meantime aren't overwritten
+    db.refresh(run)
+    latest = run.analysis_result if isinstance(run.analysis_result, dict) else {}
+    save_analysis_result(db, run_id, {
+        **latest,
+        "cost": {
+            "usd": round(sum(cost.usd for cost in found.values() if cost.usd is not None), 6),
+            "calls": {name: cost.usd for name, cost in found.items()},
+            # False when a call is missing from Langfuse or has no price
+            "complete": not missing and not unpriced,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        },
+    })
+    return True
+
+
+async def _record_cost_later(session_factory: sessionmaker[Session], run_id: int) -> None:
+    """Wait for Langfuse to ingest the run's calls, then save their cost.
+
+    A server restart during the wait loses the lookup; the run then has no cost.
+    """
+    if not is_cost_tracking_configured():
+        return
+    for attempt in range(COST_LOOKUP_ATTEMPTS):
+        await asyncio.sleep(COST_LOOKUP_DELAY_SECONDS)
+        final = attempt == COST_LOOKUP_ATTEMPTS - 1
+        try:
+            with session_factory() as db:
+                if await record_run_cost(db, run_id, final=final):
+                    return
+        except Exception:
+            logger.exception("Cost lookup for run %s failed", run_id)
 
 
 def trigger_research_task(
@@ -361,6 +447,8 @@ def trigger_research_task(
                 analyzer=analyzer,
                 timeout_seconds=timeout_seconds,
             )
+        # Also for failed runs: a timeout can still leave paid calls behind
+        await _record_cost_later(session_factory, target_run_id)
 
     background_tasks.add_task(_async_worker, run.id)
     return run
