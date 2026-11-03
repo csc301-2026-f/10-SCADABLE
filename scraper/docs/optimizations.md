@@ -51,3 +51,12 @@ method, not source snippets. Batching measures the complete request including
 hints and instructions. The scoring call remains `score_candidates(candidates)`;
 custom providers can omit this optional capability. Concrete relevance and the
 configured objective remain primary; gaps guide similarly useful choices only.
+
+
+`selection.coverage_enabled=True` activates native-provider hints at existing
+scoring checkpoints, versioned as `company-research-v3`. Disabling it restores
+candidate payloads and usage version `company-research-v2`. Custom providers
+without the optional setter retain previous behavior. Structural and BFS ordering
+is unchanged. Coverage/link changes share one refresh allowance per candidate;
+after two evaluations its last score is retained. Ranking remains 70% relevance,
+20% section diversity and 10% novelty, with existing exploration and fetch caps.

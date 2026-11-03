@@ -208,3 +208,18 @@ def test_in_flight_alias_remains_an_attempt_and_first_representative_wins():
     value.complete(str(reserved.normalized_url), success=True)
     assert value.attempted_pages == 2
     assert value.get("https://example.com/alias").disposition == "crawled"
+
+
+def test_coverage_changes_share_existing_single_refresh_allowance():
+    from scraper.coverage import CoverageContext
+
+    value = frontier()
+    value.discover("/candidate")
+    score_all(value)
+    pricing = CoverageContext.from_summary({"topics": {"pricing": {"state": "indicated"}}})
+    value.set_coverage_context(pricing)
+    assert len(score_all(value)) == 1
+    value.set_coverage_context(CoverageContext.from_summary({"topics": {}}))
+    value.discover("/candidate", observation=CandidateObservation(anchor_text="New context"))
+    assert value.evaluation_candidates() == []
+    assert value.get("https://example.com/candidate").relevance_score == 0.9

@@ -55,7 +55,7 @@ def test_custom_objective_replaces_default_in_both_stages_without_rewriting_evid
 
 def test_new_usage_is_versioned_but_historical_prompt_versions_remain_readable():
     current = DecisionUsageSummary(requested_mode="llm", effective_mode="llm", budget_usd=0.03)
-    assert current.prompt_version == "company-research-v2"
+    assert current.prompt_version == "company-research-v3"
     historical = current.model_dump()
     historical["prompt_version"] = "company-research-v1"
     assert DecisionUsageSummary.model_validate(historical).prompt_version == "company-research-v1"

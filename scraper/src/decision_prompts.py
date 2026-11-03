@@ -83,6 +83,8 @@ def candidate_request(
     settings: SelectionConfig,
     coverage_context: CoverageContext | None = None,
 ) -> dict:
+    if not settings.coverage_enabled:
+        coverage_context = None
     return {
         "model": settings.model,
         "input": json.dumps(

@@ -7,6 +7,7 @@ from math import floor
 from urllib.parse import urlsplit
 
 from ..config import ScraperConfig
+from ..coverage import CoverageContext
 from ..decision_models import (
     CandidateObservation,
     CandidateScore,
@@ -48,6 +49,7 @@ class UrlFrontier:
         self._section_attempts = Counter()
         self._section_novelty: dict[tuple, list[float]] = {}
         self._final_urls: dict[str, str] = {}
+        self._coverage_state: tuple = ()
         self.discover(homepage, depth=0, source="homepage", depth_basis="homepage")
 
     @property
@@ -231,15 +233,20 @@ class UrlFrontier:
             raise ValueError("Unknown selection mode")
         self._mode = mode
 
-    @staticmethod
-    def _context(observations):
-        return tuple(
-            sorted(
-                {
-                    (item.anchor_text.casefold(), item.surrounding_text.casefold())
-                    for item in observations
-                }
-            )
+    def set_coverage_context(self, context: CoverageContext) -> None:
+        self._coverage_state = context.states
+
+    def _context(self, observations):
+        return (
+            self._coverage_state,
+            tuple(
+                sorted(
+                    {
+                        (item.anchor_text.casefold(), item.surrounding_text.casefold())
+                        for item in observations
+                    }
+                )
+            ),
         )
 
     def evaluation_candidates(self, limit: int = 50) -> list[DecisionCandidate]:

@@ -16,7 +16,7 @@ from scraper.discovery.http import RequestBlocked
 from scraper.interfaces import DiscoveryBatch
 from scraper.models import DiscoveredLink
 from scraper.service import CompetitorScraper
-from scraper.types import utc_now
+from scraper.types import PageCategory, utc_now
 
 
 class Fetcher:
@@ -633,3 +633,58 @@ async def test_only_successful_nonempty_observed_redirects_suppress_pending_targ
     target = next(item for item in run.discovered_urls if str(item.url).endswith("/target"))
     assert (target.reason == "duplicate_redirect:https://example.com/") is skip
     assert len(fetcher.requested) == (1 if skip else 2)
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_coverage_context_changes_only_at_existing_checkpoints(enabled):
+    paths = [f"/items/{i}" for i in range(10)]
+    fetcher = Fetcher(
+        {
+            "https://example.com/": page(links=paths),
+            **{"https://example.com" + path: page(path) for path in paths},
+        }
+    )
+
+    class CoverageDecisions(Decisions):
+        def __init__(self):
+            super().__init__(fetcher)
+            self.contexts = []
+            self.times = []
+
+        def set_coverage_context(self, context):
+            self.contexts.append(context)
+            self.times.append(len(fetcher.requested))
+
+        async def assess_content(self, source, ledger=()):
+            assessment = await super().assess_content(source, ledger)
+            return assessment.model_copy(
+                update={
+                    "category": PageCategory.PRICING
+                    if len(self.assessed) == 2
+                    else assessment.category
+                }
+            )
+
+    decisions = CoverageDecisions()
+    await DiscoveryCrawler(
+        fetcher, Sitemaps(), robots_guard=Guard(), decision_provider=decisions
+    ).run(
+        CompetitorInput(homepage_url="https://example.com"),
+        ScraperConfig(
+            max_pages=8,
+            selection={"coverage_enabled": enabled},
+            max_concurrency=4,
+            per_domain_concurrency=4,
+            request_delay_seconds=(0.0, 0.0),
+        ),
+    )
+    if enabled:
+        assert decisions.times == [0, 1, 6]
+        assert decisions.contexts[-1].as_prompt()["indicated"] == ["products_services", "pricing"]
+        from collections import Counter
+
+        assert (
+            max(Counter(c.candidate_id for batch in decisions.scored for c in batch).values()) == 2
+        )
+    else:
+        assert decisions.contexts == []

@@ -488,3 +488,16 @@ async def test_native_provider_accepts_optional_coverage_without_changing_score_
     async with provider:
         await provider.score_candidates([candidate()])
     assert json.loads(client.calls[0]["input"])["coverage_hints"]["indicated"] == ["pricing"]
+
+
+async def test_coverage_opt_out_preserves_previous_payload_and_prompt_version():
+    from scraper.coverage import CoverageContext
+
+    client = StubClient([response(score("candidate_0"))])
+    settings = SelectionConfig(coverage_enabled=False)
+    provider = OpenAIDecisionProvider(settings, client_factory=client.factory)
+    provider.set_coverage_context(CoverageContext.from_summary({"topics": {}}))
+    async with provider:
+        await provider.score_candidates([candidate()])
+    assert client.calls[0] == candidate_request([candidate()], settings)
+    assert provider.summary.prompt_version == "company-research-v2"

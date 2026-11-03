@@ -38,6 +38,7 @@ class SelectionConfig(ContractModel):
     budget_usd: Annotated[float, Field(strict=True, ge=0)] = 0.03
     exploration_fraction: Annotated[float, Field(strict=True, ge=0, le=1)] = 0.20
     trace_enabled: StrictBool = False
+    coverage_enabled: StrictBool = True
     timeout_seconds: PositiveSeconds = 15.0
     max_retries: NonNegativeInt = 2
     max_concurrency: PositiveInt = 2

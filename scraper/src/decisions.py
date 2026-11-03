@@ -155,6 +155,9 @@ class OpenAIDecisionProvider:
     @property
     def summary(self) -> DecisionUsageSummary:
         return DecisionUsageSummary(
+            prompt_version="company-research-v3"
+            if self.settings.coverage_enabled
+            else "company-research-v2",
             requested_mode=self.settings.mode,
             effective_mode=self._effective_mode,
             budget_usd=self.settings.budget_usd,
@@ -303,7 +306,7 @@ class OpenAIDecisionProvider:
         if len(ids) != len(set(ids)):
             raise ValueError("Decision candidate IDs must be unique")
         result = []
-        context = self._coverage_context
+        context = self._coverage_context if self.settings.coverage_enabled else None
         for batch in candidate_batches(candidates, self.settings, context):
             answers = await self._request(
                 candidate_request(batch, self.settings, context), "candidates"
