@@ -27,7 +27,7 @@ from .decision_models import (
     UnitScore,
 )
 from .decision_prompts import candidate_batches, candidate_request, content_request
-from .decision_tracking import DecisionTracker, DecisionTrackingContext
+from .decision_tracking import DecisionTracker, DecisionTrackingContext, DecisionTrackingReference
 from .reliability import TRANSIENT_STATUSES, parse_retry_after
 from .types import PageCategory
 
@@ -156,6 +156,10 @@ class OpenAIDecisionProvider:
             self._client = None
             self._opened = False
             self._tracker.finish()
+
+    @property
+    def decision_tracking(self) -> DecisionTrackingReference | None:
+        return self._tracker.reference
 
     @property
     def summary(self) -> DecisionUsageSummary:

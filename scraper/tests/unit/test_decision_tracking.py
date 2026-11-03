@@ -4,6 +4,7 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import httpx2
 import pytest
 from openai import APIConnectionError, APIStatusError
@@ -236,3 +237,73 @@ async def test_undispatched_requests_have_no_generations(monkeypatch, telemetry,
         assert await provider._request(payload, "candidates") is None
     assert len(telemetry[0].observations) == 1
     openai.decisions.create.assert_not_awaited()
+
+
+async def test_service_propagates_context_and_separates_concurrent_crawls(monkeypatch, telemetry):
+    from scraper import CompetitorInput, FetchedPage, ScraperConfig, decisions
+    from scraper.service import CompetitorScraper
+    from scraper.types import utc_now
+
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
+    original = decisions.OpenAIDecisionProvider
+
+    async def answer(**payload):
+        return {"answers": [
+            {"name": q["name"], "type": q["type"], "confidence": 0.9,
+             **({"score": 2.0} if q["type"] == "score" else {"choice": "features"})}
+            for q in payload["questions"]
+        ], "usage": {"input_tokens": 10}}
+
+    clients = []
+
+    def provider(settings, **kwargs):
+        client = sdk([])
+        client.decisions.create = AsyncMock(side_effect=answer)
+        clients.append(client)
+        return original(settings, client_factory=lambda **_: client, **kwargs)
+
+    class Fetcher:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def fetch(self, url, settings):
+            return FetchedPage(
+                source_url=url, crawl_timestamp=utc_now(), crawl_status="success",
+                raw_markdown="# Features\nConcrete evidence.",
+            )
+
+    contexts = {}
+
+    def context_for(competitor):
+        context = tracking.DecisionTrackingContext(research_run_id=competitor.display_name)
+        contexts[competitor.display_name] = context
+        return context
+
+    monkeypatch.setattr(decisions, "OpenAIDecisionProvider", provider)
+    service = CompetitorScraper(
+        fetcher_factory=lambda *_: Fetcher(),
+        http_transport=httpx.MockTransport(lambda req: httpx.Response(
+            200, text="User-agent: *\nAllow: /\n"
+        ) if req.url.path == "/robots.txt" else httpx.Response(404)),
+        decision_tracking_context_factory=context_for,
+    )
+    settings = ScraperConfig(max_pages=1, request_delay_seconds=(0.0, 0.0))
+    results = [r async for r in service.crawl_many([
+        CompetitorInput(homepage_url="https://one.example"),
+        CompetitorInput(homepage_url="https://two.example"),
+    ], settings)]
+    assert len(contexts) == 2
+    assert len({r.decision_tracking.crawl_id for r in results}) == 2
+    assert len({r.decision_tracking.trace_id for r in results}) == 2
+    for result in results:
+        reference = result.decision_tracking
+        assert reference.crawl_id == contexts[result.competitor_name].crawl_id
+        assert reference.research_run_id == result.competitor_name
+        assert reference.finished_at >= reference.started_at
+        assert "decision_tracking" not in result.model_dump()
+        assert "decision_tracking" not in result.model_json_schema()["properties"]
+        assert result.summary.successful == 1
+    assert all(c.close.await_count == 1 for c in clients)
