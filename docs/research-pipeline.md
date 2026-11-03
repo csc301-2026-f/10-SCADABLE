@@ -212,7 +212,10 @@ completion markers, provenance, and no-overwrite behavior.
 Each company costs two model calls (extraction and analysis); the comparison adds one call over
 all companies. With Langfuse keys set, `OpenAIClient` records each of these calls as a Langfuse
 generation with its token usage, and Langfuse computes the cost in USD. The scraper's
-Decisions calls do not go through this client and are not included.
+Decisions calls do not go through this client. With `scraper[langfuse]` installed, the
+scraper records them separately using the same Langfuse environment settings; see the
+[Decisions tracking guide](../scraper/docs/decision-cost-tracking.md) for correlation
+references and backend cost-retrieval responsibilities.
 
 ## Failure handling and current limits
 

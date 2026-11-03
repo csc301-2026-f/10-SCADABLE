@@ -167,6 +167,10 @@ Official references, verified October 18, 2026:
 
 ## Review without paid requests
 
+For optional metadata-only Langfuse recording, see
+[Decisions cost tracking](decision-cost-tracking.md). It records dispatched attempts
+independently of the local diagnostic trace and preserves the existing budget estimates.
+
 From the `scraper` directory, use the existing project environment:
 
 ```powershell
