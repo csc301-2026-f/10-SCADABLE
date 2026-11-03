@@ -72,7 +72,7 @@ from llm.inputs import load_analysis_input
 
 settings = ScraperConfig(
     markdown_remove_boilerplate=False,  # consent/clone cleanup only
-    deduplicate_pages=False,           # crawler alias and assessment reuse only
+    deduplicate_pages=False,  # crawler alias and assessment reuse only
     selection={"coverage_enabled": False},
 )
 analysis = load_analysis_input("bundle/example.com/crawl_summary.json", deduplicate=False)
