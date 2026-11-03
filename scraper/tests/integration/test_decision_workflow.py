@@ -277,3 +277,78 @@ async def test_fallback_exports_successes_usage_warning_and_optional_trace(
     else:
         assert len(attempts) == usage.request_count == 0 and trace == ""
     assert "sensitive upstream detail" not in trace
+
+
+async def test_cleanup_duplicate_reuse_and_coverage_share_the_exported_body(monkeypatch, tmp_path):
+    from scraper.crawl4ai_adapter import build_run_config
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-a-real-key")
+
+    class CleanedScenario(Scenario):
+        def __init__(self):
+            super().__init__()
+            self.original_html = {}
+            self.pages = {path: {"candidate_score": 3} for path in ("/a", "/b")}
+
+        def document(self, path):
+            return {"usefulness": 2, "novelty": 3, "category": "pricing"}
+
+        def rendered(self, path):
+            links = ("/a", "/b") if path == "/" else ("/extra",)
+            source = (
+                f'<div id="onetrust-banner-sdk">Consent variant {path}</div>'
+                + "<nav>"
+                + "".join(f'<a href="{link}">Page</a>' for link in links)
+                + "</nav>"
+                + "<h1>Plans</h1><p>Pro $49 monthly, annual billing only.</p>"
+            )
+            self.original_html[path] = source
+            markdown = (
+                build_run_config(ScraperConfig())
+                .markdown_generator.generate_markdown(source, base_url=self.base)
+                .raw_markdown
+            )
+            return FetchedPage(
+                source_url=self.base + path,
+                crawl_timestamp=utc_now(),
+                crawl_status="success",
+                raw_html=source,
+                raw_markdown=markdown,
+                links=[DiscoveredLink(url=self.base + link) for link in links],
+            )
+
+        def documents(self, request):
+            return (
+                httpx.Response(200, text="User-agent: *")
+                if request.url.path == "/robots.txt"
+                else httpx.Response(404)
+            )
+
+    scenario = CleanedScenario()
+    result = await scenario.service().crawl(
+        CompetitorInput(homepage_url=scenario.base),
+        ScraperConfig(
+            max_pages=3,
+            max_concurrency=2,
+            per_domain_concurrency=2,
+            request_delay_seconds=(0.0, 0.0),
+        ),
+    )
+    assert len(result.pages) == 3
+    assert len({p.cleaned_markdown for p in result.pages}) == 1
+    assert len(scenario.original_html) == 3
+    assert all("Consent variant" in source for source in scenario.original_html.values())
+    assert len(scenario.ledgers) == 1
+    assert result.decision_usage.request_count == len(scenario.api_calls) == 2
+    assert result.decision_usage.reported_input_tokens == 200
+    candidate_call = next(
+        call for call in scenario.api_calls if "candidates" in json.loads(call["input"])
+    )
+    assert json.loads(candidate_call["input"])["coverage_hints"]["indicated"] == ["pricing"]
+    summary = export_competitor(result, tmp_path)
+    folder = tmp_path / "example.com"
+    assert len(list((folder / "pages").rglob("*.md"))) == len(summary.pages) == 3
+    diagnostics = json.loads((folder / "crawl_diagnostics.json").read_text())
+    assert len(diagnostics["body_duplicates"]) == 2
+    assert len(diagnostics["coverage"]["topics"]["pricing"]["sources"]) == 1
+    assert any(str(record.url).endswith("/extra") for record in result.discovered_urls)

@@ -52,7 +52,7 @@ def test_seven_topic_mapping_is_explicit_approximation(category, topics):
         (None, "unknown"),
     ],
 )
-def test_usefulness_boundary_and_missing_usage(score, state):
+def test_usefulness_boundary_and_missing_assessment(score, state):
     assert coverage_summary([page(usefulness=score)])["topics"]["pricing"]["state"] == state
 
 

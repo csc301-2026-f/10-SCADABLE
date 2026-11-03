@@ -688,3 +688,37 @@ async def test_coverage_context_changes_only_at_existing_checkpoints(enabled):
         )
     else:
         assert decisions.contexts == []
+
+
+async def test_parallel_duplicate_representative_uses_dispatch_order():
+    fetcher_pages = {
+        "https://example.com/": page(links=("/a", "/b")),
+        **{
+            "https://example.com" + path: page(path).model_copy(
+                update={"raw_markdown": "Same body"}
+            )
+            for path in ("/a", "/b")
+        },
+    }
+
+    class ReverseCompletion(Fetcher):
+        async def fetch(self, url, settings):
+            if str(url).endswith("/a"):
+                await asyncio.sleep(0.01)
+            return await super().fetch(url, settings)
+
+    fetcher = ReverseCompletion(fetcher_pages)
+    decisions = Decisions(fetcher)
+    run = await DiscoveryCrawler(
+        fetcher, Sitemaps(), robots_guard=Guard(), decision_provider=decisions
+    ).run(
+        CompetitorInput(homepage_url="https://example.com"),
+        ScraperConfig(
+            max_pages=3,
+            max_concurrency=2,
+            per_domain_concurrency=2,
+            request_delay_seconds=(0.0, 0.0),
+        ),
+    )
+    assert decisions.assessed == ["https://example.com/", "https://example.com/a"]
+    assert run.fetched_pages[2].metadata["duplicate_of"] == "https://example.com/a"

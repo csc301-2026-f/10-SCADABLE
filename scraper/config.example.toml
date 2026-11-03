@@ -21,6 +21,9 @@ max_backoff_seconds = 30.0
 respect_robots_txt = true
 # Markdown-only cleanup: original links and rendered HTML remain available to discovery.
 markdown_remove_navigation_and_footer = true
+markdown_remove_boilerplate = true
+# Keep fetched artifacts; reuse exact-body assessments and skip known final targets.
+deduplicate_pages = true
 markdown_excluded_selectors = []
 
 [global.dynamic]
@@ -37,6 +40,8 @@ budget_usd = 0.03
 exploration_fraction = 0.20
 # Opt-in bounded evidence/answers in decisions.jsonl; not included in the normal summary.
 trace_enabled = false
+# Approximate category hints; no additional Decisions questions or coverage quotas.
+coverage_enabled = true
 timeout_seconds = 15.0
 max_retries = 2
 max_concurrency = 2

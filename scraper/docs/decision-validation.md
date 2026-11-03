@@ -74,7 +74,8 @@ To evaluate `company-research-v2` against `v1` in a separately authorized experi
   does not guarantee better live selection; scripted answers cannot establish that claim.
 
 Keep ranking weights and budgets fixed initially so changes can be attributed to prompts.
-Coverage-aware selection and downstream schema/persistence improvements are separate work.
+Coverage hints are now included in `v3`; downstream schema/persistence improvements
+remain separate work. See [optimization verification](optimizations.md#verification-and-comparison).
 
 ## Live comparison procedure
 

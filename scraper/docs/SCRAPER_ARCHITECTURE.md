@@ -302,6 +302,8 @@ merge; lists replace. Python callers use `ScraperConfig`/`SelectionConfig`; TOML
 | `max_sitemap_bytes` / `max_redirects` | `2097152` / `5` | Sitemap size and redirect bounds |
 | `allowed_domains` / `excluded_url_patterns` | `[]` / login, account, privacy, terms, etc. | Explicit extra hosts and URL exclusions |
 | `respect_robots_txt` / `user_agent` | `true` / `ScraperBot/0.1` | Robots compliance is mandatory; crawler identity |
+| `markdown_remove_boilerplate` / `deduplicate_pages` | `true` / `true` | Conservative consent/clone cleanup and exact-body assessment reuse; [controls](optimizations.md) |
+| `selection.coverage_enabled` | `true` | Approximate topic hints at existing scoring checkpoints; one shared refresh allowance |
 | `markdown_remove_navigation_and_footer` / `markdown_excluded_selectors` | `true` / `[]` | Markdown-only cleanup; explicit selectors for site-specific containers |
 | `dynamic` / `dynamic_rules` | No CSS wait; scanning off / `[]` | CSS readiness, bounded scrolling; first matching URL rule can add bounded load-more clicks |
 | `selection.mode` / `selection.model` | `llm` / `gpt-6-luna` | `structural` disables all decision calls; model is currently fixed by validation |

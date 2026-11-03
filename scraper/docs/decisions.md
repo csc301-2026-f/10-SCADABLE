@@ -32,8 +32,9 @@ operations. The application owns every URL choice, domain/robots check and crawl
 
 ## Research objective and usefulness rubrics
 
-Prompt version `company-research-v2` aligns collection with the downstream extraction
-contract. The shared default objective is:
+Prompt version `company-research-v3` adds bounded category-based coverage guidance to the
+`v2` evidence rubrics. See [optimization controls](optimizations.md). The objective aligns
+collection with the downstream extraction contract. The shared default objective is:
 
 > Find company-specific evidence about products and services, target customers, pricing,
 > integrations, differentiators, commercial activity, and careers or hiring. Favor concrete
@@ -82,7 +83,8 @@ location, and a text window around the anchor. No candidate probe requests are m
 Scoring runs after homepage/sitemap discovery, every five distinct attempts, or sooner when
 the scored queue empties. Batches end at those checkpoints, even with higher concurrency.
 At most 50 candidates per cycle are balanced across URL sections. Cached results refresh
-at most once when anchor/context evidence materially changes; identical text from another
+at most once when anchor/context evidence or approximate topic states materially change;
+these changes share one refresh allowance. Identical text from another
 parent does not consume that refresh. Refused/invalid answers leave a candidate unscored.
 
 BestFirst combines 70% model relevance, 20% section diversity, and 10% observed section
