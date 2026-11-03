@@ -37,6 +37,24 @@ export type ActivityItem = {
   detectedAt: string;
 };
 
+/** One side of a conflicting-data pair (claim text + page/source). */
+export type ConflictClaimSide = {
+  text: string;
+  sourceLabel: string;
+  sourceUrl?: string;
+};
+
+/**
+ * A claim and one or more disagreeing statements from other pages/sources.
+ * Shown on competitor profiles only when the list is non-empty.
+ */
+export type DataConflict = {
+  id: string;
+  claim: ConflictClaimSide;
+  /** One or more conflicting statements; UI bullets when length > 1. */
+  conflictsWith: ConflictClaimSide[];
+};
+
 export type CompetitorSummary = {
   id: string;
   name: string;
@@ -53,6 +71,8 @@ export type CompetitorProfile = CompetitorSummary & {
   recentActivity: ActivityItem[];
   openRoles: number | null;
   nextRefreshAt: string | null;
+  /** Optional; omit or [] when research found no conflicts. */
+  conflictingData?: DataConflict[];
   chartSeries: {
     scores: ScoreSeries[];
     activityOverTime: ChartPoint[];
@@ -62,6 +82,7 @@ export type CompetitorProfile = CompetitorSummary & {
 };
 
 export type SwotOverview = {
+  isStale?: boolean;
   updatedAt: string | null;
   strengths: Finding[];
   weaknesses: Finding[];

@@ -99,37 +99,46 @@ export default function OverviewPage() {
       <header>
         <h1 className={styles.title}>SWOT overview</h1>
         <p className={styles.sub}>
-          Findings across all tracked competitors · last updated{" "}
-          {data.updatedAt ? formatDate(data.updatedAt) : "Not yet"}
+          {data.isStale
+            ? "Overall SWOT needs refreshing"
+            : `Findings across all tracked competitors · last updated ${
+                data.updatedAt ? formatDate(data.updatedAt) : "Not yet"
+              }`}
         </p>
       </header>
 
-      <div className={styles.grid}>
-        {QUADRANTS.map(({ key, title }) => {
-          const items = data[key];
-          return (
-            <section
-              key={key}
-              className={`${styles.quadrant} ${styles[key]}`}
-              aria-labelledby={`${key}-heading`}
-            >
-              <div className={styles.qHead}>
-                <h2 id={`${key}-heading`}>{title}</h2>
-                <span className={styles.count}>{items.length}</span>
-              </div>
-              {items.length === 0 ? (
-                <p className={styles.empty}>No findings yet.</p>
-              ) : (
-                <ul className={styles.list}>
-                  {items.map((f) => (
-                    <FindingItem key={f.id} f={f} />
-                  ))}
-                </ul>
-              )}
-            </section>
-          );
-        })}
-      </div>
+      {data.isStale ? (
+        <p className={styles.state} role="status">
+          Overall SWOT is out of date. A successful comparison is needed to refresh these findings.
+        </p>
+      ) : (
+        <div className={styles.grid}>
+          {QUADRANTS.map(({ key, title }) => {
+            const items = data[key];
+            return (
+              <section
+                key={key}
+                className={`${styles.quadrant} ${styles[key]}`}
+                aria-labelledby={`${key}-heading`}
+              >
+                <div className={styles.qHead}>
+                  <h2 id={`${key}-heading`}>{title}</h2>
+                  <span className={styles.count}>{items.length}</span>
+                </div>
+                {items.length === 0 ? (
+                  <p className={styles.empty}>No findings yet.</p>
+                ) : (
+                  <ul className={styles.list}>
+                    {items.map((f) => (
+                      <FindingItem key={f.id} f={f} />
+                    ))}
+                  </ul>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      )}
     </main>
   );
 }

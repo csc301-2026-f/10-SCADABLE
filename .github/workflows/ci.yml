@@ -47,7 +47,7 @@ jobs:
 
       - name: Run backend tests
         working-directory: backend
-        run: python -m pytest tests/test_api.py tests/test_orchestrator.py -q
+        run: python -m pytest tests/test_api.py tests/test_orchestrator.py tests/test_overall_swot_review.py -q
 
   frontend:
     name: Frontend Lint

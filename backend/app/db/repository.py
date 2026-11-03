@@ -5,12 +5,13 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlsplit
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import (
     Competitor,
+    OverallSwotState,
     ResearchRun,
     ResearchStatus,
     SWOTCategory,
@@ -182,6 +183,7 @@ def create_competitor(
 
         raise
 
+    # Unresearched competitors do not affect a comparison of completed runs.
     _finish(db, commit, competitor)
     return competitor
 
@@ -231,7 +233,13 @@ def delete_competitor(
     if competitor is None:
         return False
 
+    had_completed_research = db.scalar(select(ResearchRun.id).where(
+        ResearchRun.competitor_id == competitor_id,
+        ResearchRun.status == ResearchStatus.COMPLETED,
+    ).limit(1)) is not None
     db.delete(competitor)
+    if had_completed_research:
+        mark_overall_swot_stale(db, commit=False)
     _finish(db, commit)
 
     return True
@@ -476,3 +484,96 @@ def get_overall_swot(db: Session) -> list[SWOTEntry]:
     )
 
     return list(db.scalars(stmt).all())
+
+
+# A single state row tracks which competitor-data revision produced the overall
+# SWOT. The upsert is safe if multiple workers initialize at the same time.
+def ensure_overall_swot_state(db: Session) -> None:
+    db.execute(text(
+        "INSERT INTO overall_swot_state (id, input_revision, published_revision) "
+        "VALUES (1, 0, -1) ON CONFLICT (id) DO NOTHING"
+    ))
+
+
+def get_overall_swot_revision(db: Session) -> int:
+    """Read, but never advance, the current input revision for a refresh."""
+    ensure_overall_swot_state(db)
+    # Query a scalar, not a possibly cached ORM state object.
+    return db.scalar(select(OverallSwotState.input_revision).where(OverallSwotState.id == 1))
+
+
+def is_overall_swot_current(db: Session) -> bool:
+    state = db.get(OverallSwotState, 1)
+    return state is not None and state.published_revision == state.input_revision
+
+
+def has_completed_research(db: Session) -> bool:
+    """An empty/new app is not an outdated comparison."""
+    return db.scalar(select(ResearchRun.id).where(
+        ResearchRun.status == ResearchStatus.COMPLETED
+    ).limit(1)) is not None
+
+
+def mark_overall_swot_stale(db: Session, commit: bool = True) -> int:
+    """Advance revision only when completed competitor input actually changes."""
+    ensure_overall_swot_state(db)
+    state = db.get(OverallSwotState, 1, with_for_update=True)
+    state.input_revision += 1
+    revision = state.input_revision
+    _finish(db, commit)
+    return revision
+
+
+def publish_overall_swot(
+    db: Session,
+    entries: Iterable[Mapping[str, Any]],
+    expected_revision: int,
+) -> bool:
+    """Atomically publish findings only if inputs have not changed meanwhile.
+
+    Also commits any pending per-competitor feature score updates. If a newer
+    research run or deletion invalidated the revision, discard this comparison.
+    """
+    ensure_overall_swot_state(db)
+    state = db.get(OverallSwotState, 1, with_for_update=True)
+    if state.input_revision != expected_revision:
+        db.rollback()
+        return False
+
+    replace_overall_swot(db, entries, commit=False)
+    state.published_revision = expected_revision
+    _finish(db, True)
+    return True
+
+
+def save_comparison_scores_if_current(
+    db: Session,
+    expected_revision: int,
+    scores_by_run: Mapping[int, list[dict[str, Any]]],
+    overall_entries: Iterable[Mapping[str, Any]] | None = None,
+) -> bool:
+    """Save only valid score updates on a matching revision.
+
+    If SWOT entries are supplied, publish them and scores atomically; a None
+    overall_entries value means an empty/failed SWOT result, so scores may be
+    saved but previously published SWOT remains stale.
+    """
+    ensure_overall_swot_state(db)
+    state = db.get(OverallSwotState, 1, with_for_update=True)
+    if state.input_revision != expected_revision:
+        db.rollback()
+        return False
+
+    for run_id, scores in scores_by_run.items():
+        run = db.get(ResearchRun, run_id)
+        if run is None or not scores:
+            continue
+        existing = run.analysis_result if isinstance(run.analysis_result, dict) else {}
+        run.analysis_result = {**existing, "scores": scores}
+
+    if overall_entries is not None:
+        replace_overall_swot(db, overall_entries, commit=False)
+        state.published_revision = expected_revision
+
+    _finish(db, True)
+    return True

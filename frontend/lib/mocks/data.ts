@@ -95,6 +95,43 @@ export const mockProfiles: Record<string, CompetitorProfile> = {
         detectedAt: "2026-09-20T12:00:00Z",
       },
     ],
+    conflictingData: [
+      {
+        id: "northstar-conflict-pricing",
+        claim: {
+          text: "Starts at $49/user/month",
+          sourceLabel: "Pricing page",
+          sourceUrl: "https://northstarlabs.example/pricing",
+        },
+        conflictsWith: [
+          {
+            text: "Enterprise plans from $99/user/month",
+            sourceLabel: "Sales FAQ",
+            sourceUrl: "https://northstarlabs.example/faq",
+          },
+          {
+            text: "Blog mentions free tier with no per-seat fee",
+            sourceLabel: "Product blog",
+            sourceUrl: "https://northstarlabs.example/blog/pricing",
+          },
+        ],
+      },
+      {
+        id: "northstar-conflict-roles",
+        claim: {
+          text: "Hiring 4 open engineering roles",
+          sourceLabel: "Careers",
+          sourceUrl: "https://northstarlabs.example/careers",
+        },
+        conflictsWith: [
+          {
+            text: "Team page lists 2 open roles",
+            sourceLabel: "Team page",
+            sourceUrl: "https://northstarlabs.example/team",
+          },
+        ],
+      },
+    ],
     recentActivity: [
       {
         id: "a1",

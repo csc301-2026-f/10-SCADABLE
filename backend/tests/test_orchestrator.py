@@ -17,6 +17,9 @@ from app.db.repository import (
     delete_competitor,
     get_latest_swot,
     get_overall_swot,
+    is_overall_swot_current,
+    mark_overall_swot_stale,
+    publish_overall_swot,
     get_research_run,
     save_analysis_result,
     save_swot_entries,
@@ -181,6 +184,14 @@ class CompareFailingAnalyzer(MockOpenAIAnalyzer):
         raise RuntimeError("Simulated comparison failure.")
 
 
+class EmptyComparisonAnalyzer(MockOpenAIAnalyzer):
+    """LLM comparison succeeded at transport level but yielded no findings."""
+
+    async def compare(self, baseline_context, competitors):
+        result = await super().compare(baseline_context, competitors)
+        return {**result, "swot_entries": []}
+
+
 # ---------------------------------------------------------------------------
 # Integration Tests requiring PostgreSQL test database
 # ---------------------------------------------------------------------------
@@ -297,6 +308,76 @@ if test_url:
         res2 = asyncio.run(execute_research_run(db, run2.id, crawler, analyzer))
         assert [e.id for e in get_overall_swot(db)] == overall_ids
         assert res2.analysis_result["scores"] == scores
+
+    def test_overall_swot_revision_starts_stale_and_becomes_current(db, competitor):
+        assert not is_overall_swot_current(db)
+        run = create_research_run(db, competitor.id)
+        asyncio.run(execute_research_run(
+            db, run.id, MockCrawl4AICrawler(), MockOpenAIAnalyzer()
+        ))
+        assert is_overall_swot_current(db)
+        assert get_overall_swot(db)
+
+    def test_failed_refresh_keeps_current_results_when_unchanged(db, competitor):
+        run = create_research_run(db, competitor.id)
+        asyncio.run(execute_research_run(
+            db, run.id, MockCrawl4AICrawler(), MockOpenAIAnalyzer()
+        ))
+        original = [e.id for e in get_overall_swot(db)]
+        assert is_overall_swot_current(db)
+
+        asyncio.run(refresh_overall_swot(db, CompareFailingAnalyzer()))
+        # Old records remain for recovery, but public routes must hide them.
+        assert [e.id for e in get_overall_swot(db)] == original
+        assert is_overall_swot_current(db)
+
+        # A good retry repopulates them and makes the overall view current again.
+        asyncio.run(refresh_overall_swot(db, MockOpenAIAnalyzer()))
+        assert is_overall_swot_current(db)
+        assert get_overall_swot(db)
+
+    def test_empty_refresh_keeps_current_results_when_unchanged(db, competitor):
+        run = create_research_run(db, competitor.id)
+        asyncio.run(execute_research_run(
+            db, run.id, MockCrawl4AICrawler(), MockOpenAIAnalyzer()
+        ))
+        assert is_overall_swot_current(db)
+
+        asyncio.run(refresh_overall_swot(db, EmptyComparisonAnalyzer()))
+        assert is_overall_swot_current(db)
+        assert get_overall_swot(db)  # preserved in storage, not served
+
+        # Unchanged re-run must retry if the overall result is stale even when
+        # old overall rows still exist.
+        rerun = create_research_run(db, competitor.id)
+        finished = asyncio.run(execute_research_run(
+            db, rerun.id, MockCrawl4AICrawler(), MockOpenAIAnalyzer()
+        ))
+        assert finished.analysis_result["skipped_llm"] is True
+        assert is_overall_swot_current(db)
+
+    def test_older_comparison_cannot_publish_after_newer_update(db, competitor):
+        revision = mark_overall_swot_stale(db)
+        mark_overall_swot_stale(db)
+        published = publish_overall_swot(db, [
+            {"category": "strength", "content": "Old comparison", "source_url": None}
+        ], revision)
+        assert published is False
+        assert not is_overall_swot_current(db)
+        assert get_overall_swot(db) == []
+
+    def test_deleting_competitor_invalidates_overall_immediately(db, competitor):
+        run = create_research_run(db, competitor.id)
+        asyncio.run(execute_research_run(
+            db, run.id, MockCrawl4AICrawler(), MockOpenAIAnalyzer()
+        ))
+        assert is_overall_swot_current(db)
+        delete_competitor(db, competitor.id)
+        assert not is_overall_swot_current(db)
+        assert get_overall_swot(db)
+        asyncio.run(refresh_overall_swot(db, MockOpenAIAnalyzer()))
+        assert is_overall_swot_current(db)
+        assert get_overall_swot(db) == []
 
     def test_execute_research_run_compare_failure_keeps_run_completed(db, competitor):
         run = create_research_run(db, competitor.id)
