@@ -18,6 +18,7 @@ import { toUserFacingError } from "@/lib/errors";
 import { displayWebsite, formatRelativePast } from "@/lib/format";
 import { profilePollInterval, runsPollInterval } from "@/lib/polling";
 import { latestSuccessfulRunForCompetitor } from "@/lib/runs/stats";
+import { ConflictingDataTable } from "./ConflictingDataTable";
 import { ProfileVisuals } from "./ProfileVisuals";
 import { ResearchStatusBanner } from "./ResearchStatusBanner";
 import styles from "./CompetitorProfile.module.css";
@@ -311,6 +312,10 @@ export function CompetitorProfileView({ id }: { id: string }) {
           </section>
         </div>
       </div>
+
+      {(data.conflictingData?.length ?? 0) > 0 ? (
+        <ConflictingDataTable conflicts={data.conflictingData ?? []} />
+      ) : null}
 
       <div className={styles.deleteBar}>
         <Button

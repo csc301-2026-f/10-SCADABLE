@@ -28,6 +28,7 @@ class FakeStore:
         self.runs: dict[int, SimpleNamespace] = {}
         self.entries: dict[int, list[SimpleNamespace]] = {}  # run_id -> entries
         self.overall: list[SimpleNamespace] = []
+        self.overall_current = False
         self.triggered: list[int] = []
         self.overall_refreshes = 0
 
@@ -104,6 +105,12 @@ class FakeStore:
     def get_overall_swot(self, db):
         return self.overall
 
+    def is_overall_swot_current(self, db):
+        return self.overall_current
+
+    def has_completed_research(self, db):
+        return any(run.status == ResearchStatus.COMPLETED for run in self.runs.values())
+
     def get_research_run(self, db, rid):
         return self.runs.get(rid)
 
@@ -126,7 +133,8 @@ def store(monkeypatch):
     fake = FakeStore()
     for name in (
         "get_competitor", "list_competitors", "create_competitor", "delete_competitor",
-        "get_latest_research_run", "get_latest_swot", "get_overall_swot", "get_research_run",
+        "get_latest_research_run", "get_latest_swot", "get_overall_swot",
+        "is_overall_swot_current", "has_completed_research", "get_research_run",
     ):
         monkeypatch.setattr(repo, name, getattr(fake, name))
     monkeypatch.setattr(runs_routes, "query_runs", fake.query_runs)
@@ -448,19 +456,25 @@ def test_list_runs_filter_and_errors(client, researched, store):
 # ---------------------------------------------------------------------------
 
 
-def test_swot_overview_combines_competitors(client, researched, store):
-    body = client.get("/swot/overview").json()
-    assert [len(body[k]) for k in ("strengths", "weaknesses", "opportunities", "threats")] == [
-        1, 1, 1, 1]
-    assert body["updatedAt"] == "2026-10-19T12:01:30Z"
+def test_swot_overview_never_falls_back_to_individual_competitor_swot(client, researched):
+    # A failed/unfinished overall comparison must not look like a current one.
+    for url in ("/swot", "/swot/overview"):
+        response = client.get(url)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["isStale"] is True
+        assert body["updatedAt"] is None
+        assert all(not body[key] for key in ("strengths", "weaknesses", "opportunities", "threats"))
 
 
 def test_swot_overview_prefers_overall(client, researched, store):
+    store.overall_current = True
     store.overall = [
         SimpleNamespace(id=99, category=SWOTCategory.STRENGTH, content="Overall strength",
                         source_url=None, created_at=T0)
     ]
     body = client.get("/swot/overview").json()
+    assert body["isStale"] is False
     assert [f["text"] for f in body["strengths"]] == ["Overall strength"]
     assert body["strengths"][0]["competitorName"] == "SCADABLE"
     assert body["threats"] == []
@@ -468,7 +482,19 @@ def test_swot_overview_prefers_overall(client, researched, store):
 
 def test_swot_overview_empty(client):
     assert client.get("/swot/overview").json() == {
-        "updatedAt": None, "strengths": [], "weaknesses": [], "opportunities": [], "threats": []}
+        "isStale": False, "updatedAt": None, "strengths": [], "weaknesses": [],
+        "opportunities": [], "threats": []}
+
+
+def test_swot_overview_hides_saved_findings_when_stale(client, researched, store):
+    store.overall = [
+        SimpleNamespace(id=99, category=SWOTCategory.STRENGTH, content="Old overall SWOT",
+                        source_url=None, created_at=T0)
+    ]
+    for url in ("/swot", "/swot/overview"):
+        body = client.get(url).json()
+        assert body["isStale"] is True
+        assert body["strengths"] == []
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    Integer,
     Enum,
     ForeignKey,
     Index,
@@ -135,6 +136,20 @@ class ResearchRun(Base):
             f"<ResearchRun id={self.id} competitor_id={self.competitor_id} "
             f"status={self.status.value}>"
         )
+
+
+class OverallSwotState(Base):
+    """Persistent freshness marker for SCADABLE's overall comparison.
+
+    A monotonically increasing input revision prevents an older, slow comparison
+    from publishing results after a newer competitor change.
+    """
+
+    __tablename__ = "overall_swot_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    input_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    published_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=-1)
 
 
 class SWOTEntry(Base):

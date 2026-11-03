@@ -127,6 +127,7 @@ class CreateCompetitorResult(ApiModel):
 
 
 class SwotOverview(ApiModel):
+    is_stale: bool = False
     updated_at: datetime | None
     strengths: list[Finding]
     weaknesses: list[Finding]
