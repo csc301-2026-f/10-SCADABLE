@@ -32,3 +32,14 @@ Exports include best-effort `crawl_diagnostics.json` version `1.0`, with enabled
 settings, skipped redirect aliases and fetched body duplicate mappings. It is
 published before the unchanged schema `2.1` completion summary. A sidecar failure
 warns and permits the normal export; existing output folders are never replaced.
+
+
+Coverage diagnostics track seven extraction topics using primary categories and
+usefulness >= 2/3 on unique successful pages. Products/services/features indicate
+products and services; positioning optimistically indicates target customers and
+differentiators; pricing and integrations map directly; news/press releases
+indicate commercial activity; careers/hiring indicate hiring. Blog alone does not
+indicate commercial activity. Invalid, refused, unavailable or duplicate
+assessments add no hints. `indicated` means approximate support, `not_indicated`
+means no qualifying category was observed, and `unknown` means assessments were
+unavailable or incomplete. None of these establish that a capability is absent.
