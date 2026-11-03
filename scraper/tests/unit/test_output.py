@@ -153,7 +153,7 @@ def test_trace_is_utf8_jsonl_and_is_published_before_completion_marker(tmp_path,
     assert [
         DecisionTraceRecord.model_validate_json(line) for line in lines
     ] == source.decision_trace
-    assert published == ["pages", "decisions.jsonl", "crawl_summary.json"]
+    assert published == ["pages", "decisions.jsonl", "crawl_diagnostics.json", "crawl_summary.json"]
 
 
 def test_enabled_trace_without_decisions_is_an_empty_file(tmp_path):
@@ -518,3 +518,50 @@ def test_summary_rejects_unsafe_markdown_references(relative):
             status="success",
             crawled_at=NOW,
         )
+
+
+@pytest.mark.parametrize("failure", [None, "write", "publish"])
+def test_best_effort_diagnostics_precede_marker_and_do_not_block_export(
+    tmp_path, monkeypatch, failure
+):
+    from scraper import output
+
+    writes, published = [], []
+    original_write, original_rename = Path.write_text, output.os.rename
+
+    def write(path, *args, **kwargs):
+        writes.append(path.name)
+        if path.name == "crawl_diagnostics.json" and failure == "write":
+            raise OSError("private error body")
+        return original_write(path, *args, **kwargs)
+
+    def rename(source, target):
+        published.append(Path(source).name)
+        if Path(source).name == "crawl_diagnostics.json" and failure == "publish":
+            raise OSError("private error body")
+        return original_rename(source, target)
+
+    monkeypatch.setattr(Path, "write_text", write)
+    monkeypatch.setattr(output.os, "rename", rename)
+    source = result(
+        [
+            page(metadata={"content_fingerprint": "abc"}),
+            page(
+                "https://example.com/copy",
+                metadata={
+                    "duplicate_of": "https://example.com/pricing",
+                    "content_fingerprint": "abc",
+                },
+            ),
+        ]
+    )
+    summary = output.export_competitor(source, tmp_path)
+    assert summary.schema_version == "2.1" and len(summary.pages) == 2
+    assert (tmp_path / "example.com/crawl_summary.json").exists()
+    assert published[-1] == "crawl_summary.json"
+    assert "crawl_diagnostics.json" in writes
+    if failure is None:
+        payload = json.loads((tmp_path / "example.com/crawl_diagnostics.json").read_text())
+        assert payload["schema_version"] == "1.0"
+        assert payload["body_duplicates"][0]["representative_url"] == "https://example.com/pricing"
+        assert published.index("crawl_diagnostics.json") < published.index("crawl_summary.json")

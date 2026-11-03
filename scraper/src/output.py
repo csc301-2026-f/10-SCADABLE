@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -10,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from urllib.parse import unquote, urlsplit
 
+from .diagnostics import crawl_diagnostics
 from .discovery.urls import normalize_url
 from .models import (
     CompetitorCrawlResult,
@@ -30,6 +32,7 @@ _RESERVED = {
     *(f"LPT{i}" for i in range(1, 10)),
     *(f"{prefix}{digit}" for prefix in ("COM", "LPT") for digit in "¹²³"),
 }
+logger = logging.getLogger(__name__)
 
 
 def _digest(value: str) -> str:
@@ -279,6 +282,18 @@ def export_competitor(
                 for record in result.decision_trace:
                     trace.write(record.model_dump_json(exclude_none=True) + "\n")
         payload = summary.model_dump(mode="json", exclude_none=True)
+        diagnostics_staged = False
+        try:
+            (stage / "crawl_diagnostics.json").write_text(
+                json.dumps(crawl_diagnostics(result), ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            diagnostics_staged = True
+        except Exception as error:
+            logger.warning(
+                "Crawl diagnostics staging failed (%s); export continues", type(error).__name__
+            )
         for key in ("warnings", "discovery_truncated"):
             if not payload[key]:
                 payload.pop(key)
@@ -293,5 +308,13 @@ def export_competitor(
         os.rename(stage / "pages", target / "pages")
         if summary.decision_trace_file:
             os.rename(stage / summary.decision_trace_file, target / summary.decision_trace_file)
+        if diagnostics_staged:
+            try:
+                os.rename(stage / "crawl_diagnostics.json", target / "crawl_diagnostics.json")
+            except Exception as error:
+                logger.warning(
+                    "Crawl diagnostics publication failed (%s); export continues",
+                    type(error).__name__,
+                )
         os.rename(stage / "crawl_summary.json", target / "crawl_summary.json")
     return summary
