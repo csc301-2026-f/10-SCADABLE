@@ -215,7 +215,7 @@ class OpenAIAdapter:
             from datetime import datetime, timezone
 
             from llm.analyzer import Analyzer
-            from llm.inputs import load_analysis_input
+            from llm.inputs import deduplicate_analysis_pages, load_analysis_input
             from llm.schemas import (
                 AnalysisInput,
                 AnalysisPage,
@@ -288,7 +288,7 @@ class OpenAIAdapter:
                 )
                 analysis_input = AnalysisInput(
                     crawl_summary=export_summary,
-                    pages=analysis_pages,
+                    pages=deduplicate_analysis_pages(analysis_pages),
                 )
 
             client = _build_openai_client()
