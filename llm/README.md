@@ -136,7 +136,8 @@ prices, in USD. Generations are named after the company, step and crawl time, fo
 
 `close()` flushes pending data, so always close the client. Without Langfuse keys, tracing
 is off and nothing is sent. The scraper's own page-selection calls do not go through this
-client, so they are not included in Langfuse totals.
+client. Optional `scraper[langfuse]` instrumentation records them separately; see the
+[Decisions tracking guide](../scraper/docs/decision-cost-tracking.md) for setup and correlation.
 
 ## Tests
 
