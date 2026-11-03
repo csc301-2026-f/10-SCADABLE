@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import register_error_handlers
-from app.api.routes import company, competitors, runs, swot
+from app.api.routes import company, competitors, github, runs, swot
 
 DEFAULT_CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
 
@@ -38,6 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(runs.router)
     app.include_router(swot.router)
     app.include_router(company.router)
+    app.include_router(github.router)
     return app
 
 
