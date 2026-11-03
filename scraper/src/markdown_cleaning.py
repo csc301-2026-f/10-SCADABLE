@@ -22,6 +22,17 @@ _COOKIE_LABELS = {"cookie consent", "cookie preferences", "cookie settings"}
 _CLONE_CLASSES = {"slick-cloned", "swiper-slide-duplicate"}
 _CAROUSEL_CLASSES = {"slick-slider", "swiper", "swiper-container"}
 _PROTECTED = {"main", "article", "pre", "code", "table"}
+_TRANSIENT_SLIDE_CLASSES = _CLONE_CLASSES | {
+    "slick-active",
+    "slick-current",
+    "slick-center",
+    "swiper-slide-active",
+    "swiper-slide-next",
+    "swiper-slide-prev",
+    "swiper-slide-duplicate-active",
+    "swiper-slide-duplicate-next",
+    "swiper-slide-duplicate-prev",
+}
 
 
 def _protected(node) -> bool:
@@ -46,8 +57,12 @@ def _carousel(node):
 def _slide_identity(node):
     """Ignore only presentation/lifecycle attributes on the slide root."""
     slide = deepcopy(node)
-    for attribute in ("id", "class", "aria-hidden", "tabindex", "style"):
+    for attribute in ("id", "aria-hidden", "tabindex", "style"):
         slide.attrib.pop(attribute, None)
+    classes = set(slide.get("class", "").split()) - _TRANSIENT_SLIDE_CLASSES
+    slide.attrib.pop("class", None)
+    if classes:
+        slide.set("class", " ".join(sorted(classes)))
 
     # Structural comparison keeps child attributes, text, links and meaningful data.
     def identity(item):
@@ -77,9 +92,12 @@ def boilerplate_nodes(document) -> set:
             (node.tag == "dialog" or node.get("role", "").lower() == "dialog")
             and " ".join(label.lower().split()) in _COOKIE_LABELS
         ):
-            matches.add(node)
+            if not _contains_protected(node):
+                matches.add(node)
             continue
         if not set(node.get("class", "").split()) & _CLONE_CLASSES:
+            continue
+        if _contains_protected(node):
             continue
         carousel = _carousel(node)
         if carousel is None:
@@ -95,6 +113,14 @@ def boilerplate_nodes(document) -> set:
         ):
             matches.add(node)
     return matches
+
+
+def _contains_protected(node) -> bool:
+    return any(
+        child.tag in _PROTECTED or child.get("role", "").lower() == "main"
+        for child in node.iterdescendants()
+        if isinstance(child.tag, str)
+    )
 
 
 class _HtmlSelectorTranslator(LxmlHTMLTranslator):

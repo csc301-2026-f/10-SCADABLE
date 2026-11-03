@@ -56,3 +56,10 @@ def test_unique_hidden_slides_and_protected_regions_are_retained():
         <div id="two" class="swiper-slide-duplicate" hidden>Different limitation</div></div>
         <article><div id="onetrust-banner-sdk">Article example</div></article>
         <pre><code id="CookiebotWidget">example</code></pre>""")
+
+
+def test_meaningful_root_classes_and_protected_descendants_prevent_removal():
+    assert not removed("""<div class="slick-slider">
+        <div class="slick-slide annual"><p>$49</p></div>
+        <div id="monthly" class="slick-slide slick-cloned monthly"><p>$49</p></div>
+        </div><div id="onetrust-banner-sdk"><article>Important evidence</article></div>""")
