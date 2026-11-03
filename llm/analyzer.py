@@ -81,8 +81,14 @@ def _validate_citations(*, last_index: int, index_directory: dict[str, list]):
 
 
 class Analyzer:
-    def __init__(self, client: OpenAIClient) -> None:
+    def __init__(self, client: OpenAIClient, trace_prefix: str | None = None) -> None:
+        """trace_prefix names each call "{prefix}:{step}" for cost lookups (e.g. "run-42");
+        without it, calls are named from the company and crawl time."""
         self.client = client
+        self.trace_prefix = trace_prefix
+
+    def _observation_name(self, step: str, default: str) -> str:
+        return f"{self.trace_prefix}:{step}" if self.trace_prefix else default
 
     async def extract_information(self, data: AnalysisInput) -> ExtractedInformationByURL:
         page_urls = [str(p.source.url) for p in data.pages]
@@ -91,7 +97,9 @@ class Analyzer:
             instructions=DATA_EXTRACTION_SYSTEM_PROMPT,
             input_text=build_extraction_user_prompt(data),
             output_schema=PartialExtractedInformationByIndex,
-            observation_name=data.company_name + "-extraction-" + crawl_time_str
+            observation_name=self._observation_name(
+                "extraction", data.company_name + "-extraction-" + crawl_time_str
+            ),
         )
         
         _validate_citations(
@@ -133,7 +141,9 @@ class Analyzer:
             instructions=COMPANY_ANALYSIS_SYSTEM_PROMPT,
             input_text=build_company_user_prompt(llm_input),
             output_schema=PartialCompanyAnalysisByIndex,
-            observation_name=data.company_name + "-analysis-" + data.crawl_time_string
+            observation_name=self._observation_name(
+                "analysis", data.company_name + "-analysis-" + data.crawl_time_string
+            ),
         )
         _validate_citations(
             last_index=len(urls) - 1,
@@ -159,7 +169,9 @@ class Analyzer:
             instructions=COMPARISON_SYSTEM_PROMPT,
             input_text=build_comparison_user_prompt(llm_input),
             output_schema=SWOTAnalysisByIndex,
-            observation_name="SWOT-" + data.scadable.crawl_time_string
+            observation_name=self._observation_name(
+                "comparison", "SWOT-" + data.scadable.crawl_time_string
+            ),
         )
         _validate_swot_citations(company_urls, response.SWOT_entries)
         _validate_feature_scores(len(companies), response.scores)
