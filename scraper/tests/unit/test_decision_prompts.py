@@ -98,3 +98,36 @@ def test_content_assessment_keeps_novelty_and_category_questions_separate():
     ]
     assert category["type"] == "choice"
     assert {choice["value"] for choice in category["choices"]} >= {"careers", "hiring", "pricing"}
+
+
+def test_candidate_coverage_guidance_is_bounded_and_preserves_objective_and_questions():
+    from scraper.coverage import CoverageContext
+    from scraper.decision_budget import MAX_REQUEST_BYTES, request_size
+    from scraper.decision_models import CandidateObservation
+    from scraper.decision_prompts import candidate_batches
+
+    context = CoverageContext.from_summary({"topics": {"pricing": {"state": "indicated"}}})
+    settings = SelectionConfig(objective="Research integration restrictions only.")
+    candidates = [
+        DecisionCandidate(
+            candidate_id=f"c{i}",
+            url=f"https://example.com/{i}",
+            observations=[CandidateObservation(surrounding_text="x" * 400)] * 2,
+        )
+        for i in range(50)
+    ]
+    ordinary = candidate_request(candidates[:1], settings)
+    payload = candidate_request(candidates[:1], settings, context)
+    assert "coverage_hints" not in json.loads(ordinary["input"])
+    hints = json.loads(payload["input"])["coverage_hints"]
+    assert hints["indicated"] == ["pricing"] and len(hints["unknown"]) == 6
+    assert json.loads(payload["input"])["research_objective"] == settings.objective
+    assert len(payload["questions"]) == 1
+    assert "otherwise similarly useful" in payload["questions"][0]["instructions"]
+    assert "no quotas" in payload["questions"][0]["instructions"]
+    batches = list(candidate_batches(candidates, settings, context))
+    assert sum(map(len, batches)) == 50
+    assert all(
+        request_size(candidate_request(batch, settings, context)) <= MAX_REQUEST_BYTES
+        for batch in batches
+    )

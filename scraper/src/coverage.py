@@ -1,6 +1,7 @@
 """Category-based hints, not evidence verification or capability-absence claims."""
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from .content_identity import markdown_fingerprint
 from .models import FetchedPage, ScrapedPage
@@ -19,6 +20,45 @@ METHOD = (
     "Positioning optimistically indicates both target customers and differentiators. "
     "Hints do not confirm evidence or establish absence of a capability."
 )
+
+
+@dataclass(frozen=True)
+class CoverageContext:
+    """A fixed-size state vector; source excerpts/URLs never enter candidate hints."""
+
+    states: tuple[str, ...]
+
+    def __post_init__(self):
+        if len(self.states) != len(TOPIC_CATEGORIES) or any(
+            state not in {"indicated", "not_indicated", "unknown"} for state in self.states
+        ):
+            raise ValueError("Coverage requires seven valid topic states")
+
+    @classmethod
+    def from_summary(cls, summary: dict):
+        return cls(
+            tuple(
+                summary["topics"].get(topic, {}).get("state", "unknown")
+                for topic in TOPIC_CATEGORIES
+            )
+        )
+
+    def as_prompt(self) -> dict:
+        return {
+            "method": METHOD,
+            **{
+                label: [
+                    topic
+                    for topic, state in zip(TOPIC_CATEGORIES, self.states, strict=True)
+                    if state == value
+                ]
+                for label, value in (
+                    ("indicated", "indicated"),
+                    ("gaps", "not_indicated"),
+                    ("unknown", "unknown"),
+                )
+            },
+        }
 
 
 def coverage_summary(pages: Sequence[FetchedPage | ScrapedPage], *, available: bool = True) -> dict:

@@ -43,3 +43,11 @@ indicate commercial activity. Invalid, refused, unavailable or duplicate
 assessments add no hints. `indicated` means approximate support, `not_indicated`
 means no qualifying category was observed, and `unknown` means assessments were
 unavailable or incomplete. None of these establish that a capability is absent.
+
+
+The native Decisions provider accepts optional `set_coverage_context(CoverageContext)`.
+Candidate hints carry only a bounded seven-state vector and the approximation
+method, not source snippets. Batching measures the complete request including
+hints and instructions. The scoring call remains `score_candidates(candidates)`;
+custom providers can omit this optional capability. Concrete relevance and the
+configured objective remain primary; gaps guide similarly useful choices only.

@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from .config import SelectionConfig
+from .coverage import CoverageContext
 from .decision_budget import MAX_REQUEST_BYTES, request_size
 from .decision_models import CollectedExcerpt, DecisionCandidate
 from .types import PageCategory
@@ -69,14 +70,25 @@ NOVELTY_LEVELS = [
     {"label": "Useful addition", "description": "Adds meaningful company-specific evidence."},
     {"label": "Substantial addition", "description": "Adds substantial distinct evidence."},
 ]
+COVERAGE_POLICY = (
+    "The configured objective and concrete relevance remain primary. Coverage hints are "
+    "category-based approximations, not confirmed evidence. Prefer candidates likely to fill "
+    "gaps when otherwise similarly useful. Unknown or missing hints do not prove evidence "
+    "exists or a capability is absent. Careers/hiring has equal status; no quotas. "
+)
 
 
-def candidate_request(candidates: Sequence[DecisionCandidate], settings: SelectionConfig) -> dict:
+def candidate_request(
+    candidates: Sequence[DecisionCandidate],
+    settings: SelectionConfig,
+    coverage_context: CoverageContext | None = None,
+) -> dict:
     return {
         "model": settings.model,
         "input": json.dumps(
             {
                 "research_objective": settings.objective,
+                **({"coverage_hints": coverage_context.as_prompt()} if coverage_context else {}),
                 "candidates": [
                     {
                         **item.model_dump(mode="json"),
@@ -93,6 +105,7 @@ def candidate_request(candidates: Sequence[DecisionCandidate], settings: Selecti
                 "name": f"candidate_{index}",
                 "instructions": POLICY
                 + USEFULNESS_POLICY
+                + (COVERAGE_POLICY if coverage_context else "")
                 + f"Rate the expected usefulness of candidate {item.candidate_id} "
                 "using only its URL and link context; do not assume page contents.",
                 "levels": CANDIDATE_VALUE_LEVELS,
@@ -102,12 +115,20 @@ def candidate_request(candidates: Sequence[DecisionCandidate], settings: Selecti
     }
 
 
-def candidate_batches(candidates: Sequence[DecisionCandidate], settings: SelectionConfig):
+def candidate_batches(
+    candidates: Sequence[DecisionCandidate],
+    settings: SelectionConfig,
+    coverage_context: CoverageContext | None = None,
+):
     """Partition by both question count and total serialized request bytes."""
     batch = []
     for candidate in candidates:
         trial = [*batch, candidate]
-        if len(trial) > 50 or request_size(candidate_request(trial, settings)) > MAX_REQUEST_BYTES:
+        if (
+            len(trial) > 50
+            or request_size(candidate_request(trial, settings, coverage_context))
+            > MAX_REQUEST_BYTES
+        ):
             if batch:
                 yield batch
             batch = [candidate]
