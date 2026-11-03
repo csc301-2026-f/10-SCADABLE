@@ -6,7 +6,8 @@ from llm.swot_entries import to_swot_entries
 
 def analysis(*claims):
     return CompanyAnalysis(
-        company_name="Acme", summary="s", summary_page_urls=[], claims_cited=list(claims), features=[]
+        company_name="Acme", summary="s", summary_page_urls=[], claims_cited=list(claims), features=[],
+        crawl_time_string="2026-10-19 12:00:01",
     )
 
 

@@ -150,6 +150,7 @@ class ExtractedInformationByURL(ExtractedInformation):
     summary_page_urls: list[str]
     job_postings: list[JobCitedByURL]
     claims_cited: list[ClaimCitedByURL]
+    crawl_time_string: str
 
 class ExtractedInformationByIndex(ExtractedInformation):
     """Used for input conversion for LLM prompt"""
@@ -170,6 +171,7 @@ class CompanyAnalysis(BaseModel):
     claims_cited: list[ClaimCitedByURL]
     # The company's features, as extracted. They are scored later, in compare().
     features: list[str]
+    crawl_time_string: str
 
     def claims_in(self, category: Category) -> list[str]:
         return [c.claim for c in self.claims_cited if c.category == category]

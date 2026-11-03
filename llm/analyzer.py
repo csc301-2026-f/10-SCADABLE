@@ -81,16 +81,25 @@ def _validate_citations(*, last_index: int, index_directory: dict[str, list]):
 
 
 class Analyzer:
-    def __init__(self, client: OpenAIClient) -> None:
+    def __init__(self, client: OpenAIClient, trace_prefix: str | None = None) -> None:
+        """trace_prefix names each call "{prefix}:{step}" for cost lookups (e.g. "run-42");
+        without it, calls are named from the company and crawl time."""
         self.client = client
+        self.trace_prefix = trace_prefix
+
+    def _observation_name(self, step: str, default: str) -> str:
+        return f"{self.trace_prefix}:{step}" if self.trace_prefix else default
 
     async def extract_information(self, data: AnalysisInput) -> ExtractedInformationByURL:
         page_urls = [str(p.source.url) for p in data.pages]
-
+        crawl_time_str = data.crawl_summary.finished_at.strftime("%Y-%m-%d %H:%M:%S")
         partial = await self.client.generate_structured(
             instructions=DATA_EXTRACTION_SYSTEM_PROMPT,
             input_text=build_extraction_user_prompt(data),
             output_schema=PartialExtractedInformationByIndex,
+            observation_name=self._observation_name(
+                "extraction", data.company_name + "-extraction-" + crawl_time_str
+            ),
         )
         
         _validate_citations(
@@ -104,7 +113,9 @@ class Analyzer:
                                       summary=partial.summary,
                                       summary_page_urls=[page_urls[p] for p in partial.summary_page_indexes], 
                                       job_postings=[JobCitedByURL(role=job.role, category=job.category, job_families=job.job_families, job_page_url=page_urls[job.job_page_index]) for job in partial.job_postings],
-                                      claims_cited=[ClaimCitedByURL(category=c.category, claim=c.claim, claim_page_url=page_urls[c.claim_page_index]) for c in partial.claims_cited])
+                                      claims_cited=[ClaimCitedByURL(category=c.category, claim=c.claim, claim_page_url=page_urls[c.claim_page_index]) for c in partial.claims_cited],
+                                      crawl_time_string=crawl_time_str
+                                      )
         return result
 
     async def analyze_company(self, data: ExtractedInformationByURL) -> CompanyAnalysis:
@@ -130,6 +141,9 @@ class Analyzer:
             instructions=COMPANY_ANALYSIS_SYSTEM_PROMPT,
             input_text=build_company_user_prompt(llm_input),
             output_schema=PartialCompanyAnalysisByIndex,
+            observation_name=self._observation_name(
+                "analysis", data.company_name + "-analysis-" + data.crawl_time_string
+            ),
         )
         _validate_citations(
             last_index=len(urls) - 1,
@@ -155,6 +169,9 @@ class Analyzer:
             instructions=COMPARISON_SYSTEM_PROMPT,
             input_text=build_comparison_user_prompt(llm_input),
             output_schema=SWOTAnalysisByIndex,
+            observation_name=self._observation_name(
+                "comparison", "SWOT-" + data.scadable.crawl_time_string
+            ),
         )
         _validate_swot_citations(company_urls, response.SWOT_entries)
         _validate_feature_scores(len(companies), response.scores)
@@ -193,5 +210,6 @@ def build_company_analysis(partial: PartialCompanyAnalysisByIndex, data: Extract
                            summary=data.summary, 
                            summary_page_urls=data.summary_page_urls,
                            features=[c.claim for c in data.claims_cited if c.category == "features"],
-                           company_name=data.company_name
+                           company_name=data.company_name,
+                           crawl_time_string=data.crawl_time_string
                            )

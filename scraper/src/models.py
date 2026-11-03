@@ -3,7 +3,7 @@
 from pathlib import PurePosixPath
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, JsonValue, field_validator, model_validator
+from pydantic import Field, JsonValue, PrivateAttr, field_validator, model_validator
 
 from .config import CompetitorInput, NonNegativeInt, PositiveInt, ScraperConfig
 from .decision_models import (
@@ -13,6 +13,7 @@ from .decision_models import (
     PageAssessment,
     SelectionDiagnostics,
 )
+from .decision_tracking import DecisionTrackingReference
 from .types import (
     ContractModel,
     CrawlStatus,
@@ -172,6 +173,12 @@ class CompetitorSummary(ContractModel):
 class CompetitorCrawlResult(CompetitorSummary):
     pages: list[ScrapedPage] = Field(default_factory=list)
     decision_trace: list[DecisionTraceRecord] = Field(default_factory=list)
+    _decision_tracking: DecisionTrackingReference | None = PrivateAttr(default=None)
+
+    @property
+    def decision_tracking(self) -> DecisionTrackingReference | None:
+        """Runtime reference, exported separately from the existing crawl contracts."""
+        return self._decision_tracking
 
     @model_validator(mode="after")
     def validate_result_and_derive_summary(self) -> Self:

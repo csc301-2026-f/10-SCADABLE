@@ -266,4 +266,14 @@ def agent_run(run: ResearchRun, competitor_name: str) -> AgentRun:
         finished_at=run.completed_at,
         steps=steps,
         error_message=safe_run_error(run.error_message) if run.status == ResearchStatus.FAILED else None,
+        cost_usd=_cost_usd(run),
     )
+
+
+def _cost_usd(run: ResearchRun) -> float | None:
+    """OpenAI cost looked up from Langfuse a few minutes after the run; None until then."""
+    cost = _analysis(run).get("cost")
+    usd = cost.get("usd") if isinstance(cost, dict) else None
+    if isinstance(usd, bool) or not isinstance(usd, (int, float)):
+        return None
+    return float(usd)

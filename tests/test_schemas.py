@@ -30,7 +30,8 @@ def analysis_fields(**changes):
     return {
         "company_name": "Acme", "summary": "s",
         "summary_page_urls": ["https://example.com/"],
-        "claims_cited": [], "features": [], **changes,
+        "claims_cited": [], "features": [],
+        "crawl_time_string": "2026-10-19 12:00:01", **changes,
     }
 
 def test_company_analysis_exposes_strengths_and_weaknesses_from_claims():
@@ -115,6 +116,7 @@ def test_full_analysis_schema_keeps_every_field():
         "summary_page_urls",
         "claims_cited",
         "features",
+        "crawl_time_string",
     }
 
 
@@ -136,6 +138,7 @@ def test_build_company_analysis_resolves_urls_and_copies_the_fields():
         summary_page_urls=["https://example.com/"],
         job_postings=[],
         claims_cited=[claim("features", "Reports")],
+        crawl_time_string="2026-10-19 12:00:01",
     )
     analysis = build_company_analysis(
         partial, facts, ["https://example.com/a", "https://example.com/b"]
@@ -146,10 +149,12 @@ def test_build_company_analysis_resolves_urls_and_copies_the_fields():
     assert analysis.strengths == ["Fast"]
     assert analysis.claims_cited[0].claim_page_url == "https://example.com/b"
     assert analysis.features == ["Reports"]
+    assert analysis.crawl_time_string == "2026-10-19 12:00:01"
 
 
 @pytest.mark.parametrize(
-    "missing", ["company_name", "summary", "summary_page_urls", "claims_cited", "features"]
+    "missing",
+    ["company_name", "summary", "summary_page_urls", "claims_cited", "features", "crawl_time_string"],
 )
 def test_full_analysis_requires_every_field(missing):
     fields = analysis_fields()
