@@ -133,6 +133,7 @@ def prepare_markdown_html(
     source: str,
     *,
     remove_navigation_and_footer: bool = True,
+    remove_boilerplate: bool = True,
     excluded_selectors: Sequence[str] = (),
 ) -> str:
     """Remove semantic site chrome and explicit CSS matches, preserving adjacent text.
@@ -140,7 +141,9 @@ def prepare_markdown_html(
     Never searches for menu/footer words in prose or guesses CSS class names. A
     document that cannot be parsed falls back to its original input.
     """
-    if not source.strip() or (not remove_navigation_and_footer and not excluded_selectors):
+    if not source.strip() or (
+        not remove_navigation_and_footer and not remove_boilerplate and not excluded_selectors
+    ):
         return source
     parser = html.HTMLParser(encoding="utf-8", no_network=True, recover=True)
     try:
@@ -155,6 +158,8 @@ def prepare_markdown_html(
         logger.warning("Markdown cleanup skipped after fatal HTML parser recovery; source retained")
         return source
     matches = set()
+    if remove_boilerplate:
+        matches.update(boilerplate_nodes(document))
     if remove_navigation_and_footer:
         matches.update(node for node in document.iter() if _is_site_chrome(node))
     for selector in excluded_selectors:

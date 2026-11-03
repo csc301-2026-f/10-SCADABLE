@@ -78,7 +78,10 @@ def test_default_cleanup_can_be_disabled_without_disabling_explicit_selectors():
 def test_disabling_all_cleanup_passes_original_input_through_unchanged():
     from scraper.markdown_cleaning import prepare_markdown_html
 
-    assert prepare_markdown_html(SOURCE, remove_navigation_and_footer=False) == SOURCE
+    assert (
+        prepare_markdown_html(SOURCE, remove_navigation_and_footer=False, remove_boilerplate=False)
+        == SOURCE
+    )
 
 
 def test_global_and_competitor_cleanup_overrides_merge_normally():

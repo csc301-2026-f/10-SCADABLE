@@ -3,6 +3,24 @@ from lxml import html
 from scraper.markdown_cleaning import boilerplate_nodes
 
 
+def test_generator_wires_independent_boilerplate_opt_out():
+    from scraper import ScraperConfig
+    from scraper.crawl4ai_adapter import build_run_config
+
+    source = '<div id="onetrust-banner-sdk">CONSENT_UI</div><p>Product evidence</p>'
+    for enabled in (True, False):
+        generator = build_run_config(
+            ScraperConfig(
+                markdown_remove_boilerplate=enabled,
+                markdown_remove_navigation_and_footer=False,
+            )
+        ).markdown_generator
+        result = generator.generate_markdown(source)
+        assert ("CONSENT_UI" in result.raw_markdown) is not enabled
+        assert "Product evidence" in result.raw_markdown
+    assert "CONSENT_UI" in source
+
+
 def removed(source):
     document = html.document_fromstring(source)
     return {node.get("id") for node in boilerplate_nodes(document)}
@@ -38,4 +56,3 @@ def test_unique_hidden_slides_and_protected_regions_are_retained():
         <div id="two" class="swiper-slide-duplicate" hidden>Different limitation</div></div>
         <article><div id="onetrust-banner-sdk">Article example</div></article>
         <pre><code id="CookiebotWidget">example</code></pre>""")
-
