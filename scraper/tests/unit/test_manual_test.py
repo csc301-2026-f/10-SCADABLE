@@ -20,9 +20,11 @@ def test_manual_runner_exposes_selection_controls_without_credentials():
     runner = load_runner()
     # Edit selection settings beside the existing crawl limits; no config file needed.
     assert "selection" in runner.SETTINGS.model_fields_set
-    assert {"mode", "objective", "budget_usd", "trace_enabled"} <= (
+    assert {"mode", "budget_usd", "trace_enabled"} <= (
         runner.SETTINGS.selection.model_fields_set
     )
+    assert runner.SETTINGS.selection.objective == runner.SelectionConfig().objective
+    assert "objective" not in runner.SETTINGS.selection.model_fields_set
     assert runner.SETTINGS.selection.mode == "llm"
     assert runner.SETTINGS.selection.budget_usd == 0.03
     assert runner.SETTINGS.selection.trace_enabled is False
