@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -15,7 +16,7 @@ import {
 } from "@/lib/api";
 import { useFocusTrap } from "@/lib/a11y/useFocusTrap";
 import { toUserFacingError } from "@/lib/errors";
-import { displayWebsite, formatRelativePast } from "@/lib/format";
+import { displayWebsite, formatRelativePast, formatRefreshDate } from "@/lib/format";
 import { profilePollInterval, runsPollInterval } from "@/lib/polling";
 import { latestSuccessfulRunForCompetitor } from "@/lib/runs/stats";
 import { ConflictingDataTable } from "./ConflictingDataTable";
@@ -274,7 +275,11 @@ export function CompetitorProfileView({ id }: { id: string }) {
             </div>
             <div className={styles.statRow}>
               <span>Open roles</span>
-              <b>Coming in D3</b>
+              <b>
+                {data.openRoles === null
+                  ? "Not available"
+                  : `${data.openRoles} ${data.openRoles === 1 ? "role" : "roles"}`}
+              </b>
             </div>
             <div className={styles.statRow}>
               <span>Last checked</span>
@@ -282,7 +287,15 @@ export function CompetitorProfileView({ id }: { id: string }) {
             </div>
             <div className={styles.statRow}>
               <span>Next refresh</span>
-              <b>Coming in D3</b>
+              <b>
+                {data.nextRefreshAt ? (
+                  <time dateTime={data.nextRefreshAt}>
+                    {formatRefreshDate(data.nextRefreshAt)}
+                  </time>
+                ) : (
+                  "Not scheduled"
+                )}
+              </b>
             </div>
           </section>
 
@@ -391,3 +404,6 @@ export function CompetitorProfileView({ id }: { id: string }) {
     </div>
   );
 }
+
+
+
