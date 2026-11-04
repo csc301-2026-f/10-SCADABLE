@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
+from app.services.open_roles import count_open_roles, normalize_job_postings
+
 logger = logging.getLogger(__name__)
 
 
@@ -314,6 +316,11 @@ class OpenAIAdapter:
             finally:
                 await client.close()
 
+            # The LLM already extracts cited job postings in its first step.
+            # Preserve them before CompanyAnalysis (which omits those fields)
+            # is converted to the backend's saved analysis shape.
+            job_postings = normalize_job_postings(getattr(facts, "job_postings", None))
+
             # Map cited strengths and weaknesses
             swot_entries = to_swot_entries(company_analysis)
 
@@ -355,6 +362,8 @@ class OpenAIAdapter:
                 "competitor_name": competitor_name,
                 "summary": getattr(company_analysis, "summary", ""),
                 "features": list(getattr(company_analysis, "features", [])),
+                "job_postings": job_postings,
+                "open_roles": count_open_roles(job_postings),
                 "swot_entries": swot_entries,
                 "llm_calls": llm_calls,
             }

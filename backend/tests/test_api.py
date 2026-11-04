@@ -240,6 +240,33 @@ def test_get_competitor_profile(client, researched):
     assert body["recentActivity"][0]["text"].startswith("Research run completed")
 
 
+def test_profile_open_roles_from_completed_analysis(client, store):
+    competitor = store.add_competitor("Hiring Co", "https://hiring.example")
+    jobs = [{"role": "Developer", "category": "engineering", "job_page_url": "https://hiring.example/careers",
+             "job_families": [{"job_family": "full-time", "count": 2},
+                              {"job_family": "co-op/internship", "count": 1}]}]
+    store.add_run(competitor, ResearchStatus.COMPLETED,
+                  analysis={"summary": "Company", "job_postings": jobs, "open_roles": 3})
+    assert client.get(f"/competitors/{competitor.id}").json()["openRoles"] == 3
+
+
+def test_profile_open_roles_reused_and_failure_keeps_last_success(client, store):
+    competitor = store.add_competitor("Hiring Co", "https://hiring.example")
+    first = store.add_run(competitor, ResearchStatus.COMPLETED,
+                          analysis={"summary": "Company", "open_roles": 5})
+    store.add_run(competitor, ResearchStatus.COMPLETED,
+                  analysis={"skipped_llm": True, "reused_from_run_id": first.id})
+    store.add_run(competitor, ResearchStatus.FAILED)
+    assert client.get(f"/competitors/{competitor.id}").json()["openRoles"] == 5
+
+
+def test_profile_open_roles_unknown_when_not_extracted(client, store):
+    competitor = store.add_competitor("Unknown", "https://unknown.example")
+    store.add_run(competitor, ResearchStatus.COMPLETED,
+                  analysis={"summary": "Company", "job_postings": []})
+    assert client.get(f"/competitors/{competitor.id}").json()["openRoles"] is None
+
+
 def test_get_competitor_not_researched(client, store):
     new = store.add_competitor("Secureframe", "https://secureframe.com")
     body = client.get(f"/competitors/{new.id}").json()
@@ -253,7 +280,7 @@ def test_get_competitor_not_researched(client, store):
 def test_profile_scores_from_analysis(client, store):
     drata = store.add_competitor("Drata", "https://drata.com")
     store.add_run(drata, ResearchStatus.COMPLETED, analysis={"summary": "s", "scores": [
-        {"feature": "Evidence collection", "score": 8},
+        {"feature": "Evidence collection", "score": 8, "scadable_score": 5},
         {"feature": "Out of range", "score": 14},
         {"feature": "", "score": 5},
         {"feature": "Bad score", "score": "high"},
@@ -261,7 +288,7 @@ def test_profile_scores_from_analysis(client, store):
     ]})
     scores = client.get(f"/competitors/{drata.id}").json()["chartSeries"]["scores"]
     assert scores == [
-        {"label": "Evidence collection", "competitor": 8, "scadable": None},
+        {"label": "Evidence collection", "competitor": 8, "scadable": 5},
         {"label": "Out of range", "competitor": 10, "scadable": None},
     ]
 
@@ -539,3 +566,13 @@ def test_get_swot_for_one_competitor(client, researched, store):
     assert body["strengths"] == []
     assert client.get("/swot?competitorId=999").status_code == 404
     assert client.get("/swot?competitorId=0").status_code == 422
+
+
+def test_profile_next_refresh_is_only_shown_when_scheduler_enabled(client, store, monkeypatch):
+    competitor = store.add_competitor("Scheduled", "https://scheduled.example")
+    store.add_run(competitor, ResearchStatus.COMPLETED, analysis={"summary": "Research done"})
+    monkeypatch.setenv("AUTO_REFRESH_ENABLED", "false")
+    assert client.get(f"/competitors/{competitor.id}").json()["nextRefreshAt"] is None
+    monkeypatch.setenv("AUTO_REFRESH_ENABLED", "true")
+    scheduled = client.get(f"/competitors/{competitor.id}").json()["nextRefreshAt"]
+    assert scheduled == "2026-10-26T12:01:30Z"

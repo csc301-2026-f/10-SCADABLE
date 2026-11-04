@@ -32,6 +32,11 @@ class InvalidStatusTransitionError(Exception):
     pass
 
 
+class ResearchAlreadyActiveError(Exception):
+    """Prevents concurrent manual and scheduled research for one competitor."""
+    pass
+
+
 _ALLOWED_TRANSITIONS = {
     ResearchStatus.PENDING: {ResearchStatus.RUNNING, ResearchStatus.FAILED},
     ResearchStatus.RUNNING: {ResearchStatus.COMPLETED, ResearchStatus.FAILED},
@@ -250,8 +255,21 @@ def create_research_run(
     competitor_id: int,
     commit: bool = True,
 ) -> ResearchRun:
-    if db.get(Competitor, competitor_id) is None:
+    # Lock the parent row, not the latest run: it also serializes a competitor
+    # with no runs yet. The scheduler uses the same row lock.
+    competitor = db.scalar(
+        select(Competitor).where(Competitor.id == competitor_id).with_for_update()
+    )
+    if competitor is None:
         raise NotFoundError(f"Competitor {competitor_id} does not exist.")
+    active = db.scalar(
+        select(ResearchRun.id).where(
+            ResearchRun.competitor_id == competitor_id,
+            ResearchRun.status.in_((ResearchStatus.PENDING, ResearchStatus.RUNNING)),
+        ).limit(1)
+    )
+    if active is not None:
+        raise ResearchAlreadyActiveError(f"Research for {competitor.name} is already queued or running.")
 
     run = ResearchRun(
         competitor_id=competitor_id,
