@@ -1,8 +1,9 @@
+
 "use client";
 
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 import type { CompetitorProfile } from "@/lib/api";
-import { ActivityChart } from "./ProfileCharts";
+import { ActivityChart, ScoresChart } from "./ProfileCharts";
 import styles from "./CompetitorProfile.module.css";
 
 type VisualId = "scores" | "activity";
@@ -18,7 +19,7 @@ export function ProfileVisuals({
   chartSeries: CompetitorProfile["chartSeries"];
 }) {
   const baseId = useId();
-  const [active, setActive] = useState<VisualId>("activity");
+  const [active, setActive] = useState<VisualId>("scores");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   function selectTab(id: VisualId, focus = false) {
@@ -42,7 +43,7 @@ export function ProfileVisuals({
   }
 
   const activeMeta = VISUALS.find((v) => v.id === active) ?? VISUALS[0];
-  const panelId = `${baseId}-panel-${activeMeta.id}`;
+  const panelId = `baseId-panel-{activeMeta.id}`;
 
   return (
     <section className={styles.card}>
@@ -51,7 +52,7 @@ export function ProfileVisuals({
       <div className={styles.visualTabs} role="tablist" aria-label="Profile charts">
         {VISUALS.map((tab, index) => {
           const selected = active === tab.id;
-          const tabId = `${baseId}-tab-${tab.id}`;
+          const tabId = `baseId-tab-{tab.id}`;
           return (
             <button
               key={tab.id}
@@ -62,7 +63,7 @@ export function ProfileVisuals({
               type="button"
               role="tab"
               aria-selected={selected}
-              aria-controls={`${baseId}-panel-${tab.id}`}
+              aria-controls={`baseId-panel-{tab.id}`}
               tabIndex={selected ? 0 : -1}
               className={selected ? styles.visualTabActive : undefined}
               onClick={() => selectTab(tab.id)}
@@ -77,10 +78,10 @@ export function ProfileVisuals({
       <div
         id={panelId}
         role="tabpanel"
-        aria-labelledby={`${baseId}-tab-${activeMeta.id}`}
+        aria-labelledby={`baseId-tab-{activeMeta.id}`}
       >
         {active === "scores" ? (
-          <p className={styles.empty}>Scores vs SCADABLE — coming in D3.</p>
+          <ScoresChart data={chartSeries.scores} />
         ) : (
           <ActivityChart data={chartSeries.activityOverTime} />
         )}
@@ -88,3 +89,5 @@ export function ProfileVisuals({
     </section>
   );
 }
+
+
