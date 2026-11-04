@@ -144,7 +144,7 @@ def test_mock_compare():
 
 def test_scores_by_company_drops_invalid_items():
     raw = [
-        {"company_name": "Vanta", "feature": " Audits ", "score": 6},
+        {"company_name": "Vanta", "feature": " Audits ", "score": 6, "scadable_score": 4},
         {"company_name": "Vanta", "feature": "", "score": 5},
         {"company_name": "Vanta", "feature": "Too high", "score": 11},
         {"company_name": "Vanta", "feature": "Not a number", "score": "high"},
@@ -152,7 +152,7 @@ def test_scores_by_company_drops_invalid_items():
         {"feature": "No company", "score": 4},
         "not a dict",
     ]
-    assert _scores_by_company(raw) == {"Vanta": [{"feature": "Audits", "score": 6}]}
+    assert _scores_by_company(raw) == {"Vanta": [{"feature": "Audits", "score": 6, "scadable_score": 4}]}
     assert _scores_by_company(None) == {}
 
 

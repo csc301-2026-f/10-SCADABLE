@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable
 from datetime import timedelta
+import os
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -19,6 +20,7 @@ from app.api.schemas import (
 )
 from app.db.models import Competitor, ResearchRun, ResearchStatus, SWOTEntry
 from app.services.crawler import CRAWL_FAILED_MESSAGE
+from app.services.refresh_schedule import next_refresh_at
 import re
 
 _STATUS_MAP: dict[ResearchStatus, ApiResearchStatus] = {
@@ -135,6 +137,11 @@ def competitor_profile(
     return CompetitorProfile(
         **summary.model_dump(),
         summary=text or NOT_RESEARCHED_SUMMARY,
+        next_refresh_at=(
+            next_refresh_at(competitor.research_runs)
+            if os.getenv("AUTO_REFRESH_ENABLED", "false").lower() == "true"
+            else None
+        ),
         findings=[finding_from_entry(e, competitor) for e in swot_entries],
         recent_activity=activity,
         chart_series=ChartSeries(
@@ -147,7 +154,8 @@ def competitor_profile(
 def _scores(analysis: dict[str, Any]) -> list[ScoreSeries]:
     """LLM feature scores (0-10 competition with SCADABLE) as chart bars.
 
-    The analyzer doesn't score SCADABLE itself, so ``scadable`` stays empty.
+    SCADABLE ratings are supplied by the comparison LLM, never made up in the API.
+    Older comparisons lack ``scadable_score`` and retain a null chart value.
     """
     series = []
     for item in analysis.get("scores") or []:
@@ -158,8 +166,12 @@ def _scores(analysis: dict[str, Any]) -> list[ScoreSeries]:
             continue
         if isinstance(score, bool) or not isinstance(score, (int, float)):
             continue
+        baseline_score = item.get("scadable_score")
+        if (isinstance(baseline_score, bool) or not isinstance(baseline_score, (int, float))
+                or not 0 <= baseline_score <= 10):
+            baseline_score = None
         series.append(
-            ScoreSeries(label=label.strip(), competitor=min(max(score, 0), 10), scadable=None)
+            ScoreSeries(label=label.strip(), competitor=min(max(score, 0), 10), scadable=baseline_score)
         )
     return series
 
