@@ -430,6 +430,19 @@ def test_failed_run_does_not_expose_sensitive_errors(client, researched, store):
     )
 
 
+def test_failed_crawl_message_is_shown(client, researched, store):
+    run = store.add_run(
+        researched, ResearchStatus.FAILED, error="Could not crawl the competitor's website."
+    )
+    detail = client.get(f"/runs/{run.id}").json()
+    assert detail["status"] == "failed"
+    assert detail["errorMessage"] == "Could not crawl the competitor's website."
+    profile = client.get(f"/competitors/{researched.id}").json()
+    assert profile["recentActivity"][0]["text"] == (
+        "Research run failed: Could not crawl the competitor's website."
+    )
+
+
 def test_run_skipped_llm_counts_as_cache_hit(client, researched, store):
     run = store.add_run(
         researched, ResearchStatus.COMPLETED,
