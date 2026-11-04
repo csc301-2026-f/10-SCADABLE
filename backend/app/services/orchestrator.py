@@ -287,6 +287,11 @@ async def execute_research_run(
             for key in ("summary", "features", "scores"):
                 if prev_analysis.get(key):
                     reused_payload[key] = prev_analysis[key]
+            # A skipped refresh must retain role counts, including an explicit 0,
+            # without making another paid LLM call.
+            for key in ("job_postings", "open_roles"):
+                if key in prev_analysis:
+                    reused_payload[key] = prev_analysis[key]
 
             save_analysis_result(db, run_id, reused_payload)
 

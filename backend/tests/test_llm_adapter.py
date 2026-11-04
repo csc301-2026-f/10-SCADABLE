@@ -15,6 +15,8 @@ pytest.importorskip("pydantic_settings")
 from llm.schemas import (  # noqa: E402
     ClaimCitedByIndex,
     FeatureScoreByIndex,
+    JobCitedByIndex,
+    JobFamily,
     PartialCompanyAnalysisByIndex,
     PartialExtractedInformationByIndex,
     SWOTAnalysisByIndex,
@@ -60,7 +62,11 @@ def test_analyze_uses_real_llm_schemas(fake_client):
         "PartialExtractedInformationByIndex": PartialExtractedInformationByIndex(
             summary="Vanta automates compliance.",
             summary_page_indexes=[0],
-            job_postings=[],
+            job_postings=[JobCitedByIndex(
+                role="Software Engineer", category="Engineering", job_page_index=0,
+                job_families=[JobFamily(job_family="full-time", count=2),
+                              JobFamily(job_family="co-op/internship", count=1)],
+            )],
             claims_cited=[
                 ClaimCitedByIndex(category="features", claim="Evidence collection", claim_page_index=0),
             ],
@@ -84,6 +90,15 @@ def test_analyze_uses_real_llm_schemas(fake_client):
     # A schema mismatch makes analyze() fall back to the mock, which has no "mode"
     assert result.get("mode") == "real"
     assert result["features"] == ["Evidence collection"]
+    assert result["open_roles"] == 3
+    assert result["job_postings"] == [{
+        "role": "Software Engineer", "category": "Engineering",
+        "job_page_url": "https://vanta.com/features",
+        "job_families": [
+            {"job_family": "full-time", "count": 2},
+            {"job_family": "co-op/internship", "count": 1},
+        ],
+    }]
     assert {
         "category": "strength",
         "content": "Many integrations",

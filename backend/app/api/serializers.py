@@ -21,6 +21,7 @@ from app.api.schemas import (
 from app.db.models import Competitor, ResearchRun, ResearchStatus, SWOTEntry
 from app.services.crawler import CRAWL_FAILED_MESSAGE
 from app.services.refresh_schedule import next_refresh_at
+from app.services.open_roles import open_roles_from_analysis
 import re
 
 _STATUS_MAP: dict[ResearchStatus, ApiResearchStatus] = {
@@ -137,6 +138,7 @@ def competitor_profile(
     return CompetitorProfile(
         **summary.model_dump(),
         summary=text or NOT_RESEARCHED_SUMMARY,
+        open_roles=open_roles_from_analysis(analysis),
         next_refresh_at=(
             next_refresh_at(competitor.research_runs)
             if os.getenv("AUTO_REFRESH_ENABLED", "false").lower() == "true"
