@@ -25,7 +25,7 @@ from app.db.repository import (
     save_swot_entries,
     update_research_run_status,
 )
-from app.services.crawler import MockCrawl4AICrawler
+from app.services.crawler import CRAWL_FAILED_MESSAGE, CrawlFailedError, MockCrawl4AICrawler
 from app.services.diff import compute_content_hash, has_content_changed
 from app.services.llm import MockOpenAIAnalyzer
 from app.services.orchestrator import (
@@ -493,6 +493,21 @@ if test_url:
         assert failed_run.error_message == "Research failed due to an internal error."
         assert "simulated failure" in caplog.text
         assert "simulated failure" not in failed_run.error_message
+
+    def test_execute_research_run_real_crawl_failure_fails_run(db, competitor):
+        class FailingRealCrawler:
+            async def crawl(self, competitor_name, website_url):
+                raise CrawlFailedError("Could not crawl the competitor's website. (blocked)")
+
+        run = create_research_run(db, competitor.id)
+        failed_run = asyncio.run(execute_research_run(
+            db=db, run_id=run.id, crawler=FailingRealCrawler(), analyzer=MockOpenAIAnalyzer()
+        ))
+
+        assert failed_run.status == ResearchStatus.FAILED
+        assert failed_run.error_message == CRAWL_FAILED_MESSAGE
+        assert failed_run.scraped_data is None
+        assert get_latest_swot(db, competitor.id) == []
 
     def test_execute_research_run_analyzer_failure(db, competitor):
         run = create_research_run(db, competitor.id)

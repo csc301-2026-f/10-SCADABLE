@@ -147,7 +147,7 @@ Some additional features are planned for D3:
 - **Open-role monitoring:** Tracking hiring activity from competitor job listings.
 - **Detailed research cost analytics:** Expanded AI research cost monitoring.
 
-Some websites restrict automated crawling. When live crawling or analysis is unavailable, the system may use fallback data, so a completed research run does not necessarily indicate that all information was collected live.
+Some websites restrict automated crawling. If a competitor's website can't be crawled, the research run is marked failed ("Could not crawl the competitor's website.") instead of continuing with placeholder data. For offline development only, setting `ALLOW_MOCK_CRAWLER=true` makes failed crawls use mock pages. When LLM analysis is unavailable, the system may still use fallback data, so a completed research run does not necessarily indicate that the analysis was generated live.
 
 The main competitor research and SWOT workflow is available for testing in D2.
 

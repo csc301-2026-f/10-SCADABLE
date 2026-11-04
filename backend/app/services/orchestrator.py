@@ -49,7 +49,12 @@ from app.services.costs import (
     run_call_names,
     run_trace_prefix,
 )
-from app.services.crawler import CrawlerProtocol, get_default_crawler
+from app.services.crawler import (
+    CRAWL_FAILED_MESSAGE,
+    CrawlerProtocol,
+    CrawlFailedError,
+    get_default_crawler,
+)
 from app.services.diff import has_content_changed
 from app.services.llm import AnalyzerProtocol, get_default_analyzer
 
@@ -348,6 +353,16 @@ async def execute_research_run(
             run_id,
             ResearchStatus.FAILED,
             error_message=error_msg,
+        )
+
+    except CrawlFailedError:
+        # Details are logged by the crawler; the API only shows the safe message
+        logger.error("Run %s failed: crawl of %s failed", run_id, competitor.website_url)
+        return update_research_run_status(
+            db,
+            run_id,
+            ResearchStatus.FAILED,
+            error_message=CRAWL_FAILED_MESSAGE,
         )
 
     except Exception:

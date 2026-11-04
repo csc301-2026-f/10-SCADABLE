@@ -18,6 +18,7 @@ from app.api.schemas import (
     ScoreSeries,
 )
 from app.db.models import Competitor, ResearchRun, ResearchStatus, SWOTEntry
+from app.services.crawler import CRAWL_FAILED_MESSAGE
 import re
 
 _STATUS_MAP: dict[ResearchStatus, ApiResearchStatus] = {
@@ -33,7 +34,7 @@ ACTIVITY_WEEKS = 6
 SAFE_ERROR_MESSAGE = "Research failed due to an internal error."
 
 def safe_run_error(message: str | None) -> str:
-    if message == SAFE_ERROR_MESSAGE:
+    if message in (SAFE_ERROR_MESSAGE, CRAWL_FAILED_MESSAGE):
         return message
 
     if message and re.fullmatch(
