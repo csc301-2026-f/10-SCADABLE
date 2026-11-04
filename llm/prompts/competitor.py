@@ -40,7 +40,7 @@ and cite the page indices from where the claims were made, all organized into an
     <CLAIM_CITED_BY_INDEX>
     - category (string): exactly one of the following.
         <CATEGORIES>
-        - features: a product or service the company offers.
+        - features: a product or service the company offers to their customers or partners.
         - target_customers: a customer group the company primarily targets.
         - pricing: one plan or tier (format: "feature, plan/tier, pricing").
         - integrations: third-party tool(s) the product connects to.
@@ -77,6 +77,7 @@ is a deliberately limited selection of pages. Always extract claims solely based
 - The count in job_families is the number of job postings for that job family that work around a similar role (for example, a low-level software engineer intern is the same as a high-level software engineer intern).
 - Never return a "None" for any of the page_index values.
 - The summary and every claim must be plain prose. Never write page numbers, brackets or indexes inside any text field except.
+- A feature should be something that is usable. Documentation and company's internal workflow tools (which aren't open to public use) should not count as a "feature".
 </RULES>
 """
 

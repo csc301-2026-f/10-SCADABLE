@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from llm.config import Settings
 from langfuse import Langfuse
+import asyncio
 
 OutputModel = TypeVar("OutputModel", bound=BaseModel)
 
@@ -96,5 +97,5 @@ class OpenAIClient:
 
     async def close(self) -> None:
         """Release SDK HTTP resources without making an API request."""
-        self.cost_tracker.flush()
+        await asyncio.to_thread(self.cost_tracker.flush)
         await self.sdk.close()
