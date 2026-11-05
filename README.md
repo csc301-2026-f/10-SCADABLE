@@ -1,6 +1,6 @@
 # Live SWOT
 
-**Team 10 – Niche | CSC301 | Deliverable 2**
+**Team 10 – Niche | CSC301 | Deliverable 3**
 
 Live SWOT is a competitor-intelligence application developed for SCADABLE. It automatically researches competing companies and organizes findings into a SWOT analysis, helping SCADABLE understand its competitive position without manually researching every competitor.
 
@@ -32,7 +32,7 @@ The application helps users identify SCADABLE's strengths, weaknesses, market op
 
 Live SWOT includes a sign-in page implemented using **Clerk**. Account registration is currently invitation-only for SCADABLE and the course team.
 
-For D2 evaluation, the deployed application also provides a **Dev only → Go to dashboard** option, allowing evaluators to access the dashboard without an account.
+For local development, a **Dev only → Go to dashboard** option lets evaluators enter without a Clerk account while running `next dev`. The availability of this bypass on the hosted deployment must be verified before D3 submission.
 
 **Example use case:** A course evaluator visits the application and selects **Go to dashboard** to explore its features without needing login credentials.
 
@@ -64,7 +64,7 @@ Research results are stored in a PostgreSQL database, allowing users to revisit 
 
 Each tracked company has a profile displaying available information such as its website, summary, research status, recent activity, and research sources.
 
-Competitor profiles include a **Feature & Automation Score** section intended to show how competitor capabilities compare with SCADABLE's offerings on a 0–10 scale. This functionality is implemented in the research pipeline, but scores are not consistently generated in the current D2 deployment. When scores are unavailable, the interface displays "Scores not researched yet."
+Competitor profiles include **Feature & Automation Score** and **Scores vs SCADABLE** visualizations. The frontend reads values from the backend API and displays unavailable scores as missing rather than inventing a zero. SCADABLE-side ratings only appear once the LLM produces them. Profiles also show Open Roles when extraction returns a count, and Next Refresh when automatic scheduling is enabled.
 
 An **Activity over time** chart displays historical research activity for the competitor.
 
@@ -83,11 +83,11 @@ The SWOT Overview organizes SCADABLE's competitive position into four categories
 
 The analysis uses SCADABLE's current product baseline and research from tracked competitors.
 
-For D2, SCADABLE's product information is maintained as a static baseline. Automatic synchronization from GitHub is planned for D3.
+SCADABLE's product information currently uses a static baseline for comparison. Do not assume live GitHub synchronization unless the corresponding integration has been verified.
 
 **Example use case:** A SCADABLE founder opens the SWOT Overview to examine the available competitive findings across tracked companies such as Vanta and Drata, helping identify potential strengths, weaknesses, opportunities, and threats.
 
-**D2 limitation:** The SWOT Overview is implemented and displays saved findings, but the overall comparison does not consistently populate all four categories. Individual competitor research can still generate findings with supporting source URLs. Improving the completeness and reliability of the overall SWOT analysis remains a priority for D3.
+**Known limitation:** The overall LLM comparison may not consistently populate all SWOT categories. Verify the latest deployed behavior before describing comparison completeness as resolved.
 
 ### 6. Agent Runs and Research History
 
@@ -107,51 +107,33 @@ Each research run displays its main stages:
 
 ## How to Use Live SWOT
 
-### Deployed Application
+### Deployed Application and TA Access
 
-**Application URL:** https://scadable-d2.vercel.app/
+**Previously documented deployment:** https://scadable-d2.vercel.app/
+**Backend API:** https://backend-production-31e1b.up.railway.app/
 
-The D2 application is accessible through a web browser. No installation or technical knowledge is required.
+**D3 release check:** Before tagging `D3`, confirm which frontend URL is the current production deployment, that it reflects the latest `main` branch, and whether a TA can access it without an invitation. Replace the older D2 URL above if the team now uses a different deployment. Do not enable `ALLOW_DEV_DASHBOARD_BYPASS=true` in an actual production environment merely to avoid setting up access.
 
-Visitors are presented with a Clerk sign-in page. Invited users can sign in with their accounts.
+To evaluate the local application without a Clerk account, use `npm run dev` and the **Dev only → Go to dashboard** option. Invited users can also sign in using Clerk when valid credentials are configured.
 
-**For D2 evaluation, no account or password is required.** Evaluators can select **Dev only → Go to dashboard** on the sign-in page to access the application.
+### Suggested Evaluation Workflow
 
-The development dashboard shortcut is also available at:
+1. Open the verified deployed URL, or http://localhost:3000 after local setup.
+2. Sign in using an invited account, or select **Go to dashboard** in local development.
+3. Visit **Competitors** and inspect an existing tracked company.
+4. Select **Add Competitor**, enter a unique company name and a reachable homepage URL, and submit.
+5. Open **Agent Runs** to observe the pending/running/completed/failed state. Some sites restrict crawling; failed runs should display a clear error rather than silently returning fabricated scraped pages.
+6. Open the competitor profile to inspect the summary, findings, citations, feature scores, and — when available — Open Roles and Next Refresh.
+7. Use **Scores vs SCADABLE** to compare scores. A missing SCADABLE rating should be shown as unavailable, not 0/10.
+8. Visit **SWOT Overview** to inspect the overall analysis; some categories may be empty when the generated evidence does not support an entry.
 
-https://scadable-d2.vercel.app/api/dev/dashboard-bypass
+New live research can incur OpenAI costs and take time; use an existing completed competitor profile for a quick evaluation.
 
-This access method is intended for development and course evaluation rather than production authentication.
+### D3 Improvements Since D2
 
-### Getting Started
+D3 strengthens research reliability and profile usability: crawler failures are surfaced as failed runs instead of silently replacing real website data with mock pages, and the backend now supports Open Roles extraction and automatic refresh scheduling with retry/restart handling (PRs [#62](https://github.com/csc301-2026-f/10-SCADABLE/pull/62), [#63](https://github.com/csc301-2026-f/10-SCADABLE/pull/63)). The frontend connects **Scores vs SCADABLE**, **Open Roles**, and **Next Refresh** to backend API data, with explicit unavailable-data states (PR [#64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64)). Research cost instrumentation and associated tests have also been added to the research pipeline.
 
-1. Open https://scadable-d2.vercel.app/ in your browser.
-2. On the sign-in page, select **Go to dashboard** to access the D2 application without an account.
-3. Visit **SWOT Overview** to examine SCADABLE's current competitive analysis.
-4. Open **Competitors** to browse existing tracked companies.
-5. Click **Add Competitor** and enter a new company name and website URL. Use a company that is not already being tracked.
-6. Submit the form to add the competitor and initiate research.
-7. Open **Agent Runs** to monitor research progress. Research may take some time to finish.
-8. Return to **Competitors** and open the company's profile to review its research summary, recent activity, available sources, and feature scores when generated.
-9. Visit **SWOT Overview** to examine the currently available competitive findings. Some SWOT categories may remain empty in the D2 deployment.
-
-### D2 Scope and Limitations
-
-This release focuses on competitor management, automated research, research-run monitoring, competitor profiles, and the overall SWOT analysis.
-
-Some additional features are planned for D3:
-
-- **GitHub product integration:** Automatic synchronization of SCADABLE's product features from GitHub. D2 uses a static baseline.
-- **Scheduled research:** Recurring automatic research without manual initiation.
-- **Scores vs SCADABLE:** Direct comparisons between competitor scores and SCADABLE's own scores. D2 includes the competitor scoring interface, but generated scores are not consistently available.
-- **Open-role monitoring:** Tracking hiring activity from competitor job listings.
-- **Detailed research cost analytics:** Expanded AI research cost monitoring.
-
-Some websites restrict automated crawling. If a competitor's website can't be crawled, the research run is marked failed ("Could not crawl the competitor's website.") instead of continuing with placeholder data. For offline development only, setting `ALLOW_MOCK_CRAWLER=true` makes failed crawls use mock pages. When LLM analysis is unavailable, the system may still use fallback data, so a completed research run does not necessarily indicate that the analysis was generated live.
-
-The main competitor research and SWOT workflow is available for testing in D2.
-
-**Known D2 limitations:** Although feature scoring and the overall SWOT comparison are integrated into the application, the deployed system does not consistently produce feature scores or a complete four-category SWOT analysis. Automated competitor research, competitor profiles, source links, persistent storage, and research-run monitoring remain available. These limitations will be addressed through further integration and testing in D3.
+**Current limitations:** The automatic scheduler is disabled by default (`AUTO_REFRESH_ENABLED=false`); SCADABLE-side scores require corresponding LLM output and may be unavailable; some sites refuse automated crawling; and overall SWOT completeness depends on the evidence and model response. The system does not guarantee that every research run produces scores or a complete four-quadrant SWOT.
 
 ## Technical Overview
 
@@ -185,86 +167,167 @@ Display competitor profiles, agent runs,
 and SWOT analysis
 ```
 
-## Development Requirements
+## Local Development and TA Onboarding
 
-Non-technical users should access the deployed application. Local setup is intended for developers.
+These are the steps for a clean checkout. **Prerequisites:** Git, **Python 3.12**, **Node.js 22** with npm, and **Docker Desktop** (for the easiest local PostgreSQL setup) or a separately installed PostgreSQL server. Real web crawling also needs Playwright Chromium. Commands below target macOS/Linux; Windows users should adapt virtual-environment activation and shell syntax.
 
-### Running Tests
+### 1. Clone and configure all three environment templates
 
-From the repository root:
-
-```bash
-cd backend
-source .venv/bin/activate
-python -m pytest tests/test_api.py tests/test_orchestrator.py -q
-```
-
-The suite covers API endpoints, validation, research orchestration,
-caching, and security. PostgreSQL integration tests run in CI
-using an isolated test database.
-
-### Requirements
-
-- Python 3.12
-- Node.js and npm
-- PostgreSQL
-- Git
-
-### Frontend
-
-From the repository root:
+From a directory where you want the new checkout, run:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+git clone https://github.com/csc301-2026-f/10-SCADABLE.git
+cd 10-SCADABLE
+cp .env.example .env
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env.local
 ```
 
-Open http://localhost:3000.
+After `cd 10-SCADABLE`, commands in the rest of this guide assume you are at the **repository root** (the folder containing `frontend/`, `backend/`, `scraper/` and `llm/`). For D3 README verification, check out `docs/d3-readme-onboarding` in a separate clone so you test the proposed instructions rather than older `main` documentation.
 
-Configure the API connection in the frontend environment:
+Edit the three newly created files **locally**. The templates contain placeholders, not working credentials. Do not commit `.env`, `backend/.env`, `frontend/.env.local`, API keys, database passwords or tokens.
 
-```text
+| File | Variables | When needed |
+| --- | --- | --- |
+| Root `.env` (LLM + scraper) | `OPENAI_API_KEY` | Required for real OpenAI analysis and LLM-guided scraper selection; obtain a development key from the team. Never commit it. |
+| Root `.env` | `OPENAI_MODEL` | Required for real analysis. Choose a model supported by your account that accepts structured outputs through the Responses API. |
+| Root `.env` | `OPENAI_TIMEOUT_SECONDS` | Optional analysis timeout; template defaults to `30`. |
+| Root `.env` | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` | Optional cost tracing; both keys are required to enable Langfuse tracing. |
+| `backend/.env` | `DATABASE_URL` | Required PostgreSQL connection string; change the example username/password/database to match your local database. |
+| `backend/.env` | `CORS_ORIGINS` | Comma-separated allowed frontend origins; for local use include `http://localhost:3000`. |
+| `backend/.env` | `ALLOW_MOCK_CRAWLER` | Keep `false` for real research; `true` is **offline development only** and may substitute mock pages on crawl failure. |
+| `backend/.env` | `AUTO_REFRESH_ENABLED` | Defaults to `false` to avoid unplanned crawl/OpenAI calls. Set `true` only when intentionally testing scheduled refreshes. |
+| `backend/.env` | `COMPETITOR_REFRESH_DAYS`, `COMPETITOR_REFRESH_RETRY_MINUTES`, `COMPETITOR_REFRESH_POLL_SECONDS` | Optional refresh configuration; template defaults are 7 days, 60 minutes and 60 seconds. |
+| `frontend/.env.local` | `NEXT_PUBLIC_API_URL` | Use `http://localhost:8000` for the local FastAPI server. |
+| `frontend/.env.local` | `NEXT_PUBLIC_USE_MOCKS` | Set to `false` to test the real backend. `true` uses frontend fixtures and does **not** verify full-stack integration. |
+| `frontend/.env.local` | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | Required for real Clerk sign-in. Leave empty when using the **local-development-only** dashboard bypass. The publishable key is public; the secret key is not. |
+| `frontend/.env.local` | `ALLOW_DEV_DASHBOARD_BYPASS` | Optional; **do not enable in production**. Local `next dev` already permits the development bypass. |
+
+**Minimum local edits for the integrated app:**
+
+```env
+# frontend/.env.local
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_USE_MOCKS=false
 ```
 
-Clerk authentication requires the appropriate environment variables:
+For live AI research, also fill `OPENAI_API_KEY` and `OPENAI_MODEL` in the **root** `.env` and leave `ALLOW_MOCK_CRAWLER=false` in `backend/.env`. API keys are **not required to view the frontend or run offline tests**, but without them you are **not verifying live OpenAI research**.
 
-```text
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-CLERK_SECRET_KEY
+### 2. Start PostgreSQL and initialize the schema
+
+The simplest reproducible local database uses Docker Desktop. Start Docker Desktop first, ensure port **5432** is free, then run:
+
+```bash
+docker run --name scadable-dev-postgres \
+  -e POSTGRES_USER=scadable \
+  -e POSTGRES_PASSWORD=scadable_local_only \
+  -e POSTGRES_DB=live_swot \
+  -p 5432:5432 -d postgres:16
+docker exec scadable-dev-postgres pg_isready -U scadable -d live_swot
 ```
 
-Developers should obtain the required credentials from the team and configure them locally. Secrets and environment files should not be committed to GitHub.
+This password is an **example for local development only**, never a production secret. In `backend/.env`, set:
 
-### Backend
+```env
+DATABASE_URL=postgresql+psycopg://scadable:scadable_local_only@localhost:5432/live_swot
+```
 
-From the repository root:
+If you already run PostgreSQL directly on your machine, create a database called `live_swot` with your existing PostgreSQL user and replace `DATABASE_URL` with its valid connection string instead. Do **not** point test commands at Railway or another shared/production database.
+
+### 3. Install Python dependencies and Chromium
+
+From the repository root, in **Terminal A**:
+
+```bash
+python3.12 -m venv backend/.venv
+source backend/.venv/bin/activate
+python -m pip install -r backend/requirements.txt
+python -m pip install ./scraper -e ./llm -e ".[dev]"
+mkdir -p scraper/.uv-cache/playwright
+PLAYWRIGHT_BROWSERS_PATH="$PWD/scraper/.uv-cache/playwright" python -m playwright install chromium
+```
+
+The backend requirements alone do **not** install the separate scraper/LLM packages. The additional `pip` command matches the dependency groups used by CI. Chromium is required for live Crawl4AI research but not for the default offline tests. On Linux, Playwright may additionally need system dependencies; see the [pipeline guide](docs/research-pipeline.md#setup).
+
+Initialize the database and launch FastAPI (same Terminal A):
 
 ```bash
 cd backend
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+python -m app.db.init_db
 uvicorn app.main:app --reload
 ```
 
-The backend runs at http://localhost:8000, with API documentation available at http://localhost:8000/docs.
+Confirm the backend works:
 
-Local backend use requires the appropriate environment configuration, including a PostgreSQL connection and credentials for live AI research.
+```text
+http://localhost:8000/health    (should return {"status":"ok"})
+http://localhost:8000/docs      (interactive API documentation)
+```
 
-### Standalone Research Pipeline
+Leave Terminal A running. If initialization fails, first verify Docker/PostgreSQL is running and the `DATABASE_URL` in `backend/.env` matches its credentials.
 
-The repository also contains a standalone Python research pipeline.
+### 4. Start the frontend in a separate terminal
 
-- `scraper/` handles website content collection.
-- `llm/` handles AI analysis, prompts, and structured outputs.
+From the repository root, in **Terminal B**:
 
-Additional documentation:
+```bash
+cd frontend
+npm ci
+npm run dev
+```
 
-- [Research Pipeline Guide](docs/research-pipeline.md)
-- [Scraper Documentation](scraper/README.md)
+Open **http://localhost:3000**. If you have not configured Clerk, use **Dev only → Go to dashboard** for local development. The profile/competitor screens should request the local FastAPI API because `NEXT_PUBLIC_USE_MOCKS=false`.
+
+If the frontend shows fixtures rather than real backend data, recheck `NEXT_PUBLIC_USE_MOCKS` and restart the Next.js server after changing environment variables. If requests fail, verify `/health` and `CORS_ORIGINS` in `backend/.env`.
+
+### 5. Run the tests and quality checks
+
+Use a **third terminal** or stop the backend process before running backend tests. From the repository root, using the Python virtual environment installed above:
+
+```bash
+source backend/.venv/bin/activate
+cd backend
+DATABASE_URL="sqlite:///:memory:" python -m pytest \
+  tests/test_api.py tests/test_orchestrator.py tests/test_overall_swot_review.py \
+  tests/test_llm_adapter.py tests/test_costs.py -q
+```
+
+This is the standard **offline backend suite used by CI**; the crawler and LLM are mocked where appropriate, so it should not make billable API calls. The repository also has additional backend and pipeline tests; run them separately when needed.
+
+For frontend quality checks (from the repository root):
+
+```bash
+cd frontend
+npm run lint
+npx tsc --noEmit
+```
+
+For the **PostgreSQL API integration test**, use a dedicated `_test` database; it never uses the application database. After the database container is running:
+
+```bash
+docker exec scadable-dev-postgres createdb -U scadable live_swot_test
+cd backend
+source .venv/bin/activate
+TEST_DATABASE_URL="postgresql+psycopg://scadable:scadable_local_only@localhost:5432/live_swot_test" \
+DATABASE_URL="postgresql+psycopg://scadable:scadable_local_only@localhost:5432/live_swot_test" \
+python -m pytest tests/test_api_db_integration.py -q
+```
+
+The integration test uses a **mock crawler/LLM by default**, but persists results through the real PostgreSQL database and API. Do not set `RUN_LIVE_PIPELINE_TEST=1` unless you explicitly want external crawling and billable OpenAI calls. The current GitHub Actions workflow runs the five specified backend test modules plus frontend ESLint; it does **not** currently run the PostgreSQL integration test module as a job step.
+
+### 6. Fresh-clone verification before the D3 release
+
+To complete the environment-documentation ticket, open an **independent clone** (for example `~/Desktop/SCADABLE-TA-test`) with **no existing `.venv`, `node_modules`, or `.env` files**, and follow only this README. Verify that:
+
+- All three environment templates can be copied and configured without asking for undocumented steps (a teammate may need to provide authorized API/Clerk credentials).
+- A new PostgreSQL database starts and `python -m app.db.init_db` succeeds.
+- `/health` and `/docs` load; the frontend opens at http://localhost:3000, accesses the **real** backend rather than fixtures, and supports a core navigation/workflow.
+- The documented offline backend tests and frontend checks run; optionally run the PostgreSQL integration test in its isolated `_test` database.
+- If using real OpenAI credentials and Chromium, add one **new** competitor and observe its run and persisted profile. Record site-specific crawl failures without treating them as setup failures.
+
+**Verification status:** **Pending fresh-clone execution.** Do not mark the ticket verified until these commands have actually been followed and their results/errors recorded. Fix any incorrect instructions discovered and re-test.
+
+For deeper component instructions, see [Backend README](backend/README.md), [Frontend README](frontend/README.md), [LLM README](llm/README.md), [Scraper README](scraper/README.md), and the [Research Pipeline Guide](docs/research-pipeline.md).
 
 ## Git and GitHub Workflow
 
@@ -285,15 +348,15 @@ This workflow helps our seven-member team avoid conflicting changes, review code
 
 ### Deployment Workflow
 
-The D2 frontend is deployed on **Vercel**, while the backend API and PostgreSQL database are hosted on **Railway**.
+The frontend is deployed on **Vercel**, while the backend API and PostgreSQL database are hosted on **Railway**.
 
-**Frontend:** https://scadable-d2.vercel.app/
+**Previously documented frontend URL (verify D3):** https://scadable-d2.vercel.app/
 
 **Backend API:** https://backend-production-31e1b.up.railway.app/
 
-Backend deployments use the Railway CLI. Frontend deployments are managed separately through Vercel.
+Backend deployments run on Railway; the frontend uses Vercel. GitHub Actions runs the backend test subset and frontend ESLint on pull requests to `main`, with 5-minute job timeouts. The hosting integrations should deploy merged changes automatically when wired to the production branch; confirm both production targets use the latest `main` revision before release.
 
-The team coordinates deployments to maintain compatibility between frontend and backend changes.
+**Known operational caveat:** A separate fork-sync workflow can fail if its token lacks permission to update `.github/workflows/*`; that failure does not by itself establish that Vercel or Railway deployed successfully. Check both deployments independently.
 
 ## Coding Standards and Guidelines
 
@@ -343,6 +406,6 @@ SCADABLE follows a mixed licensing approach, maintaining proprietary repositorie
 
 - **D1:** Interactive frontend prototype and initial project design.
 - **D2:** Deployed full-stack application with competitor research, persistent data, research-run monitoring, authentication UI, and SWOT analysis.
-- **D3 (planned):** Additional automation, integrations, and product improvements.
+- **D3:** Research-failure handling, refresh scheduling and Open Roles backend support, frontend API-connected profile data, and expanded research cost instrumentation. See [PR #62](https://github.com/csc301-2026-f/10-SCADABLE/pull/62), [PR #63](https://github.com/csc301-2026-f/10-SCADABLE/pull/63), and [PR #64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64).
 
 The original D1 prototype remains available [here](https://csc301-2026-f.github.io/10-SCADABLE/deliverables/D1/mockups/final-prototype.html).
