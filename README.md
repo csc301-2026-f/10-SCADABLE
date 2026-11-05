@@ -32,9 +32,9 @@ The application helps users identify SCADABLE's strengths, weaknesses, market op
 
 Live SWOT includes a sign-in page implemented using **Clerk**. Account registration is currently invitation-only for SCADABLE and the course team.
 
-For local development, a **Dev only → Go to dashboard** option lets evaluators enter without a Clerk account while running `next dev`. The availability of this bypass on the hosted deployment must be verified before D3 submission.
+For D3 evaluation, the hosted application provides a **Dev only → Go to dashboard** shortcut at the **top right** of the sign-in page. TAs can use it to enter the dashboard without a Clerk account or invitation. The same shortcut is available during local development.
 
-**Example use case:** A course evaluator visits the application and selects **Go to dashboard** to explore its features without needing login credentials.
+**Example use case:** A course evaluator opens the [D3 application](https://10-scadable.vercel.app/competitors), selects **Go to dashboard** at the top right if prompted to sign in, and explores the competitor research dashboard.
 
 ![Live SWOT sign-in page](docs/screenshots/image-1.png)
 
@@ -83,11 +83,11 @@ The SWOT Overview organizes SCADABLE's competitive position into four categories
 
 The analysis uses SCADABLE's current product baseline and research from tracked competitors.
 
-SCADABLE's product information currently uses a static baseline for comparison. Do not assume live GitHub synchronization unless the corresponding integration has been verified.
+SCADABLE's product information uses a static baseline in the current comparison workflow; live GitHub synchronization is not part of this documented evaluation flow.
 
 **Example use case:** A SCADABLE founder opens the SWOT Overview to examine the available competitive findings across tracked companies such as Vanta and Drata, helping identify potential strengths, weaknesses, opportunities, and threats.
 
-**Known limitation:** The overall LLM comparison may not consistently populate all SWOT categories. Verify the latest deployed behavior before describing comparison completeness as resolved.
+**Known limitation:** Depending on the researched evidence and model response, the overall SWOT may contain fewer findings in some categories.
 
 ### 6. Agent Runs and Research History
 
@@ -109,17 +109,18 @@ Each research run displays its main stages:
 
 ### Deployed Application and TA Access
 
-**Previously documented deployment:** https://scadable-d2.vercel.app/
+**D3 application:** https://10-scadable.vercel.app/
+
+**Competitors page:** https://10-scadable.vercel.app/competitors
+
 **Backend API:** https://backend-production-31e1b.up.railway.app/
 
-**D3 release check:** Before tagging `D3`, confirm which frontend URL is the current production deployment, that it reflects the latest `main` branch, and whether a TA can access it without an invitation. Replace the older D2 URL above if the team now uses a different deployment. Do not enable `ALLOW_DEV_DASHBOARD_BYPASS=true` in an actual production environment merely to avoid setting up access.
-
-To evaluate the local application without a Clerk account, use `npm run dev` and the **Dev only → Go to dashboard** option. Invited users can also sign in using Clerk when valid credentials are configured.
+**TA access (no account required):** Open the D3 application. On the sign-in page, click **Go to dashboard** in the **top-right corner** (next to **Dev only**). The dashboard opens without a Clerk invitation, just as in D2. Invited users can alternatively sign in through Clerk. For a locally run development instance, the same **Go to dashboard** shortcut is available without Clerk keys.
 
 ### Suggested Evaluation Workflow
 
-1. Open the verified deployed URL, or http://localhost:3000 after local setup.
-2. Sign in using an invited account, or select **Go to dashboard** in local development.
+1. Open https://10-scadable.vercel.app/competitors (or http://localhost:3000 after local setup).
+2. If redirected to sign-in, click **Go to dashboard** at the top right; no account is required for course evaluation.
 3. Visit **Competitors** and inspect an existing tracked company.
 4. Select **Add Competitor**, enter a unique company name and a reachable homepage URL, and submit.
 5. Open **Agent Runs** to observe the pending/running/completed/failed state. Some sites restrict crawling; failed runs should display a clear error rather than silently returning fabricated scraped pages.
@@ -183,7 +184,7 @@ cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env.local
 ```
 
-After `cd 10-SCADABLE`, commands in the rest of this guide assume you are at the **repository root** (the folder containing `frontend/`, `backend/`, `scraper/` and `llm/`). For D3 README verification, check out `docs/d3-readme-onboarding` in a separate clone so you test the proposed instructions rather than older `main` documentation.
+The commands below assume you are at the **repository root** (the folder containing `frontend/`, `backend/`, `scraper/` and `llm/`), unless the section explicitly changes directories.
 
 Edit the three newly created files **locally**. The templates contain placeholders, not working credentials. Do not commit `.env`, `backend/.env`, `frontend/.env.local`, API keys, database passwords or tokens.
 
@@ -199,8 +200,8 @@ Edit the three newly created files **locally**. The templates contain placeholde
 | `backend/.env` | `AUTO_REFRESH_ENABLED` | Defaults to `false` to avoid unplanned crawl/OpenAI calls. Set `true` only when intentionally testing scheduled refreshes. |
 | `backend/.env` | `COMPETITOR_REFRESH_DAYS`, `COMPETITOR_REFRESH_RETRY_MINUTES`, `COMPETITOR_REFRESH_POLL_SECONDS` | Optional refresh configuration; template defaults are 7 days, 60 minutes and 60 seconds. |
 | `frontend/.env.local` | `NEXT_PUBLIC_API_URL` | Use `http://localhost:8000` for the local FastAPI server. |
-| `frontend/.env.local` | `NEXT_PUBLIC_USE_MOCKS` | Set to `false` to test the real backend. `true` uses frontend fixtures and does **not** verify full-stack integration. |
-| `frontend/.env.local` | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | Required for real Clerk sign-in. Leave empty when using the **local-development-only** dashboard bypass. The publishable key is public; the secret key is not. |
+| `frontend/.env.local` | `NEXT_PUBLIC_USE_MOCKS` | Defaults to `false` in the D3 template so the frontend talks to FastAPI. Set to `true` only for standalone frontend development with fixtures; mock mode does **not** verify full-stack integration. |
+| `frontend/.env.local` | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | Required for real Clerk sign-in. Leave empty for the local development dashboard shortcut. The publishable key is public; the secret key is not. |
 | `frontend/.env.local` | `ALLOW_DEV_DASHBOARD_BYPASS` | Optional; **do not enable in production**. Local `next dev` already permits the development bypass. |
 
 **Minimum local edits for the integrated app:**
@@ -232,6 +233,20 @@ This password is an **example for local development only**, never a production s
 DATABASE_URL=postgresql+psycopg://scadable:scadable_local_only@localhost:5432/live_swot
 ```
 
+**If host port 5432 is in use:** Docker may fail with `bind: address already in use`. A failed `docker run` may still leave the named container behind. Use another available host port (for example **5436**) by running:
+
+```bash
+docker rm -f scadable-dev-postgres
+docker run --name scadable-dev-postgres \
+  -e POSTGRES_USER=scadable \
+  -e POSTGRES_PASSWORD=scadable_local_only \
+  -e POSTGRES_DB=live_swot \
+  -p 5436:5432 -d postgres:16
+docker exec scadable-dev-postgres pg_isready -U scadable -d live_swot
+```
+
+Then use `DATABASE_URL=postgresql+psycopg://scadable:scadable_local_only@localhost:5436/live_swot` **inside `backend/.env`** (not just as a shell assignment). The container's internal PostgreSQL port remains 5432; the **host** port is 5436. Use the same host port in any PostgreSQL integration-test connection strings below.
+
 If you already run PostgreSQL directly on your machine, create a database called `live_swot` with your existing PostgreSQL user and replace `DATABASE_URL` with its valid connection string instead. Do **not** point test commands at Railway or another shared/production database.
 
 ### 3. Install Python dependencies and Chromium
@@ -249,12 +264,25 @@ PLAYWRIGHT_BROWSERS_PATH="$PWD/scraper/.uv-cache/playwright" python -m playwrigh
 
 The backend requirements alone do **not** install the separate scraper/LLM packages. The additional `pip` command matches the dependency groups used by CI. Chromium is required for live Crawl4AI research but not for the default offline tests. On Linux, Playwright may additionally need system dependencies; see the [pipeline guide](docs/research-pipeline.md#setup).
 
+**macOS troubleshooting — virtual environment fails during `ensurepip`:** During the D3 fresh-clone test, Homebrew Python 3.12 failed while bootstrapping pip (`truststore/_macos.py`, macOS version detection). The working alternative was `uv`, which can manage a separate Python installation and create the virtual environment without `ensurepip`:
+
+```bash
+brew install uv
+uv python install 3.12
+uv venv --python 3.12 --managed-python --clear backend/.venv
+source backend/.venv/bin/activate
+uv pip install -r backend/requirements.txt
+uv pip install ./scraper -e ./llm -e ".[dev]"
+```
+
+Run these from the repository root. Use the `uv` commands **instead of** the failed `python3.12 -m venv` / `pip` installation steps above; you do not need to reinstall the system Python. Once installed, run the same Playwright Chromium command shown above. `--clear` only replaces the test checkout's `backend/.venv`.
+
 Initialize the database and launch FastAPI (same Terminal A):
 
 ```bash
 cd backend
 python -m app.db.init_db
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --reload-dir app
 ```
 
 Confirm the backend works:
@@ -264,7 +292,7 @@ http://localhost:8000/health    (should return {"status":"ok"})
 http://localhost:8000/docs      (interactive API documentation)
 ```
 
-Leave Terminal A running. If initialization fails, first verify Docker/PostgreSQL is running and the `DATABASE_URL` in `backend/.env` matches its credentials.
+Leave Terminal A running. `--reload-dir app` restricts automatic reloads to application source code; otherwise a fresh dependency installation can trigger repeated reloads when Uvicorn watches `.venv`. If initialization fails, first verify Docker/PostgreSQL is running and the `DATABASE_URL` in `backend/.env` matches its credentials. If port 8000 is occupied, stop that local service before launching the backend.
 
 ### 4. Start the frontend in a separate terminal
 
@@ -313,19 +341,15 @@ DATABASE_URL="postgresql+psycopg://scadable:scadable_local_only@localhost:5432/l
 python -m pytest tests/test_api_db_integration.py -q
 ```
 
-The integration test uses a **mock crawler/LLM by default**, but persists results through the real PostgreSQL database and API. Do not set `RUN_LIVE_PIPELINE_TEST=1` unless you explicitly want external crawling and billable OpenAI calls. The current GitHub Actions workflow runs the five specified backend test modules plus frontend ESLint; it does **not** currently run the PostgreSQL integration test module as a job step.
+If PostgreSQL was started on **host port 5436**, substitute `5436` for `5432` in the two integration-test URLs above. The integration test uses a **mock crawler/LLM by default**, but persists results through the real PostgreSQL database and API. Do not set `RUN_LIVE_PIPELINE_TEST=1` unless you explicitly want external crawling and billable OpenAI calls. The current GitHub Actions workflow runs the five specified backend test modules plus frontend ESLint; it does **not** currently run the PostgreSQL integration test module as a job step.
 
-### 6. Fresh-clone verification before the D3 release
+### 6. Local setup verification results
 
-To complete the environment-documentation ticket, open an **independent clone** (for example `~/Desktop/SCADABLE-TA-test`) with **no existing `.venv`, `node_modules`, or `.env` files**, and follow only this README. Verify that:
+**Fresh-clone verification — November 5, 2026 (macOS):** The application was installed in an independent checkout without existing project dependencies or environment files. The setup used Python 3.12.14, Node.js 24.21.0, npm 11.19.0 and Docker 29.5.2. All three environment templates were copied. PostgreSQL started in Docker on host port **5436**, and the tables initialized successfully with `python -m app.db.init_db`. Python dependencies were installed with `uv` after a Homebrew `ensurepip` problem.
 
-- All three environment templates can be copied and configured without asking for undocumented steps (a teammate may need to provide authorized API/Clerk credentials).
-- A new PostgreSQL database starts and `python -m app.db.init_db` succeeds.
-- `/health` and `/docs` load; the frontend opens at http://localhost:3000, accesses the **real** backend rather than fixtures, and supports a core navigation/workflow.
-- The documented offline backend tests and frontend checks run; optionally run the PostgreSQL integration test in its isolated `_test` database.
-- If using real OpenAI credentials and Chromium, add one **new** competitor and observe its run and persisted profile. Record site-specific crawl failures without treating them as setup failures.
+FastAPI launched successfully; `/health` returned `{"status":"ok"}` and `/docs` displayed the expected API endpoints. Next.js started, the development dashboard shortcut worked, and the frontend was configured with `NEXT_PUBLIC_USE_MOCKS=false`. `GET /competitors` and `GET /swot/overview` both returned **HTTP 200**, with empty results as expected for a new database.
 
-**Verification status:** **Pending fresh-clone execution.** Do not mark the ticket verified until these commands have actually been followed and their results/errors recorded. Fix any incorrect instructions discovered and re-test.
+**Verification scope:** Fresh-clone application startup and local API responses were confirmed. The automated test suite was not rerun in the fresh checkout; automated checks are run separately by CI. Live third-party crawling and OpenAI calls were not part of this setup verification. Authorized OpenAI credentials are needed to test live research.
 
 For deeper component instructions, see [Backend README](backend/README.md), [Frontend README](frontend/README.md), [LLM README](llm/README.md), [Scraper README](scraper/README.md), and the [Research Pipeline Guide](docs/research-pipeline.md).
 
@@ -350,13 +374,13 @@ This workflow helps our seven-member team avoid conflicting changes, review code
 
 The frontend is deployed on **Vercel**, while the backend API and PostgreSQL database are hosted on **Railway**.
 
-**Previously documented frontend URL (verify D3):** https://scadable-d2.vercel.app/
+**D3 frontend:** https://10-scadable.vercel.app/
+
+**D3 competitors page:** https://10-scadable.vercel.app/competitors
 
 **Backend API:** https://backend-production-31e1b.up.railway.app/
 
-Backend deployments run on Railway; the frontend uses Vercel. GitHub Actions runs the backend test subset and frontend ESLint on pull requests to `main`, with 5-minute job timeouts. The hosting integrations should deploy merged changes automatically when wired to the production branch; confirm both production targets use the latest `main` revision before release.
-
-**Known operational caveat:** A separate fork-sync workflow can fail if its token lacks permission to update `.github/workflows/*`; that failure does not by itself establish that Vercel or Railway deployed successfully. Check both deployments independently.
+The frontend is hosted on Vercel; the backend API and database are hosted on Railway. GitHub Actions runs backend tests and frontend ESLint on pull requests to `main`, with five-minute job timeouts. The team uses reviewed pull requests and hosted deployments to keep frontend and backend changes coordinated.
 
 ## Coding Standards and Guidelines
 
