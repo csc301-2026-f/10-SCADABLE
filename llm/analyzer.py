@@ -6,9 +6,7 @@ from llm.prompts.comparison import (
     build_comparison_user_prompt,
 )
 from llm.prompts.competitor import (
-    COMPANY_ANALYSIS_SYSTEM_PROMPT,
     DATA_EXTRACTION_SYSTEM_PROMPT,
-    build_company_user_prompt,
     build_extraction_user_prompt,
 )
 from llm.schemas import (
@@ -17,16 +15,13 @@ from llm.schemas import (
     ClaimCitedByIndex,
     ConflictCitedByURL,
     ConflictEntry,
-    PartialCompanyAnalysisByIndex,
     PartialExtractedInformationByIndex,
-    CompanyAnalysis,
-    CompanyAnalysisByIndex,
     ComparisonInput,
     ComparisonInputByIndex,
-    JobCitedByURL,
     JobCitedByIndex,
-    ExtractedInformationByURL,
+    JobCitedByURL,
     ExtractedInformationByIndex,
+    ExtractedInformationByURL,
     FeatureScore,
     FeatureScoreByIndex,
     SWOTAnalysisByIndex,
@@ -59,12 +54,22 @@ def _validate_feature_scores(company_count: int, scores: list[FeatureScoreByInde
                 f"(valid: 1 to {company_count - 1})."
             )
 
-def _company_by_index(position: int, company: CompanyAnalysis, url_index) -> CompanyAnalysisByIndex:
-    return CompanyAnalysisByIndex(
+def _extraction_by_index(position: int, company: ExtractedInformationByURL, url_index: list[dict[str, int]]) -> ExtractedInformationByIndex:
+    """
+    A helper function to build an Extract
+    """
+    return ExtractedInformationByIndex(
         company_index=position,
         company_name=company.company_name,
-        summary=company.summary,
-        features=company.features,
+        job_postings=[
+            JobCitedByIndex(
+                role=j.role, 
+                category=j.category,
+                job_families=j.job_families,
+                job_page_index=url_index[position][j.job_page_url]   
+            )
+            for j in company.job_postings
+        ],
         claims_cited=[
             ClaimCitedByIndex(
                 category=c.category,
@@ -123,50 +128,16 @@ class Analyzer:
                                       )
         return result
 
-    async def analyze_company(self, data: ExtractedInformationByURL) -> CompanyAnalysis:
-        """
-        Analyzes the company based on its website data extracted and stored "data".
-        """
-        # Stores all distinct URLs from the input
-        urls = list(dict.fromkeys(                  # distinct, in first-seen order
-            [c.claim_page_url for c in data.claims_cited]
-            + [j.job_page_url for j in data.job_postings]
-            + data.summary_page_urls
-        ))
-        url_index = {url: i for i, url in enumerate(urls)}
-
-        llm_input = ExtractedInformationByIndex(company_name=data.company_name, 
-                                                       summary=data.summary, 
-                                                       job_postings=[JobCitedByIndex(role=d.role, 
-                                                                                     category=d.category, 
-                                                                                     job_families=d.job_families,
-                                                                                     job_page_index=url_index[d.job_page_url]) for d in data.job_postings],
-                                                        claims_cited=[ClaimCitedByIndex(category=c.category, claim=c.claim, claim_page_index=url_index[c.claim_page_url]) for c in data.claims_cited])
-        partial = await self.client.generate_structured(
-            instructions=COMPANY_ANALYSIS_SYSTEM_PROMPT,
-            input_text=build_company_user_prompt(llm_input),
-            output_schema=PartialCompanyAnalysisByIndex,
-            observation_name=self._observation_name(
-                "analysis", data.company_name + "-analysis-" + data.crawl_time_string
-            ),
-        )
-        _validate_citations(
-            last_index=len(urls) - 1,
-            index_directory={"Claim":[p.claim_page_index for p in partial.claims_cited]}
-        )
-        result = build_company_analysis(partial, data, urls)
-        return result
-
     async def compare(self, data: ComparisonInput) -> SWOTAnalysisByURL:
         companies = [data.scadable, *data.competitors]
-        company_urls = [list(dict.fromkeys(c.claim_page_url for c in company.claims_cited))
+        company_urls = [list(dict.fromkeys([c.claim_page_url for c in company.claims_cited] + [j.job_page_url for j in company.job_postings]))
                         for company in companies]
 
         url_index = [{url: i for i, url in enumerate(urls)} for urls in company_urls]
 
         llm_input = ComparisonInputByIndex(
-            scadable=_company_by_index(0, data.scadable, url_index),
-            competitors=[_company_by_index(p, c, url_index)
+            scadable=_extraction_by_index(0, data.scadable, url_index),
+            competitors=[_extraction_by_index(p, c, url_index)
                          for p, c in enumerate(data.competitors, start=1)],
         )
 
@@ -205,18 +176,3 @@ class Analyzer:
             conflicting_data=[data.scadable.conflicting_data] + [c.conflicting_data for c in data.competitors]
         )
 
-
-def build_company_analysis(partial: PartialCompanyAnalysisByIndex, data: ExtractedInformationByURL, index_url: list[str]) -> CompanyAnalysis:
-    """
-    A helper function that returns the partial result into a CompanyAnalysis object, 
-    containing the company's name, summary, and source URLs for the summary.
-    """
-    return CompanyAnalysis(claims_cited=[ClaimCitedByURL(category=c.category, 
-                                                         claim=c.claim, claim_page_url=index_url[c.claim_page_index]) for c in partial.claims_cited],  
-                           summary=data.summary, 
-                           summary_page_urls=data.summary_page_urls,
-                           features=[c.claim for c in data.claims_cited if c.category == "features"],
-                           company_name=data.company_name,
-                           conflicting_data=data.conflicting_data,
-                           crawl_time_string=data.crawl_time_string
-                           )

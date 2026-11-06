@@ -7,11 +7,11 @@ from pydantic import AfterValidator, BaseModel, Field
 from scraper import CrawlExportSummary, ExportedPage
 
 Category = Literal[
-    "features",
+    "feature",
     "target_customers",
     "pricing",
     "integrations",
-    "differentiators",
+    "differentiator",
     "strength",
     "weakness",
     "workforce_improvement",
@@ -151,7 +151,6 @@ class FeatureScoreByIndex(BaseModel):
 
 class FeatureScore(BaseModel):
     """One competitor feature scored 0-10, by company name. Use this after the LLM output has been converted."""
-
     company_name: str
     feature: str
     score: Score
@@ -183,38 +182,40 @@ class ExtractedInformationByURL(ExtractedInformation):
     conflicting_data: ConflictEntry
     crawl_time_string: str
 
-class ExtractedInformationByIndex(ExtractedInformation):
-    """Used for input conversion for LLM prompt"""
+class ExtractedInformationByIndex(BaseModel):
+    """Used for input conversion for comparison LLM prompt."""
+    company_index: int
+    company_name: str
     job_postings: list[JobCitedByIndex]
     claims_cited: list[ClaimCitedByIndex]
 
 
-class PartialCompanyAnalysisByIndex(BaseModel):
-    """Used for LLM output schema."""
-    claims_cited: list[ClaimCitedByIndex]
+# class PartialCompanyAnalysisByIndex(BaseModel):
+#     """Used for LLM output schema."""
+#     claims_cited: list[ClaimCitedByIndex]
 
-class CompanyAnalysis(BaseModel):
-    """Shared analysis shape for a competitor or SCADABLE."""
+# class CompanyAnalysis(BaseModel):
+#     """Shared analysis shape for a competitor or SCADABLE."""
 
-    company_name: str
-    summary: str
-    summary_page_urls: list[str]
-    claims_cited: list[ClaimCitedByURL]
-    conflicting_data: ConflictEntry
-    # The company's features, as extracted. They are scored later, in compare().
-    features: list[str]
-    crawl_time_string: str
+#     company_name: str
+#     summary: str
+#     summary_page_urls: list[str]
+#     claims_cited: list[ClaimCitedByURL]
+#     conflicting_data: ConflictEntry
+#     # The company's features, as extracted. They are scored later, in compare().
+#     features: list[str]
+#     crawl_time_string: str
 
-    def claims_in(self, category: Category) -> list[str]:
-        return [c.claim for c in self.claims_cited if c.category == category]
+#     def claims_in(self, category: Category) -> list[str]:
+#         return [c.claim for c in self.claims_cited if c.category == category]
 
-    @property
-    def strengths(self) -> list[str]:
-        return self.claims_in("strength")
+#     @property
+#     def strengths(self) -> list[str]:
+#         return self.claims_in("strength")
 
-    @property
-    def weaknesses(self) -> list[str]:
-        return self.claims_in("weakness")
+#     @property
+#     def weaknesses(self) -> list[str]:
+#         return self.claims_in("weakness")
 
 class CompanyAnalysisByIndex(BaseModel):
     company_index: int
@@ -229,20 +230,18 @@ class CompetitorResearchResult(BaseModel):
 
     crawl_summary: CrawlExportSummary
     extracted_information: ExtractedInformationByURL
-    analysis: CompanyAnalysis
 
 
 class ComparisonInput(BaseModel):
-    scadable: CompanyAnalysis
-    competitors: list[CompanyAnalysis]
+    scadable: ExtractedInformationByURL
+    competitors: list[ExtractedInformationByURL]
 
 class ComparisonInputByIndex(BaseModel):
-    scadable: CompanyAnalysisByIndex
-    competitors: list[CompanyAnalysisByIndex]
+    scadable: ExtractedInformationByIndex
+    competitors: list[ExtractedInformationByIndex]
 
 class CompetitorNote(BaseModel):
     """Short explanation of what one competitor means for SCADABLE."""
-
     company_name: str
     why_it_matters: str
 
@@ -261,14 +260,16 @@ class SWOTEntryByIndex(SWOTEntry):
 class SWOTEntryByURL(SWOTEntry):
     swot_component_page_urls: list[str]
 
-
+# NOTE THIS IS THE BASE CLASS FOR THE LLM OUTPUT
 class SWOTAnalysis(BaseModel):
     competitor_notes: list[CompetitorNote]
 
+# NOTE THIS IS ONLY USED FOR THE LLM OUTPUT
 class SWOTAnalysisByIndex(SWOTAnalysis):
     SWOT_entries: list[SWOTEntryByIndex]
     scores: list[FeatureScoreByIndex]
 
+# NOTE THIS IS USED FOR THE FINAL OUTPUT
 class SWOTAnalysisByURL(SWOTAnalysis):
     SWOT_entries: list[SWOTEntryByURL]
     scores: list[FeatureScore]
