@@ -287,6 +287,48 @@ if test_url:
         assert res2.analysis_result.get("skipped_llm") is True
         assert res2.analysis_result.get("reused_from_run_id") == run1.id
 
+    def test_processing_policy_change_forces_reanalysis(db, competitor, monkeypatch):
+        import app.services.orchestrator as orchestrator
+
+        analyzer = MockOpenAIAnalyzer()
+        crawler = MockCrawl4AICrawler()
+        initial = create_research_run(db, competitor.id)
+        asyncio.run(execute_research_run(db, initial.id, crawler, analyzer))
+        assert initial.analysis_result["analysis_policy_version"]
+
+        # Unchanged pages with a new policy must not reuse stale findings.
+        monkeypatch.setattr(orchestrator, "ANALYSIS_POLICY_VERSION", "policy-next")
+        rerun = create_research_run(db, competitor.id)
+        asyncio.run(execute_research_run(db, rerun.id, crawler, analyzer))
+        assert rerun.analysis_result["analysis_policy_version"] == "policy-next"
+        assert not rerun.analysis_result.get("skipped_llm")
+
+        same_policy = create_research_run(db, competitor.id)
+        asyncio.run(execute_research_run(db, same_policy.id, crawler, analyzer))
+        assert same_policy.analysis_result["skipped_llm"] is True
+        assert same_policy.analysis_result["analysis_policy_version"] == "policy-next"
+
+    def test_run_id_forwarded_to_crawler_and_reference_persisted(db, competitor):
+        class TrackingCrawler:
+            received = None
+
+            async def crawl(self, competitor_name, website_url, *, research_run_id=None):
+                self.received = research_run_id
+                payload = await MockCrawl4AICrawler().crawl(competitor_name, website_url)
+                payload["decision_tracking"] = {
+                    "trace_id": "a" * 32, "observation_id": "b" * 16,
+                    "research_run_id": str(research_run_id),
+                }
+                payload["decision_usage"] = {"request_count": 2, "estimated_cost_usd": 0.005}
+                return payload
+
+        crawler = TrackingCrawler()
+        run = create_research_run(db, competitor.id)
+        asyncio.run(execute_research_run(db, run.id, crawler, MockOpenAIAnalyzer()))
+        assert crawler.received == run.id
+        assert run.scraped_data["decision_tracking"]["research_run_id"] == str(run.id)
+        assert run.scraped_data["decision_usage"]["request_count"] == 2
+
     def test_execute_research_run_saves_overall_swot(db, competitor):
         crawler = MockCrawl4AICrawler()
         analyzer = MockOpenAIAnalyzer()
@@ -496,7 +538,7 @@ if test_url:
 
     def test_execute_research_run_real_crawl_failure_fails_run(db, competitor):
         class FailingRealCrawler:
-            async def crawl(self, competitor_name, website_url):
+            async def crawl(self, competitor_name, website_url, *, research_run_id=None):
                 raise CrawlFailedError("Could not crawl the competitor's website. (blocked)")
 
         run = create_research_run(db, competitor.id)

@@ -45,6 +45,7 @@ from app.db.repository import (
 )
 from app.services.costs import (
     fetch_call_costs,
+    fetch_decisions_cost,
     is_cost_tracking_configured,
     run_call_names,
     run_trace_prefix,
@@ -63,6 +64,9 @@ logger = logging.getLogger(__name__)
 # Langfuse can take a few minutes to ingest a call's cost
 COST_LOOKUP_DELAY_SECONDS = float(os.getenv("LANGFUSE_COST_DELAY_SECONDS", "300"))
 COST_LOOKUP_ATTEMPTS = 2
+# Increment whenever LLM prompts, extraction rules or analysis-input processing change.
+# This belongs on the saved analysis, not the page-content hash.
+ANALYSIS_POLICY_VERSION = os.getenv("ANALYSIS_POLICY_VERSION", "2026-11-06-scraper-v2")
 
 
 
@@ -266,7 +270,9 @@ async def execute_research_run(
         # Step 2: Execute web crawling with timeout protection
         logger.info("Executing crawler for %s (%s)", competitor.name, competitor.website_url)
         scraped_data = await asyncio.wait_for(
-            active_crawler.crawl(competitor.name, competitor.website_url),
+            active_crawler.crawl(
+                competitor.name, competitor.website_url, research_run_id=run_id
+            ),
             timeout=timeout_seconds,
         )
 
@@ -277,7 +283,14 @@ async def execute_research_run(
         previous_run = _get_previous_completed_run(db, competitor.id, run_id)
         prev_scraped = previous_run.scraped_data if previous_run else None
 
-        if previous_run and not has_content_changed(scraped_data, prev_scraped):
+        previous_analysis = (
+            previous_run.analysis_result
+            if previous_run and isinstance(previous_run.analysis_result, dict)
+            else {}
+        )
+        if (previous_run
+                and not has_content_changed(scraped_data, prev_scraped)
+                and previous_analysis.get("analysis_policy_version") == ANALYSIS_POLICY_VERSION):
             logger.info(
                 "Scraped content unchanged for %s. Skipping LLM synthesis to conserve tokens.",
                 competitor.name,
@@ -290,6 +303,7 @@ async def execute_research_run(
             )
             reused_payload: dict[str, Any] = {
                 "skipped_llm": True,
+                "analysis_policy_version": ANALYSIS_POLICY_VERSION,
                 "reason": "Content unchanged from previous snapshot",
                 "reused_from_run_id": prev_analysis.get(
                     "reused_from_run_id", previous_run.id
@@ -342,7 +356,10 @@ async def execute_research_run(
         )
 
         # Step 6: Save raw LLM analysis output
-        save_analysis_result(db, run_id, analysis_result)
+        save_analysis_result(db, run_id, {
+            **analysis_result,
+            "analysis_policy_version": ANALYSIS_POLICY_VERSION,
+        })
 
         # Step 7: Parse structured SWOT findings and persist with verified source citations
         raw_entries = analysis_result.get("swot_entries", [])
@@ -397,44 +414,63 @@ async def execute_research_run(
 
 
 async def record_run_cost(db: Session, run_id: int, final: bool = True) -> bool:
-    """Save the cost of a run's OpenAI calls from Langfuse on its analysis_result.
+    """Combine independently measured LLM and Decisions costs for this run.
 
-    Looks up the run's extraction, analysis and comparison calls. Returns False,
-    without saving, if a call the run made isn't in Langfuse yet and this isn't
-    the final attempt; the final attempt saves what it found as incomplete.
+    Decisions may be charged even when analysis is skipped or the run fails.
+    Comparison is attributed to the research run that initiated it (not to
+    every competitor the comparison read). Never use local budget estimates
+    as measured Langfuse costs. Incomplete data stays visibly incomplete.
     """
     run = get_research_run(db, run_id)
     if run is None:
-        # Deleted with its competitor before the lookup
         return True
 
     analysis = run.analysis_result if isinstance(run.analysis_result, dict) else {}
+    scrape = run.scraped_data if isinstance(run.scraped_data, dict) else {}
     made = [name for name in analysis.get("llm_calls", []) if isinstance(name, str)]
-    # The names the run recorded, plus rebuilt ones for runs that failed before recording any
     names = list(dict.fromkeys(made + run_call_names(run_id, run.competitor.name)))
 
     costs = await fetch_call_costs(names)
     if costs is None:
         return True
 
+    usage = scrape.get("decision_usage")
+    usage = usage if isinstance(usage, dict) else {}
+    expected = usage.get("request_count")
+    if type(expected) is not int or expected < 0:
+        expected = None
+    decisions = await fetch_decisions_cost(
+        run_id,
+        scrape.get("decision_tracking"),
+        expected_requests=expected,
+        started_at=run.started_at or run.created_at,
+    )
     missing = [name for name in made if name not in costs or costs[name].found == 0]
-    if missing and not final:
-        logger.info("Cost for run %s not in Langfuse yet (%s); retrying later", run_id, missing)
+    found = {name: item for name, item in costs.items() if item.found}
+    unpriced = [name for name, item in found.items() if item.usd is None]
+    pending = bool(missing or unpriced or not decisions.complete)
+    if pending and not final:
+        logger.info("Run %s cost telemetry incomplete; retrying later", run_id)
         return False
 
-    found = {name: cost for name, cost in costs.items() if cost.found}
-    unpriced = [name for name, cost in found.items() if cost.usd is None]
-
-    # Re-read so scores saved by a comparison in the meantime aren't overwritten
+    llm_total = sum(item.usd for item in found.values() if item.usd is not None)
+    decisions_total = decisions.usd
+    # A partial sum is useful for audit, but not a reliable dashboard total.
+    complete = not pending
+    total = round(llm_total + decisions_total, 6) if complete and decisions_total is not None else None
     db.refresh(run)
     latest = run.analysis_result if isinstance(run.analysis_result, dict) else {}
     save_analysis_result(db, run_id, {
         **latest,
         "cost": {
-            "usd": round(sum(cost.usd for cost in found.values() if cost.usd is not None), 6),
-            "calls": {name: cost.usd for name, cost in found.items()},
-            # False when a call is missing from Langfuse or has no price
-            "complete": not missing and not unpriced,
+            "usd": total,
+            "analysis_usd": round(llm_total, 6),
+            "decisions_usd": round(decisions_total, 6) if decisions_total is not None else None,
+            "decisions_found": decisions.found,
+            "decisions_expected": decisions.expected,
+            "decisions_complete": decisions.complete,
+            "calls": {name: item.usd for name, item in found.items()},
+            "complete": complete,
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         },
     })

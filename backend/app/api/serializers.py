@@ -294,7 +294,7 @@ def agent_run(run: ResearchRun, competitor_name: str) -> AgentRun:
 def _cost_usd(run: ResearchRun) -> float | None:
     """OpenAI cost looked up from Langfuse a few minutes after the run; None until then."""
     cost = _analysis(run).get("cost")
-    usd = cost.get("usd") if isinstance(cost, dict) else None
+    usd = cost.get("usd") if isinstance(cost, dict) and cost.get("complete") is True else None
     if isinstance(usd, bool) or not isinstance(usd, (int, float)):
         return None
     return float(usd)
