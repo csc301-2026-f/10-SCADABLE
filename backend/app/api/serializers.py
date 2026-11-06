@@ -87,6 +87,12 @@ def _analysis(run: ResearchRun | None) -> dict[str, Any]:
     return run.analysis_result if run and isinstance(run.analysis_result, dict) else {}
 
 
+def _was_analyzed(analysis: dict[str, Any]) -> bool:
+    """True if the LLM step saved a result. The cost lookup alone doesn't count:
+    it also saves on runs that failed before analysis."""
+    return any(key != "cost" for key in analysis)
+
+
 def competitor_summary(
     competitor: Competitor, latest_run: ResearchRun | None
 ) -> CompetitorSummary:
@@ -252,7 +258,7 @@ def _run_steps(run: ResearchRun) -> list[RunStep]:
         return RunStep(name=name, result="Not started", status="pending")
 
     crawled = run.scraped_data is not None
-    analyzed = bool(analysis)
+    analyzed = _was_analyzed(analysis)
     return [
         step("Crawl competitor website", crawled, True),
         step(
@@ -268,7 +274,7 @@ def _run_steps(run: ResearchRun) -> list[RunStep]:
 def agent_run(run: ResearchRun, competitor_name: str) -> AgentRun:
     steps = _run_steps(run)
     skipped = bool(_analysis(run).get("skipped_llm"))
-    analyzed = bool(_analysis(run))
+    analyzed = _was_analyzed(_analysis(run))
     return AgentRun(
         id=str(run.id),
         competitor_id=str(run.competitor_id),

@@ -18,7 +18,9 @@ from app.db.repository import (
     delete_competitor,
     get_research_run,
     save_analysis_result,
+    update_research_run_status,
 )
+from app.db.models import ResearchStatus
 from app.services import costs, orchestrator
 from app.services.costs import (
     CallCost,
@@ -325,3 +327,25 @@ def test_agent_run_reports_saved_cost(session_factory, run_id):
 
         save_analysis_result(db, run_id, {**run.analysis_result, "cost": {"usd": 0.035}})
         assert serializers.agent_run(get_research_run(db, run_id), "Vanta").cost_usd == 0.035
+
+
+def test_saved_cost_does_not_mark_a_failed_crawl_as_analyzed(monkeypatch, session_factory):
+    # A failed crawl saves no analysis; the cost lookup later saves only "cost"
+    with session_factory() as db:
+        competitor = create_competitor(db, name="Drata", website_url="https://drata.com")
+        run_id = create_research_run(db, competitor.id).id
+        update_research_run_status(
+            db, run_id, ResearchStatus.FAILED, error_message="Could not crawl the competitor's website."
+        )
+    _fake_costs(monkeypatch, {})
+
+    with session_factory() as db:
+        assert asyncio.run(orchestrator.record_run_cost(db, run_id))
+        run = get_research_run(db, run_id)
+        assert run.analysis_result == {"cost": run.analysis_result["cost"]}
+
+        api_run = serializers.agent_run(run, "Drata")
+    assert api_run.cost_usd == 0.0
+    assert [step.status for step in api_run.steps] == ["failed", "pending", "pending"]
+    assert api_run.cache_hits is None
+    assert api_run.cache_misses is None
