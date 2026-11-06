@@ -135,3 +135,87 @@ def test_comparison_prompt_contains_scoring_rubric():
     assert "FEATURE_SCORE_BY_INDEX" in COMPARISON_SYSTEM_PROMPT
     assert "SCORING_CRITERIA" in COMPARISON_SYSTEM_PROMPT
     assert "score" in COMPARISON_SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_comparison_returns_per_competitor_swot_and_pairs():
+    from llm.schemas import CompetitorSWOTByIndex, FeaturePairByIndex
+
+    class RichClient:
+        async def generate_structured(self, **request):
+            return SWOTAnalysisByIndex(
+                competitor_notes=[], SWOT_entries=[],
+                scores=[score(0, "Fixes issues", 8), score(1, "Broad frameworks", 7)],
+                competitor_swots=[CompetitorSWOTByIndex(
+                    company_index=1,
+                    SWOT_entries=[SWOTEntryByIndex(
+                        component="strength", what="Vanta supports broad frameworks.",
+                        swot_citations=[SWOTIndex(swot_component_company_index=1, swot_component_page_index=0)],
+                    )],
+                )],
+                feature_pairs=[FeaturePairByIndex(
+                    company_index=1, competitor_feature="Broad frameworks",
+                    scadable_feature="Fixes issues",
+                )],
+            )
+
+    result = await Analyzer(RichClient()).compare(DATA)
+    assert result.competitor_swots[0].company_name == "Vanta"
+    assert result.competitor_swots[0].SWOT_entries[0].swot_component_page_urls == ["https://vanta.com/"]
+    assert result.feature_pairs[0].scadable_feature == "Fixes issues"
+
+
+@pytest.mark.asyncio
+async def test_competitor_swot_requires_own_citation():
+    from llm.schemas import CompetitorSWOTByIndex
+
+    class BadClient:
+        async def generate_structured(self, **request):
+            return SWOTAnalysisByIndex(
+                competitor_notes=[], SWOT_entries=[], scores=[],
+                competitor_swots=[CompetitorSWOTByIndex(
+                    company_index=1,
+                    SWOT_entries=[SWOTEntryByIndex(
+                        component="strength", what="Vanta strength without Vanta citation",
+                        swot_citations=[SWOTIndex(swot_component_company_index=0, swot_component_page_index=0)],
+                    )],
+                )],
+            )
+
+    with pytest.raises(ValueError, match="subject company"):
+        await Analyzer(BadClient()).compare(DATA)
+
+
+@pytest.mark.parametrize("bad_pair", [
+    {"company_index": 0, "competitor_feature": "Fixes issues", "scadable_feature": None},
+    {"company_index": 1, "competitor_feature": "Missing feature", "scadable_feature": "Fixes issues"},
+    {"company_index": 1, "competitor_feature": "Broad frameworks", "scadable_feature": "Missing baseline score"},
+])
+@pytest.mark.asyncio
+async def test_rejects_invalid_explicit_feature_pairs(bad_pair):
+    from llm.schemas import FeaturePairByIndex
+
+    class BadClient:
+        async def generate_structured(self, **request):
+            return SWOTAnalysisByIndex(
+                competitor_notes=[], SWOT_entries=[],
+                scores=[score(0, "Fixes issues", 8), score(1, "Broad frameworks", 7)],
+                feature_pairs=[FeaturePairByIndex(**bad_pair)],
+            )
+
+    with pytest.raises(ValueError, match="Feature pair"):
+        await Analyzer(BadClient()).compare(DATA)
+
+@pytest.mark.asyncio
+async def test_competitor_swot_rejects_invalid_company_index():
+    from llm.schemas import CompetitorSWOTByIndex
+
+    class BadClient:
+        async def generate_structured(self, **request):
+            return SWOTAnalysisByIndex(
+                competitor_notes=[], SWOT_entries=[], scores=[],
+                competitor_swots=[CompetitorSWOTByIndex(company_index=0, SWOT_entries=[])],
+            )
+
+    with pytest.raises(ValueError, match="Competitor SWOT company index"):
+        await Analyzer(BadClient()).compare(DATA)

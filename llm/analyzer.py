@@ -27,10 +27,17 @@ from llm.schemas import (
     SWOTAnalysisByIndex,
     SWOTAnalysisByURL,
     SWOTEntryByURL,
-    SWOTEntryByIndex
+    SWOTEntryByIndex,
+    CompetitorSWOTByIndex,
+    CompetitorSWOTByURL,
+    FeaturePairByIndex,
+    FeaturePair,
 )
 
-def _validate_swot_citations(company_urls: list[list[str]], entries: list[SWOTEntryByIndex]) -> None:
+def _validate_swot_citations(
+    company_urls: list[list[str]], entries: list[SWOTEntryByIndex],
+    *, owner_index: int = 0,
+) -> None:
     for entry in entries:
         if not entry.swot_citations:
             raise ValueError("A SWOT entry must cite at least one page.")
@@ -41,9 +48,11 @@ def _validate_swot_citations(company_urls: list[list[str]], entries: list[SWOTEn
             if not 0 <= page < len(company_urls[company]):
                 raise ValueError(f"Page number {page} does not exist for company {company}.")
         if entry.component in ("strength", "weakness") and not any(
-            c.swot_component_company_index == 0 for c in entry.swot_citations
+            c.swot_component_company_index == owner_index for c in entry.swot_citations
         ):
-            raise ValueError("A strength or weakness must cite at least one SCADABLE page.")
+            raise ValueError(
+                "A strength or weakness must cite at least one page from its subject company."
+            )
 
 def _validate_feature_scores(company_count: int, scores: list[FeatureScoreByIndex]) -> None:
     """Scores may belong to any company, including SCADABLE (index 0)."""
@@ -53,6 +62,39 @@ def _validate_feature_scores(company_count: int, scores: list[FeatureScoreByInde
                 f"Score company index {score.company_index} is out of range "
                 f"(valid: 0 to {company_count - 1})."
             )
+
+def _validate_competitor_swots(
+    company_urls: list[list[str]], blocks: list[CompetitorSWOTByIndex],
+) -> None:
+    seen: set[int] = set()
+    for block in blocks:
+        index = block.company_index
+        if not 1 <= index < len(company_urls):
+            raise ValueError(f"Competitor SWOT company index {index} is out of range.")
+        if index in seen:
+            raise ValueError(f"Duplicate competitor SWOT for company index {index}.")
+        seen.add(index)
+        _validate_swot_citations(company_urls, block.SWOT_entries, owner_index=index)
+
+
+def _validate_feature_pairs(
+    company_count: int, scores: list[FeatureScoreByIndex],
+    pairs: list[FeaturePairByIndex],
+) -> None:
+    scored = {(s.company_index, s.feature) for s in scores}
+    seen: set[tuple[int, str]] = set()
+    for pair in pairs:
+        if not 1 <= pair.company_index < company_count:
+            raise ValueError(f"Feature pair company index {pair.company_index} is out of range.")
+        key = (pair.company_index, pair.competitor_feature)
+        if key not in scored:
+            raise ValueError(f"Feature pair references unscored competitor feature: {key!r}.")
+        if key in seen:
+            raise ValueError(f"Duplicate feature pair for {key!r}.")
+        seen.add(key)
+        if pair.scadable_feature is not None and (0, pair.scadable_feature) not in scored:
+            raise ValueError("Feature pair references an unscored SCADABLE feature.")
+
 
 def _extraction_by_index(position: int, company: ExtractedInformationByURL, url_index: list[dict[str, int]]) -> ExtractedInformationByIndex:
     """
@@ -152,6 +194,28 @@ class Analyzer:
         )
         _validate_swot_citations(company_urls, response.SWOT_entries)
         _validate_feature_scores(len(companies), response.scores)
+        _validate_competitor_swots(company_urls, response.competitor_swots)
+        _validate_feature_pairs(len(companies), response.scores, response.feature_pairs)
+        # A crawled job URL may be valid, but SWOT findings must be supported
+        # by a cited CLAIM, not merely a page containing a job posting.
+        claim_indexes = [
+            {url_index[i][claim.claim_page_url] for claim in company.claims_cited}
+            for i, company in enumerate(companies)
+        ]
+        all_entries = [
+            *response.SWOT_entries,
+            *(entry for block in response.competitor_swots for entry in block.SWOT_entries),
+        ]
+        for entry in all_entries:
+            for citation in entry.swot_citations:
+                if citation.swot_component_page_index not in claim_indexes[citation.swot_component_company_index]:
+                    raise ValueError("SWOT citation must reference an extracted claim page.")
+
+        def cited_urls(entry: SWOTEntryByIndex) -> list[str]:
+            return [
+                company_urls[c.swot_component_company_index][c.swot_component_page_index]
+                for c in entry.swot_citations
+            ]
 
         return SWOTAnalysisByURL(
             competitor_notes=response.competitor_notes,
@@ -159,10 +223,7 @@ class Analyzer:
                 SWOTEntryByURL(
                     component=swot.component,
                     what=swot.what,
-                    swot_component_page_urls=[
-                        company_urls[c.swot_component_company_index][c.swot_component_page_index]
-                        for c in swot.swot_citations
-                    ],
+                    swot_component_page_urls=cited_urls(swot),
                 )
                 for swot in response.SWOT_entries
             ],
@@ -174,6 +235,28 @@ class Analyzer:
                 )
                 for score in response.scores
             ],
-            conflicting_data=[data.scadable.conflicting_data] + [c.conflicting_data for c in data.competitors]
+            conflicting_data=[data.scadable.conflicting_data] + [c.conflicting_data for c in data.competitors],
+            competitor_swots=[
+                CompetitorSWOTByURL(
+                    company_name=companies[block.company_index].company_name,
+                    SWOT_entries=[
+                        SWOTEntryByURL(
+                            component=entry.component,
+                            what=entry.what,
+                            swot_component_page_urls=cited_urls(entry),
+                        )
+                        for entry in block.SWOT_entries
+                    ],
+                )
+                for block in response.competitor_swots
+            ],
+            feature_pairs=[
+                FeaturePair(
+                    company_name=companies[pair.company_index].company_name,
+                    competitor_feature=pair.competitor_feature,
+                    scadable_feature=pair.scadable_feature,
+                )
+                for pair in response.feature_pairs
+            ],
         )
 
