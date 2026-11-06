@@ -59,7 +59,18 @@ def fake_client(monkeypatch):
     return install
 
 
-def test_analyze_uses_real_llm_schemas(fake_client):
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_analyze_uses_real_llm_schemas(fake_client, monkeypatch, duplicate):
+    from llm.analyzer import Analyzer
+
+    observed = []
+    original = Analyzer.extract_information
+
+    async def capture(self, data):
+        observed.append(data)
+        return await original(self, data)
+
+    monkeypatch.setattr(Analyzer, "extract_information", capture)
     client = fake_client({
         "PartialExtractedInformationByIndex": PartialExtractedInformationByIndex(
             summary="Vanta automates compliance.",
@@ -81,9 +92,14 @@ def test_analyze_uses_real_llm_schemas(fake_client):
         "pages": [{"url": "https://vanta.com/features", "title": "Features", "text": "Evidence collection"}],
     }
 
+    if duplicate:
+        scraped["pages"].append({"url": "https://vanta.com/copy", "text": "Evidence collection"})
     result = asyncio.run(
         OpenAIAdapter().analyze(scraped, get_scadable_baseline(), trace_prefix="run-42:vanta")
     )
+    assert len(observed[0].pages) == 1
+    assert len(observed[0].crawl_summary.pages) == (2 if duplicate else 1)
+    assert len(scraped["pages"]) == (2 if duplicate else 1)
 
     # A schema mismatch makes analyze() fall back to the mock, which has no "mode"
     assert result.get("mode") == "real"

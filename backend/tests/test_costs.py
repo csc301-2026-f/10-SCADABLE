@@ -18,7 +18,9 @@ from app.db.repository import (
     delete_competitor,
     get_research_run,
     save_analysis_result,
+    update_research_run_status,
 )
+from app.db.models import ResearchStatus
 from app.services import costs, orchestrator
 from app.services.costs import (
     CallCost,
@@ -56,6 +58,11 @@ def _fake_costs(monkeypatch, by_name):
         return {name: by_name.get(name, CallCost(found=0, usd=0.0)) for name in names}
 
     monkeypatch.setattr(orchestrator, "fetch_call_costs", fetch)
+
+    async def no_decisions(run_id, reference, *, expected_requests, started_at):
+        return costs.DecisionsCost(found=0, usd=0.0, complete=True, expected=0)
+
+    monkeypatch.setattr(orchestrator, "fetch_decisions_cost", no_decisions)
 
 
 def _cost(session_factory, run_id):
@@ -219,7 +226,8 @@ def test_record_run_cost_waits_for_missing_calls_before_the_final_attempt(
     with session_factory() as db:
         assert asyncio.run(orchestrator.record_run_cost(db, run_id, final=True))
     cost = _cost(session_factory, run_id)
-    assert cost["usd"] == pytest.approx(0.01)
+    assert cost["usd"] is None
+    assert cost["analysis_usd"] == pytest.approx(0.01)
     assert cost["complete"] is False
 
 
@@ -233,7 +241,8 @@ def test_record_run_cost_marks_unpriced_calls_incomplete(monkeypatch, session_fa
         asyncio.run(orchestrator.record_run_cost(db, run_id))
 
     cost = _cost(session_factory, run_id)
-    assert cost["usd"] == pytest.approx(0.01)
+    assert cost["usd"] is None
+    assert cost["analysis_usd"] == pytest.approx(0.01)
     assert cost["complete"] is False
 
 
@@ -323,5 +332,125 @@ def test_agent_run_reports_saved_cost(session_factory, run_id):
         run = get_research_run(db, run_id)
         assert serializers.agent_run(run, "Vanta").cost_usd is None
 
-        save_analysis_result(db, run_id, {**run.analysis_result, "cost": {"usd": 0.035}})
+        save_analysis_result(db, run_id, {**run.analysis_result, "cost": {"usd": 0.035, "complete": True}})
         assert serializers.agent_run(get_research_run(db, run_id), "Vanta").cost_usd == 0.035
+
+
+def test_saved_cost_does_not_mark_a_failed_crawl_as_analyzed(monkeypatch, session_factory):
+    # A failed crawl saves no analysis; the cost lookup later saves only "cost"
+    with session_factory() as db:
+        competitor = create_competitor(db, name="Drata", website_url="https://drata.com")
+        run_id = create_research_run(db, competitor.id).id
+        update_research_run_status(
+            db, run_id, ResearchStatus.FAILED, error_message="Could not crawl the competitor's website."
+        )
+    _fake_costs(monkeypatch, {})
+
+    with session_factory() as db:
+        assert asyncio.run(orchestrator.record_run_cost(db, run_id))
+        run = get_research_run(db, run_id)
+        assert run.analysis_result == {"cost": run.analysis_result["cost"]}
+
+        api_run = serializers.agent_run(run, "Drata")
+    assert api_run.cost_usd == 0.0  # Fake cost lookup explicitly reports zero Decisions calls.
+    assert [step.status for step in api_run.steps] == ["failed", "pending", "pending"]
+    assert api_run.cache_hits is None
+    assert api_run.cache_misses is None
+
+
+def test_record_run_cost_adds_decisions_to_analysis_cost(monkeypatch, session_factory, run_id):
+    with session_factory() as db:
+        run = get_research_run(db, run_id)
+        from app.db.repository import save_scraped_data
+        save_scraped_data(db, run_id, {
+            "mode": "real",
+            "pages": [{"url": "https://vanta.com", "text": "Evidence"}],
+            "decision_usage": {"request_count": 2, "estimated_cost_usd": 99.0},
+            "decision_tracking": {"trace_id": "a"*32, "observation_id": "b"*16},
+        })
+    _fake_costs(monkeypatch, {
+        f"run-{run_id}:vanta:extraction": CallCost(found=1, usd=0.01),
+        f"run-{run_id}:vanta:analysis": CallCost(found=1, usd=0.02),
+    })
+
+    async def decisions(target_run, reference, *, expected_requests, started_at):
+        assert target_run == run_id
+        assert expected_requests == 2
+        return costs.DecisionsCost(found=2, usd=0.003, complete=True, expected=2)
+    monkeypatch.setattr(orchestrator, "fetch_decisions_cost", decisions)
+    with session_factory() as db:
+        assert asyncio.run(orchestrator.record_run_cost(db, run_id))
+    record = _cost(session_factory, run_id)
+    assert record["usd"] == pytest.approx(0.033)
+    assert record["analysis_usd"] == pytest.approx(0.03)
+    assert record["decisions_usd"] == pytest.approx(0.003)
+    assert record["complete"] is True
+    # The budget reservation is never added to measured Langfuse costs.
+    assert record["usd"] != 99.033
+
+
+def test_record_run_cost_incomplete_decisions_is_not_measured_zero(
+    monkeypatch, session_factory, run_id
+):
+    _fake_costs(monkeypatch, {
+        f"run-{run_id}:vanta:extraction": CallCost(found=1, usd=0.01),
+        f"run-{run_id}:vanta:analysis": CallCost(found=1, usd=0.02),
+    })
+    async def incomplete(*args, **kwargs):
+        return costs.DecisionsCost(found=0, usd=0.0, complete=False, expected=2)
+    monkeypatch.setattr(orchestrator, "fetch_decisions_cost", incomplete)
+    with session_factory() as db:
+        assert asyncio.run(orchestrator.record_run_cost(db, run_id, final=False)) is False
+    assert _cost(session_factory, run_id) is None
+    with session_factory() as db:
+        assert asyncio.run(orchestrator.record_run_cost(db, run_id, final=True)) is True
+    record = _cost(session_factory, run_id)
+    assert record["usd"] is None
+    assert record["complete"] is False
+    assert record["analysis_usd"] == 0.03
+
+
+def test_unchanged_analysis_can_still_have_scraper_decisions_costs(
+    monkeypatch, session_factory
+):
+    with session_factory() as db:
+        competitor = create_competitor(db, name="Scrut", website_url="https://scrut.io")
+        run_id = create_research_run(db, competitor.id).id
+        from app.db.repository import save_scraped_data
+        save_scraped_data(db, run_id, {
+            "mode": "real", "pages": [],
+            "decision_usage": {"request_count": 1},
+        })
+        save_analysis_result(db, run_id, {"skipped_llm": True})
+    _fake_costs(monkeypatch, {})
+
+    async def paid_decisions(*args, **kwargs):
+        return costs.DecisionsCost(found=1, usd=0.0008, complete=True, expected=1)
+    monkeypatch.setattr(orchestrator, "fetch_decisions_cost", paid_decisions)
+    with session_factory() as db:
+        assert asyncio.run(orchestrator.record_run_cost(db, run_id))
+    item = _cost(session_factory, run_id)
+    assert item["usd"] == pytest.approx(0.0008)
+    assert item["analysis_usd"] == 0.0
+    assert item["decisions_usd"] == pytest.approx(0.0008)
+    assert item["complete"] is True
+
+
+def test_failed_crawl_without_scraper_telemetry_keeps_cost_unavailable(
+    monkeypatch, session_factory
+):
+    with session_factory() as db:
+        competitor = create_competitor(db, name="Foresite", website_url="https://foresite.com")
+        run_id = create_research_run(db, competitor.id).id
+        update_research_run_status(db, run_id, ResearchStatus.FAILED)
+    _fake_costs(monkeypatch, {})
+    async def unknown(*args, **kwargs):
+        return costs.DecisionsCost(found=0, usd=0.0, complete=False, expected=None)
+    monkeypatch.setattr(orchestrator, "fetch_decisions_cost", unknown)
+    with session_factory() as db:
+        assert not asyncio.run(orchestrator.record_run_cost(db, run_id, final=False))
+    with session_factory() as db:
+        assert asyncio.run(orchestrator.record_run_cost(db, run_id, final=True))
+        run = get_research_run(db, run_id)
+        assert run.analysis_result["cost"]["usd"] is None
+        assert serializers.agent_run(run, "Foresite").cost_usd is None

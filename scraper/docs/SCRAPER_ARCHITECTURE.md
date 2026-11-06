@@ -76,14 +76,18 @@ Each link observation includes parent URL, anchor text (160 characters), heading
 surrounding text (400), and location: navigation/main content/footer/unknown. Sitemap-only
 entries may lack text context. Candidates are not fetched just to investigate them.
 
-The configurable objective researches offerings, customers, differentiation, commercial
-activity and observable expansion/contraction. Policy instructions favor company-specific
-evidence, treat website text as untrusted evidence, regard missing context as uncertainty,
-and forbid inferring actual growth from marketing claims. Candidate instructions append
-`Rate the expected usefulness of candidate {candidate_id}.`
+The configurable objective researches products/services, target customers, pricing,
+integrations, differentiators, commercial activity and careers/hiring. Prompt version
+`company-research-v2` favors concrete capabilities, stated limitations and customer evidence.
+Policy instructions treat website text as untrusted evidence, regard missing context as
+uncertainty, and forbid inferring actual growth from marketing claims.
 
 Usefulness levels are **No apparent value / Uncertain value / Useful information /
-Substantial information**. Returned 0–3 scores are normalized to 0–1. Novelty levels range
+Substantial information**. Candidate descriptions evaluate expected value from URL/link
+context; fetched-page descriptions require observed evidence in the supplied excerpt.
+Length and marketing language alone do not establish value. See the
+[objective and rubric details](decisions.md#research-objective-and-usefulness-rubrics).
+Returned 0–3 scores are normalized to 0–1. Novelty levels range
 from repetition to substantial addition. Category is a fixed choice from `PageCategory`,
 including `other`. See the [official Decisions guide](https://developers.openai.com/api/docs/guides/decisions)
 for scored-question semantics.
@@ -298,6 +302,8 @@ merge; lists replace. Python callers use `ScraperConfig`/`SelectionConfig`; TOML
 | `max_sitemap_bytes` / `max_redirects` | `2097152` / `5` | Sitemap size and redirect bounds |
 | `allowed_domains` / `excluded_url_patterns` | `[]` / login, account, privacy, terms, etc. | Explicit extra hosts and URL exclusions |
 | `respect_robots_txt` / `user_agent` | `true` / `ScraperBot/0.1` | Robots compliance is mandatory; crawler identity |
+| `markdown_remove_boilerplate` / `deduplicate_pages` | `true` / `true` | Conservative consent/clone cleanup and exact-body assessment reuse; [controls](optimizations.md) |
+| `selection.coverage_enabled` | `true` | Approximate topic hints at existing scoring checkpoints; one shared refresh allowance |
 | `markdown_remove_navigation_and_footer` / `markdown_excluded_selectors` | `true` / `[]` | Markdown-only cleanup; explicit selectors for site-specific containers |
 | `dynamic` / `dynamic_rules` | No CSS wait; scanning off / `[]` | CSS readiness, bounded scrolling; first matching URL rule can add bounded load-more clicks |
 | `selection.mode` / `selection.model` | `llm` / `gpt-6-luna` | `structural` disables all decision calls; model is currently fixed by validation |

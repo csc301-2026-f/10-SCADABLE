@@ -47,6 +47,36 @@ $env:SCRAPER_BROWSER_TESTS = "1"
 uv run --locked pytest tests/integration/test_browser_local.py -q
 ```
 
+## Objective and rubric comparisons
+
+The prompt-builder tests in `tests/unit/test_decision_prompts.py` verify that the aligned
+objective reaches candidate and content requests, custom objectives still replace it,
+the two usefulness rubrics stay distinct, safety policies remain present, and historical
+prompt versions remain readable. They do not measure model judgment or output quality.
+
+To evaluate `company-research-v2` against `v1` in a separately authorized experiment:
+
+- Keep model, page/attempt limits and research input fixed. Replay identical saved
+  candidate observations and page excerpts to isolate prompt changes; use fresh output
+  roots for any complete crawl comparison and record website changes.
+- Include concrete feature/integration documentation, pricing with billing qualifiers,
+  named customer evidence, explicit job postings, generic articles and vague marketing.
+  Include an opaque URL with good anchor context and a promising URL with irrelevant
+  fetched content. Label pages from their content before inspecting model scores.
+- Measure supported facts and coverage of products, target customers, pricing, integrations,
+  differentiators and hiring, along with company developments relevant to those topics.
+  Count each topic independently; neither a primary page category nor an absent page proves
+  evidence coverage or nonexistence. Hiring has no special quota.
+- Record distinct useful pages per attempt budget, supported citations, input tokens,
+  latency and fallback events. Retain important qualifiers such as annual billing or
+  planned features. Compare usage per supported fact, not just raw page count.
+- Report the actual prompt version and any trade-offs. Changing an objective or rubric
+  does not guarantee better live selection; scripted answers cannot establish that claim.
+
+Keep ranking weights and budgets fixed initially so changes can be attributed to prompts.
+Coverage hints are now included in `v3`; downstream schema/persistence improvements
+remain separate work. See [optimization verification](optimizations.md#verification-and-comparison).
+
 ## Live comparison procedure
 
 Historical permission for the original scraper's live crawl is not approval for paid
@@ -66,8 +96,9 @@ comparability; timing a live site cannot guarantee identical conditions.
 
 Review the collected source Markdown manually against the objective before looking at
 model scores. Label each successful page as direct company evidence, generic/redundant
-material, or unavailable, and record which offerings/customer/differentiation/commercial/
-expansion themes are supported by source-linked excerpts. Compare useful distinct pages
+material, or unavailable, and record which product/customer/pricing/integration/
+differentiation/commercial/hiring themes are supported by source-linked excerpts.
+Compare useful distinct pages
 per equal attempt budget and thematic coverage; do not score a page using only its URL.
 
 Record total crawl duration, successful/failed/attempted counts, API attempt latency

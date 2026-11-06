@@ -176,3 +176,30 @@ def test_unusable_export_error_keeps_competitor_and_startup_diagnostics(tmp_path
     assert "failed" in message
     assert "Chromium missing" in message
     assert str(index) in message
+
+
+def test_exact_duplicates_only_filter_analysis_pages_and_opt_out_restores_them(
+    tmp_path,
+):
+    index = write_export(
+        tmp_path,
+        make_result(
+            pages=[
+                make_page(),
+                make_page(source_url="https://example.com/copy"),
+                make_page(
+                    source_url="https://example.com/distinct",
+                    cleaned_markdown="Different price $50",
+                ),
+            ]
+        ),
+    )
+    data = load_analysis_input(index)
+    assert len(data.pages) == 2
+    assert str(data.pages[0].source.url) == "https://example.com/"
+    assert len(data.crawl_summary.pages) == data.crawl_summary.counts.successful == 3
+    assert len(load_analysis_input(index, deduplicate=False).pages) == 3
+    assert (index.parent / "pages/copy.md").exists()
+    (index.parent / "pages/copy.md").unlink()
+    with pytest.raises(FileNotFoundError):
+        load_analysis_input(index)

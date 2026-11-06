@@ -16,7 +16,7 @@ from scraper.discovery.http import RequestBlocked
 from scraper.interfaces import DiscoveryBatch
 from scraper.models import DiscoveredLink
 from scraper.service import CompetitorScraper
-from scraper.types import utc_now
+from scraper.types import PageCategory, utc_now
 
 
 class Fetcher:
@@ -549,3 +549,176 @@ async def test_cancelling_a_decision_closes_provider_and_fetcher():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert fetcher.closed and decisions.closed
+
+
+@pytest.mark.parametrize("enabled, expected_calls", [(True, 1), (False, 3)])
+async def test_exact_duplicate_assessments_preserve_pages_links_and_attempt_cap(
+    enabled, expected_calls
+):
+    home = page(links=("/a", "/b"))
+    duplicate = page("/a", links=("/extra",)).model_copy(
+        update={"raw_markdown": "\n" + home.raw_markdown.replace("\n", "\r\n") + "\n"}
+    )
+    fetcher = Fetcher(
+        {
+            "https://example.com/": home,
+            "https://example.com/a": duplicate,
+            "https://example.com/b": page("/b").model_copy(
+                update={"raw_markdown": home.raw_markdown}
+            ),
+        }
+    )
+    decisions = Decisions(fetcher)
+    run = await DiscoveryCrawler(
+        fetcher, Sitemaps(), robots_guard=Guard(), decision_provider=decisions
+    ).run(
+        CompetitorInput(homepage_url="https://example.com"),
+        ScraperConfig(
+            max_pages=3,
+            deduplicate_pages=enabled,
+            max_concurrency=3,
+            per_domain_concurrency=3,
+            request_delay_seconds=(0.0, 0.0),
+        ),
+    )
+    assert len(decisions.assessed) == expected_calls
+    assert len(run.fetched_pages) == run.attempted_pages == 3
+    assert any(str(item.url).endswith("/extra") for item in run.discovered_urls)
+    if enabled:
+        assert all(
+            p.metadata["duplicate_of"] == "https://example.com/" for p in run.fetched_pages[1:]
+        )
+        assert all(p.content_assessment.novelty == 0 for p in run.fetched_pages[1:])
+        assert len(decisions.ledgers) == 1
+
+
+@pytest.mark.parametrize(
+    "status, body, skip",
+    [("success", "Evidence", True), ("failed", "Evidence", False), ("success", "   ", False)],
+)
+async def test_only_successful_nonempty_observed_redirects_suppress_pending_target(
+    status, body, skip
+):
+    home = page(links=("/target",)).model_copy(
+        update={
+            "final_url": "https://example.com/target",
+            "raw_markdown": body,
+            "crawl_status": status,
+            "error_message": "failed" if status == "failed" else None,
+        }
+    )
+    fetcher = Fetcher({"https://example.com/": home, "https://example.com/target": page("/target")})
+    from scraper.models import DiscoveredUrl
+
+    class TargetSitemap:
+        async def discover(self, *args):
+            return DiscoveryBatch(
+                urls=[
+                    DiscoveredUrl(
+                        url="https://example.com/target",
+                        normalized_url="https://example.com/target",
+                        discovery_source="sitemap",
+                        depth=1,
+                    )
+                ]
+            )
+
+    decisions = Decisions(fetcher)
+    run = await DiscoveryCrawler(
+        fetcher, TargetSitemap(), robots_guard=Guard(), decision_provider=decisions
+    ).run(
+        CompetitorInput(homepage_url="https://example.com"),
+        ScraperConfig(max_pages=2, request_delay_seconds=(0.0, 0.0)),
+    )
+    target = next(item for item in run.discovered_urls if str(item.url).endswith("/target"))
+    assert (target.reason == "duplicate_redirect:https://example.com/") is skip
+    assert len(fetcher.requested) == (1 if skip else 2)
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_coverage_context_changes_only_at_existing_checkpoints(enabled):
+    paths = [f"/items/{i}" for i in range(10)]
+    fetcher = Fetcher(
+        {
+            "https://example.com/": page(links=paths),
+            **{"https://example.com" + path: page(path) for path in paths},
+        }
+    )
+
+    class CoverageDecisions(Decisions):
+        def __init__(self):
+            super().__init__(fetcher)
+            self.contexts = []
+            self.times = []
+
+        def set_coverage_context(self, context):
+            self.contexts.append(context)
+            self.times.append(len(fetcher.requested))
+
+        async def assess_content(self, source, ledger=()):
+            assessment = await super().assess_content(source, ledger)
+            return assessment.model_copy(
+                update={
+                    "category": PageCategory.PRICING
+                    if len(self.assessed) == 2
+                    else assessment.category
+                }
+            )
+
+    decisions = CoverageDecisions()
+    await DiscoveryCrawler(
+        fetcher, Sitemaps(), robots_guard=Guard(), decision_provider=decisions
+    ).run(
+        CompetitorInput(homepage_url="https://example.com"),
+        ScraperConfig(
+            max_pages=8,
+            selection={"coverage_enabled": enabled},
+            max_concurrency=4,
+            per_domain_concurrency=4,
+            request_delay_seconds=(0.0, 0.0),
+        ),
+    )
+    if enabled:
+        assert decisions.times == [0, 1, 6]
+        assert decisions.contexts[-1].as_prompt()["indicated"] == ["products_services", "pricing"]
+        from collections import Counter
+
+        assert (
+            max(Counter(c.candidate_id for batch in decisions.scored for c in batch).values()) == 2
+        )
+    else:
+        assert decisions.contexts == []
+
+
+async def test_parallel_duplicate_representative_uses_dispatch_order():
+    fetcher_pages = {
+        "https://example.com/": page(links=("/a", "/b")),
+        **{
+            "https://example.com" + path: page(path).model_copy(
+                update={"raw_markdown": "Same body"}
+            )
+            for path in ("/a", "/b")
+        },
+    }
+
+    class ReverseCompletion(Fetcher):
+        async def fetch(self, url, settings):
+            if str(url).endswith("/a"):
+                await asyncio.sleep(0.01)
+            return await super().fetch(url, settings)
+
+    fetcher = ReverseCompletion(fetcher_pages)
+    decisions = Decisions(fetcher)
+    run = await DiscoveryCrawler(
+        fetcher, Sitemaps(), robots_guard=Guard(), decision_provider=decisions
+    ).run(
+        CompetitorInput(homepage_url="https://example.com"),
+        ScraperConfig(
+            max_pages=3,
+            max_concurrency=2,
+            per_domain_concurrency=2,
+            request_delay_seconds=(0.0, 0.0),
+        ),
+    )
+    assert decisions.assessed == ["https://example.com/", "https://example.com/a"]
+    assert run.fetched_pages[2].metadata["duplicate_of"] == "https://example.com/a"

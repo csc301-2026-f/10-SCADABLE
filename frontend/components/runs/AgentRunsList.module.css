@@ -29,15 +29,7 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
-  margin-bottom: 8px;
-}
-
-.finePrint {
-  margin: 0 0 16px;
-  color: var(--muted);
-  font-family: var(--font-sans);
-  font-size: 11px;
-  line-height: 1.45;
+  margin-bottom: 16px;
 }
 
 .summaryCard {

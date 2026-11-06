@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from pydantic import Field
 
 from ..config import CompetitorInput, ScraperConfig, resolve_config
+from ..content_identity import markdown_fingerprint
 from ..decision_models import DecisionTraceRecord, DecisionUsageSummary
 from ..decisions import DecisionAccessError, OpenAIDecisionProvider
 from ..interfaces import DecisionProvider, PageFetcher, RobotsGuard, SitemapDiscoverer
@@ -180,6 +181,10 @@ class DiscoveryCrawler:
                         frontier.complete(url, success=success, error=outcome.error_message)
                         pages.append(selection.attach(outcome, record))
                         if success:
+                            if markdown_fingerprint(outcome.raw_markdown) is not None:
+                                frontier.register_final_url(
+                                    str(outcome.final_url or outcome.source_url), url
+                                )
                             assessments.append((len(pages) - 1, record))
                             depth = frontier.get(url).depth + 1
                             observations = link_observations(outcome)

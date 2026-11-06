@@ -14,12 +14,12 @@ Interactive docs: http://localhost:8000/docs
 ## Docker
 
 ```bash
-docker build -t live-swot-api backend
+docker build -t live-swot-api -f Dockerfile .
 docker run --env-file backend/.env -p 8000:8000 live-swot-api
 ```
 
-The container creates any missing tables (`app.db.init_db`) and then starts
-uvicorn on `$PORT` (default 8000). On Railway, set the service root directory
+The container installs the sibling scraper and LLM packages, Playwright Chromium,
+creates missing tables (`app.db.init_db`), and starts uvicorn on `$PORT` (default 8000). On Railway, set the service root directory
 to `backend` and add `DATABASE_URL` and `CORS_ORIGINS` as variables.
 
 ## API
