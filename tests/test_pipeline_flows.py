@@ -13,7 +13,7 @@ CLUELY = CompetitorInput(homepage_url="https://cluely.com/", name="Cluely")
 BLUEJ = CompetitorInput(homepage_url="https://www.bluej.com/", name="Blue J")
 
 
-async def test_run_scadable_uses_scadable_analysis(tmp_path):
+async def test_run_scadable_uses_scadable_extraction(tmp_path):
     scraper = StubScraper([company_result(SCADABLE)])
     analyzer = StubAnalyzer()
 
@@ -21,8 +21,8 @@ async def test_run_scadable_uses_scadable_analysis(tmp_path):
         SCADABLE, scraper=scraper, analyzer=analyzer, output_directory=tmp_path
     )
 
-    assert result.analysis.company_name == "SCADABLE"
-    assert analyzer.calls == [("extract", "SCADABLE"), ("company", "SCADABLE")]
+    assert result.extracted_information.company_name == "SCADABLE"
+    assert analyzer.calls == [("extract", "SCADABLE")]
 
 
 @pytest.mark.parametrize("run", [pipeline.run_scadable, pipeline.run_competitor])
@@ -77,7 +77,7 @@ async def test_comparison_with_no_competitors_still_compares(tmp_path):
     assert analyzer.comparison_input.competitors == []
 
 
-async def test_comparison_skips_comparison_when_a_company_analysis_fails(tmp_path):
+async def test_comparison_skips_comparison_when_company_extraction_fails(tmp_path):
     scraper = StubScraper([company_result(c) for c in (SCADABLE, CLUELY, BLUEJ)])
     analyzer = StubAnalyzer(fail_for={"Cluely"})
     with pytest.raises(RuntimeError, match="Cluely"):

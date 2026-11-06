@@ -18,7 +18,7 @@ from tests.helpers import (
 pytestmark = pytest.mark.asyncio
 
 
-async def test_analyze_export_preserves_sources_and_returns_facts_and_analysis(
+async def test_analyze_export_preserves_sources_and_extracted_facts(
     tmp_path,
 ):
     index = write_export(tmp_path)
@@ -28,9 +28,8 @@ async def test_analyze_export_preserves_sources_and_returns_facts_and_analysis(
 
     assert result.crawl_summary.competitor_name == "Example"
     assert result.extracted_information.summary == "facts"
-    assert result.analysis.summary == "competitor"
     assert analyzer.inputs[0].pages[0].markdown == MARKDOWN
-    assert analyzer.calls == [("extract", "Example"), ("company", "Example")]
+    assert analyzer.calls == [("extract", "Example")]
 
 
 async def test_run_pipeline_uses_shared_crawl_many_and_keeps_export_metadata(tmp_path):
@@ -50,7 +49,7 @@ async def test_run_pipeline_uses_shared_crawl_many_and_keeps_export_metadata(tmp
         analyzer=analyzer,
     )
 
-    assert [result.analysis.company_name for result in results] == ["Two", "One"]
+    assert [result.extracted_information.company_name for result in results] == ["Two", "One"]
     assert scraper.calls == [(companies, settings)]
     assert scraper.closed
     for name in ("one.example", "two.example"):
@@ -80,7 +79,7 @@ async def test_output_conflicts_fail_before_scraping(tmp_path, problem):
     assert scraper.calls == []
 
 
-async def test_analysis_failure_closes_scraper_iterator_and_keeps_export_for_replay(
+async def test_extraction_failure_closes_scraper_iterator_and_keeps_export_for_replay(
     tmp_path,
 ):
     competitor = CompetitorInput(homepage_url="https://example.com/", name="Example")
@@ -97,10 +96,10 @@ async def test_analysis_failure_closes_scraper_iterator_and_keeps_export_for_rep
     assert scraper.closed
     index = tmp_path / "example.com/crawl_summary.json"
     result = await pipeline.analyze_export(index, analyzer=StubAnalyzer())
-    assert result.analysis.company_name == "Example"
+    assert result.extracted_information.company_name == "Example"
 
 
-async def test_cancelling_analysis_closes_scraper_iterator(tmp_path):
+async def test_cancelling_extraction_closes_scraper_iterator(tmp_path):
     entered = asyncio.Event()
     scraper = StubScraper([make_result()])
 
@@ -153,4 +152,4 @@ async def test_pipeline_accepts_protocol_iterator_without_aclose(tmp_path):
         analyzer=StubAnalyzer(),
     )
 
-    assert results[0].analysis.company_name == "Example"
+    assert results[0].extracted_information.company_name == "Example"
