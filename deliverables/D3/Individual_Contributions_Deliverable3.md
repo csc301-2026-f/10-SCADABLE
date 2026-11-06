@@ -13,8 +13,16 @@
 - Made failed website crawls mark the research run as failed instead of silently using mock data ([PR #62](https://github.com/csc301-2026-f/10-SCADABLE/pull/62)).
 - Wrote API, crawler, and orchestrator tests for each change.
 
-**[Name]**, [Role]
-> [Specific contributions]
+### Ibraheem Hussain
+
+**Role:** Frontend development (accessibility, competitor profiles, agent runs).
+
+**Contributions:**
+- Improved frontend accessibility and client-side security for D3 NFRs: focus traps on dialogs, accessible Add Competitor validation/errors, keyboard chart tabs, sanitized UI/API error messages, and documented Lighthouse a11y evidence in the root README ([PR #47](https://github.com/csc301-2026-f/10-SCADABLE/pull/47)).
+- Built the optional Conflicting data table on competitor profiles (Claim vs Conflicts with, bullets for multiple conflicts); shown only when `conflictingData` is present ([PR #55](https://github.com/csc301-2026-f/10-SCADABLE/pull/55)).
+- Hid the unfinished GitHub sync block on Our Company while keeping the code commented for later ([PR #66](https://github.com/csc301-2026-f/10-SCADABLE/pull/66)).
+- Surfaced backend/Langfuse `costUsd` on the Agent Runs page (per-run Cost column and weekly Estimated cost) ([PR #70](https://github.com/csc301-2026-f/10-SCADABLE/pull/70)).
+- Reviewed the D3 product evolution report draft ([PR #65](https://github.com/csc301-2026-f/10-SCADABLE/pull/65)).
 
 **[Name]**, [Role]
 > [Specific contributions]
