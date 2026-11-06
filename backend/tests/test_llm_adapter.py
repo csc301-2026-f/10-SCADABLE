@@ -17,8 +17,8 @@ from llm.schemas import (  # noqa: E402
     FeatureScoreByIndex,
     JobCitedByIndex,
     JobFamily,
-    PartialCompanyAnalysisByIndex,
     PartialExtractedInformationByIndex,
+    ConflictCitedByIndex,
     SWOTAnalysisByIndex,
     SWOTEntryByIndex,
     SWOTIndex,
@@ -62,18 +62,14 @@ def test_analyze_uses_real_llm_schemas(fake_client):
         "PartialExtractedInformationByIndex": PartialExtractedInformationByIndex(
             summary="Vanta automates compliance.",
             summary_page_indexes=[0],
+            conflicting_data=[],
             job_postings=[JobCitedByIndex(
                 role="Software Engineer", category="Engineering", job_page_index=0,
                 job_families=[JobFamily(job_family="full-time", count=2),
                               JobFamily(job_family="co-op/internship", count=1)],
             )],
             claims_cited=[
-                ClaimCitedByIndex(category="features", claim="Evidence collection", claim_page_index=0),
-            ],
-        ),
-        "PartialCompanyAnalysisByIndex": PartialCompanyAnalysisByIndex(
-            claims_cited=[
-                ClaimCitedByIndex(category="strength", claim="Many integrations", claim_page_index=0),
+                ClaimCitedByIndex(category="feature", claim="Evidence collection", claim_page_index=0),
             ],
         ),
     })
@@ -99,25 +95,23 @@ def test_analyze_uses_real_llm_schemas(fake_client):
             {"job_family": "co-op/internship", "count": 1},
         ],
     }]
-    assert {
-        "category": "strength",
-        "content": "Many integrations",
-        "source_url": "https://vanta.com/features",
-    } in result["swot_entries"]
     # Calls are named for cost lookups, and the run records which ones it made
-    assert client.observation_names == ["run-42:vanta:extraction", "run-42:vanta:analysis"]
-    assert result["llm_calls"] == ["run-42:vanta:extraction", "run-42:vanta:analysis"]
+    assert client.observation_names == ["run-42:vanta:extraction"]
+    assert result["llm_calls"] == ["run-42:vanta:extraction"]
     assert client.closed
 
 
-def test_analyze_fallback_keeps_paid_calls(fake_client):
-    # Extraction succeeds (and is paid for), then analysis has no canned response and fails
+def test_analyze_fallback_keeps_paid_extraction_call(fake_client):
     fake_client({
         "PartialExtractedInformationByIndex": PartialExtractedInformationByIndex(
             summary="Vanta automates compliance.",
             summary_page_indexes=[0],
             job_postings=[],
             claims_cited=[],
+            conflicting_data=[ConflictCitedByIndex(
+                claim_a="SOC 2 supported", claim_b="SOC 2 coming soon",
+                claim_a_page_index=0, claim_b_page_index=99,
+            )],
         ),
     })
     scraped = {
@@ -125,13 +119,11 @@ def test_analyze_fallback_keeps_paid_calls(fake_client):
         "base_url": "https://vanta.com",
         "pages": [{"url": "https://vanta.com/features", "title": "Features", "text": "Evidence"}],
     }
-
     result = asyncio.run(
         OpenAIAdapter().analyze(scraped, get_scadable_baseline(), trace_prefix="run-42:vanta")
     )
-
-    assert result.get("mode") is None  # fell back to the mock
-    assert result["llm_calls"] == ["run-42:vanta:extraction", "run-42:vanta:analysis"]
+    assert result.get("mode") is None
+    assert result["llm_calls"] == ["run-42:vanta:extraction"]
 
 
 def test_compare_uses_real_llm_schemas(fake_client):

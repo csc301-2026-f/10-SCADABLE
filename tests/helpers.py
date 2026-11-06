@@ -5,7 +5,7 @@ from pathlib import Path
 
 from llm.analyzer import Analyzer
 from llm.schemas import (
-    CompanyAnalysis,
+    ConflictEntry,
     CompetitorNote,
     ExtractedInformationByURL,
     FeatureScore,
@@ -106,22 +106,12 @@ class StubAnalyzer(Analyzer):
     async def extract_information(self, data):
         self.calls.append(("extract", data.company_name))
         self.inputs.append(data)
+        if data.company_name in self.fail_for:
+            raise RuntimeError(f"extraction failed for {data.company_name}")
         return ExtractedInformationByURL(
             company_name=data.company_name, summary="facts", summary_page_urls=[], job_postings=[], claims_cited=[],
+            conflicting_data=ConflictEntry(company_name=data.company_name, conflicts=[]),
             crawl_time_string=CRAWL_TIME,
-        )
-
-    async def analyze_company(self, data: ExtractedInformationByURL):
-        self.calls.append(("company", data.company_name))
-        if data.company_name in self.fail_for:
-            raise RuntimeError(f"analysis failed for {data.company_name}")
-        return CompanyAnalysis(
-            company_name=data.company_name,
-            summary="competitor",
-            summary_page_urls=[],
-            claims_cited=[],
-            features=[],
-            crawl_time_string=data.crawl_time_string,
         )
 
     async def compare(self, data):
@@ -136,5 +126,6 @@ class StubAnalyzer(Analyzer):
                 )
                 for c in data.competitors
             ],
-            scores=[]
+            scores=[],
+            conflicting_data=[],
         )
