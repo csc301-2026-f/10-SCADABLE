@@ -87,6 +87,8 @@ SCADABLE's product information uses a static baseline in the current comparison 
 
 **Example use case:** A SCADABLE founder opens the SWOT Overview to examine the available competitive findings across tracked companies such as Vanta and Drata, helping identify potential strengths, weaknesses, opportunities, and threats.
 
+![Live SWOT Overview showing competitive analysis](docs/screenshots/image-7.png)
+
 **Known limitation:** Depending on the researched evidence and model response, the overall SWOT may contain fewer findings in some categories. The overall comparison can also time out after competitor research; when that happens, the overview may appear stale or unavailable until a successful comparison completes.
 
 ### 6. Agent Runs and Research History
@@ -382,6 +384,37 @@ The frontend is deployed on **Vercel**, while the backend API and PostgreSQL dat
 
 The frontend is hosted on Vercel; the backend API and database are hosted on Railway. GitHub Actions runs backend tests and frontend ESLint on pull requests to `main`, with five-minute job timeouts. The team uses reviewed pull requests and hosted deployments to keep frontend and backend changes coordinated.
 
+### CI/CD Pipeline and Automated Deployment Evidence
+
+Our project uses GitHub Actions for continuous integration and
+Vercel/Railway for hosted deployments.
+
+**Continuous Integration (GitHub Actions)**
+
+GitHub Actions runs automated backend tests and frontend ESLint
+checks on pull requests targeting `main`. These checks help detect
+regressions before changes are merged.
+
+![Successful GitHub Actions CI pipeline](docs/screenshots/ci-pipeline.png)
+
+**Verification:** [View GitHub Actions workflow runs](https://github.com/csc301-2026-f/10-SCADABLE/actions)
+
+**Backend Automatic Deployment (Railway)**
+
+The backend is hosted on Railway. Railway is configured to deploy
+updates automatically from the connected GitHub repository
+when changes are merged into `main`.
+
+![Railway backend automatic deployment](docs/screenshots/railway-auto-deploy.png)
+
+**Frontend Automatic Deployment (Vercel)**
+
+The Next.js frontend is hosted on Vercel. Vercel is configured to
+deploy updates automatically from the connected GitHub repository
+when changes are merged into `main`.
+
+![Vercel frontend automatic deployment](docs/screenshots/vercel-auto-deploy.png)
+
 ## Coding Standards and Guidelines
 
 We follow the existing naming conventions and directory structure of each component.
@@ -406,6 +439,7 @@ D3 non-functional goals: Lighthouse accessibility **> 80**, keyboard-usable core
 ![Lighthouse accessibility score 98](docs/screenshots/lighthouse-accessibility-98.png)
 
 ![Lighthouse accessibility score 96](docs/screenshots/lighthouse-accessibility-96.png)
+
 
 ### Security
 
@@ -433,3 +467,4 @@ SCADABLE follows a mixed licensing approach, maintaining proprietary repositorie
 - **D3:** Research-failure handling, backend refresh-scheduling implementation (not fully operational in D3), frontend API integration for competitor scores and profile data, Open Roles display support (without automated extraction), and expanded research cost instrumentation. See [PR #62](https://github.com/csc301-2026-f/10-SCADABLE/pull/62), [PR #63](https://github.com/csc301-2026-f/10-SCADABLE/pull/63), and [PR #64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64).
 
 The original D1 prototype remains available [here](https://csc301-2026-f.github.io/10-SCADABLE/deliverables/D1/mockups/final-prototype.html).
+
