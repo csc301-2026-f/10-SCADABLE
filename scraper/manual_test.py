@@ -27,12 +27,8 @@ SETTINGS = ScraperConfig(
     # EDIT: "llm" reads OPENAI_API_KEY from .env; "structural" makes no OpenAI calls.
     selection=SelectionConfig(
         mode="llm",
-        objective=(
-            "Understand the company's offerings, customers, differentiation, commercial "
-            "activity, and observable evidence of expansion or contraction. Favor "
-            "company-specific evidence over general industry articles. Collect evidence "
-            "rather than predicting growth."
-        ),
+        # Optional override; otherwise use the shared extraction-aligned objective.
+        # objective="Research integration setup and plan restrictions.",
         budget_usd=0.03,  # Estimated per website; not a guaranteed billing ceiling.
         trace_enabled=False,  # True saves bounded evidence/answers in decisions.jsonl.
     ),

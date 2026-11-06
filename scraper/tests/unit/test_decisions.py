@@ -476,3 +476,28 @@ async def test_real_sdk_uses_decisions_wire_format_with_mock_transport_only(monk
     assert len(requests) == 1
     assert requests[0].url.path == "/v1/decisions"
     assert json.loads(requests[0].content)["questions"][0]["name"] == "candidate_0"
+
+
+async def test_native_provider_accepts_optional_coverage_without_changing_score_signature():
+    from scraper.coverage import CoverageContext
+
+    client = StubClient([response(score("candidate_0"))])
+    provider = OpenAIDecisionProvider(SelectionConfig(), client_factory=client.factory)
+    context = CoverageContext.from_summary({"topics": {"pricing": {"state": "indicated"}}})
+    provider.set_coverage_context(context)
+    async with provider:
+        await provider.score_candidates([candidate()])
+    assert json.loads(client.calls[0]["input"])["coverage_hints"]["indicated"] == ["pricing"]
+
+
+async def test_coverage_opt_out_preserves_previous_payload_and_prompt_version():
+    from scraper.coverage import CoverageContext
+
+    client = StubClient([response(score("candidate_0"))])
+    settings = SelectionConfig(coverage_enabled=False)
+    provider = OpenAIDecisionProvider(settings, client_factory=client.factory)
+    provider.set_coverage_context(CoverageContext.from_summary({"topics": {}}))
+    async with provider:
+        await provider.score_candidates([candidate()])
+    assert client.calls[0] == candidate_request([candidate()], settings)
+    assert provider.summary.prompt_version == "company-research-v2"

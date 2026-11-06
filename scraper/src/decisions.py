@@ -15,6 +15,7 @@ from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .config import SelectionConfig
+from .coverage import CoverageContext
 from .decision_budget import MAX_REQUEST_BYTES, DecisionBudget, request_size
 from .decision_models import (
     CandidateScore,
@@ -130,6 +131,7 @@ class OpenAIDecisionProvider:
         self._used = False
         self._fatal: DecisionAccessError | None = None
         self._operation_lock = asyncio.Lock()
+        self._coverage_context: CoverageContext | None = None
         self._tracker = DecisionTracker(
             mode=settings.mode, model=settings.model, context=tracking_context
         )
@@ -164,6 +166,9 @@ class OpenAIDecisionProvider:
     @property
     def summary(self) -> DecisionUsageSummary:
         return DecisionUsageSummary(
+            prompt_version="company-research-v3"
+            if self.settings.coverage_enabled
+            else "company-research-v2",
             requested_mode=self.settings.mode,
             effective_mode=self._effective_mode,
             budget_usd=self.settings.budget_usd,
@@ -318,6 +323,12 @@ class OpenAIDecisionProvider:
                     return None
         return None
 
+    def set_coverage_context(self, context: CoverageContext | None) -> None:
+        """Optional capability; the scoring protocol remains unchanged."""
+        if context is not None and not isinstance(context, CoverageContext):
+            raise TypeError("Expected CoverageContext or None")
+        self._coverage_context = context
+
     async def score_candidates(
         self, candidates: Sequence[DecisionCandidate]
     ) -> list[CandidateScore]:
@@ -326,8 +337,11 @@ class OpenAIDecisionProvider:
         if len(ids) != len(set(ids)):
             raise ValueError("Decision candidate IDs must be unique")
         result = []
-        for batch in candidate_batches(candidates, self.settings):
-            answers = await self._request(candidate_request(batch, self.settings), "candidates")
+        context = self._coverage_context if self.settings.coverage_enabled else None
+        for batch in candidate_batches(candidates, self.settings, context):
+            answers = await self._request(
+                candidate_request(batch, self.settings, context), "candidates"
+            )
             for index, candidate in enumerate(batch):
                 answer = answers.get(f"candidate_{index}", {}) if answers is not None else {}
                 kind = answer.get("type")

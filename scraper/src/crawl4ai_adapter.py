@@ -59,6 +59,7 @@ def build_run_config(
         markdown_generator=ContentMarkdownGenerator(
             content_source="raw_html",
             remove_navigation_and_footer=settings.markdown_remove_navigation_and_footer,
+            remove_boilerplate=settings.markdown_remove_boilerplate,
             excluded_selectors=settings.markdown_excluded_selectors,
             options={"ignore_links": False, "ignore_images": True},
             content_filter=PruningContentFilterLXML(threshold=0.2, min_word_threshold=0),
