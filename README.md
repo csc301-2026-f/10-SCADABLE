@@ -64,7 +64,7 @@ Research results are stored in a PostgreSQL database, allowing users to revisit 
 
 Each tracked company has a profile displaying available information such as its website, summary, research status, recent activity, and research sources.
 
-Competitor profiles include **Feature & Automation Score** and **Scores vs SCADABLE** visualizations. The frontend reads values from the backend API and displays unavailable scores as missing rather than inventing a zero. SCADABLE-side ratings only appear once the LLM produces them. Profiles also show Open Roles when extraction returns a count, and Next Refresh when automatic scheduling is enabled.
+Competitor profiles include **Feature & Automation Score** and **Scores vs SCADABLE** visualizations. The frontend reads values from the backend API and displays unavailable scores as missing rather than inventing a zero. SCADABLE-side ratings only appear once the LLM produces them. Profiles also include an Open Roles field connected to the backend API, but automated extraction of job openings is not yet implemented. The Next Refresh field is connected to the backend scheduling data, but reliable automatic refresh execution is not yet available in D3. The field may show "Not scheduled"; it should not be treated as a confirmed upcoming refresh.
 
 An **Activity over time** chart displays historical research activity for the competitor.
 
@@ -87,7 +87,7 @@ SCADABLE's product information uses a static baseline in the current comparison 
 
 **Example use case:** A SCADABLE founder opens the SWOT Overview to examine the available competitive findings across tracked companies such as Vanta and Drata, helping identify potential strengths, weaknesses, opportunities, and threats.
 
-**Known limitation:** Depending on the researched evidence and model response, the overall SWOT may contain fewer findings in some categories.
+**Known limitation:** Depending on the researched evidence and model response, the overall SWOT may contain fewer findings in some categories. The overall comparison can also time out after competitor research; when that happens, the overview may appear stale or unavailable until a successful comparison completes.
 
 ### 6. Agent Runs and Research History
 
@@ -113,7 +113,7 @@ Each research run displays its main stages:
 
 **Competitors page:** https://10-scadable.vercel.app/competitors
 
-**Backend API:** https://backend-production-31e1b.up.railway.app/
+**Backend API:** https://backend-d3-production.up.railway.app/
 
 **TA access (no account required):** Open the D3 application. On the sign-in page, click **Go to dashboard** in the **top-right corner** (next to **Dev only**). The dashboard opens without a Clerk invitation, just as in D2. Invited users can alternatively sign in through Clerk. For a locally run development instance, the same **Go to dashboard** shortcut is available without Clerk keys.
 
@@ -124,17 +124,17 @@ Each research run displays its main stages:
 3. Visit **Competitors** and inspect an existing tracked company.
 4. Select **Add Competitor**, enter a unique company name and a reachable homepage URL, and submit.
 5. Open **Agent Runs** to observe the pending/running/completed/failed state. Some sites restrict crawling; failed runs should display a clear error rather than silently returning fabricated scraped pages.
-6. Open the competitor profile to inspect the summary, findings, citations, feature scores, and — when available — Open Roles and Next Refresh.
+6. Open the competitor profile to inspect the summary, findings, citations, and feature scores. The Open Roles field is present without automated job-opening extraction; Next Refresh may show "Not scheduled" because automatic scheduling is not fully operational for D3.
 7. Use **Scores vs SCADABLE** to compare scores. A missing SCADABLE rating should be shown as unavailable, not 0/10.
-8. Visit **SWOT Overview** to inspect the overall analysis; some categories may be empty when the generated evidence does not support an entry.
+8. Visit **SWOT Overview** to inspect the overall analysis. Some categories may be empty, and an overall comparison timeout can leave the overview marked stale even after an individual competitor research run finishes.
 
 New live research can incur OpenAI costs and take time; use an existing completed competitor profile for a quick evaluation.
 
 ### D3 Improvements Since D2
 
-D3 strengthens research reliability and profile usability: crawler failures are surfaced as failed runs instead of silently replacing real website data with mock pages, and the backend now supports Open Roles extraction and automatic refresh scheduling with retry/restart handling (PRs [#62](https://github.com/csc301-2026-f/10-SCADABLE/pull/62), [#63](https://github.com/csc301-2026-f/10-SCADABLE/pull/63)). The frontend connects **Scores vs SCADABLE**, **Open Roles**, and **Next Refresh** to backend API data, with explicit unavailable-data states (PR [#64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64)). Research cost instrumentation and associated tests have also been added to the research pipeline.
+D3 strengthens research reliability and profile usability: crawler failures are surfaced as failed runs instead of silently replacing real website data with mock pages, and the backend includes automatic refresh scheduling logic with retry/restart handling (PRs [#62](https://github.com/csc301-2026-f/10-SCADABLE/pull/62), [#63](https://github.com/csc301-2026-f/10-SCADABLE/pull/63)). The frontend connects competitor feature scores, Open Roles, and Next Refresh to backend API data, with explicit unavailable-data states (PR [#64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64)). Open Roles has frontend and backend display support, but automated LLM extraction remains incomplete. Next Refresh has frontend/API integration and backend scheduling logic, but scheduled execution has not been verified as reliable in the deployed D3 environment and remains disabled. Research cost instrumentation and associated tests have also been added to the research pipeline.
 
-**Current limitations:** The automatic scheduler is disabled by default (`AUTO_REFRESH_ENABLED=false`); SCADABLE-side scores require corresponding LLM output and may be unavailable; some sites refuse automated crawling; and overall SWOT completeness depends on the evidence and model response. The system does not guarantee that every research run produces scores or a complete four-quadrant SWOT.
+**Current limitations:** Automatic competitor refresh is **not fully working for D3**. Although scheduling logic and the Next Refresh API/UI field have been implemented, reliable end-to-end scheduled runs are not verified; the automatic scheduler remains disabled (`AUTO_REFRESH_ENABLED=false`) and Next Refresh may display "Not scheduled." SCADABLE-side scores depend on LLM output and may be unavailable. Automated extraction of competitor job openings is not implemented, so Open Roles data may be unavailable. Some sites refuse automated crawling. The overall SWOT comparison may time out after research and remain marked stale, so a complete four-quadrant overview is not guaranteed.
 
 ## Technical Overview
 
@@ -197,7 +197,7 @@ Edit the three newly created files **locally**. The templates contain placeholde
 | `backend/.env` | `DATABASE_URL` | Required PostgreSQL connection string; change the example username/password/database to match your local database. |
 | `backend/.env` | `CORS_ORIGINS` | Comma-separated allowed frontend origins; for local use include `http://localhost:3000`. |
 | `backend/.env` | `ALLOW_MOCK_CRAWLER` | Keep `false` for real research; `true` is **offline development only** and may substitute mock pages on crawl failure. |
-| `backend/.env` | `AUTO_REFRESH_ENABLED` | Defaults to `false` to avoid unplanned crawl/OpenAI calls. Set `true` only when intentionally testing scheduled refreshes. |
+| `backend/.env` | `AUTO_REFRESH_ENABLED` | Keep `false` for D3: automatic refresh execution is not fully verified. Enable only for controlled development testing because it can trigger additional crawl/OpenAI calls. |
 | `backend/.env` | `COMPETITOR_REFRESH_DAYS`, `COMPETITOR_REFRESH_RETRY_MINUTES`, `COMPETITOR_REFRESH_POLL_SECONDS` | Optional refresh configuration; template defaults are 7 days, 60 minutes and 60 seconds. |
 | `frontend/.env.local` | `NEXT_PUBLIC_API_URL` | Use `http://localhost:8000` for the local FastAPI server. |
 | `frontend/.env.local` | `NEXT_PUBLIC_USE_MOCKS` | Defaults to `false` in the D3 template so the frontend talks to FastAPI. Set to `true` only for standalone frontend development with fixtures; mock mode does **not** verify full-stack integration. |
@@ -378,7 +378,7 @@ The frontend is deployed on **Vercel**, while the backend API and PostgreSQL dat
 
 **D3 competitors page:** https://10-scadable.vercel.app/competitors
 
-**Backend API:** https://backend-production-31e1b.up.railway.app/
+**Backend API:** https://backend-d3-production.up.railway.app/
 
 The frontend is hosted on Vercel; the backend API and database are hosted on Railway. GitHub Actions runs backend tests and frontend ESLint on pull requests to `main`, with five-minute job timeouts. The team uses reviewed pull requests and hosted deployments to keep frontend and backend changes coordinated.
 
@@ -430,6 +430,6 @@ SCADABLE follows a mixed licensing approach, maintaining proprietary repositorie
 
 - **D1:** Interactive frontend prototype and initial project design.
 - **D2:** Deployed full-stack application with competitor research, persistent data, research-run monitoring, authentication UI, and SWOT analysis.
-- **D3:** Research-failure handling, refresh scheduling and Open Roles backend support, frontend API-connected profile data, and expanded research cost instrumentation. See [PR #62](https://github.com/csc301-2026-f/10-SCADABLE/pull/62), [PR #63](https://github.com/csc301-2026-f/10-SCADABLE/pull/63), and [PR #64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64).
+- **D3:** Research-failure handling, backend refresh-scheduling implementation (not fully operational in D3), frontend API integration for competitor scores and profile data, Open Roles display support (without automated extraction), and expanded research cost instrumentation. See [PR #62](https://github.com/csc301-2026-f/10-SCADABLE/pull/62), [PR #63](https://github.com/csc301-2026-f/10-SCADABLE/pull/63), and [PR #64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64).
 
 The original D1 prototype remains available [here](https://csc301-2026-f.github.io/10-SCADABLE/deliverables/D1/mockups/final-prototype.html).
