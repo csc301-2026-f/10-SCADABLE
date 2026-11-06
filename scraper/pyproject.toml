@@ -25,6 +25,9 @@ dependencies = [
 [project.scripts]
 scraper = "scraper.cli:main"
 
+[project.optional-dependencies]
+langfuse = ["langfuse>=5,<6"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.4,<10",

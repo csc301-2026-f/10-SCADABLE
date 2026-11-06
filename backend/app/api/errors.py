@@ -14,6 +14,7 @@ from app.db.repository import (
     DuplicateCompetitorError,
     InvalidStatusTransitionError,
     NotFoundError,
+    ResearchAlreadyActiveError,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(InvalidStatusTransitionError)
     @app.exception_handler(ConflictError)
+    @app.exception_handler(ResearchAlreadyActiveError)
     async def _conflict(_: Request, exc: Exception) -> JSONResponse:
         return _error(status.HTTP_409_CONFLICT, str(exc) or "Conflict.")
 

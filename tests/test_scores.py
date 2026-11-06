@@ -31,6 +31,7 @@ def company(name, features, pages=("https://x.example/",)):
             for url in pages
         ],
         features=features,
+        crawl_time_string="2026-10-19 12:00:01",
     )
 
 
@@ -126,6 +127,7 @@ def test_build_company_analysis_copies_the_features_claims():
             ClaimCitedByURL(category="pricing", claim="Pro, $9", claim_page_url="https://a.com/p"),
             ClaimCitedByURL(category="features", claim="Alerts", claim_page_url="https://a.com/"),
         ],
+        crawl_time_string="2026-10-19 12:00:01",
     )
     partial = PartialCompanyAnalysisByIndex(
         claims_cited=[ClaimCitedByIndex(category="strength", claim="Good", claim_page_index=0)]

@@ -1,3 +1,4 @@
+
 import type { CompetitorProfile, CompetitorSummary, AgentRun } from "@/lib/api/types";
 
 const POLL_MS = 3000;
@@ -14,12 +15,26 @@ export function competitorsPollInterval(
   return POLL_MS;
 }
 
-/** Poll while this profile's research is still pending/running. */
+/** Poll research, plus a short window for scores produced after the run completes. */
 export function profilePollInterval(
   profile: CompetitorProfile | undefined,
 ): number | false {
-  if (!profile || !isInProgress(profile.researchStatus)) return false;
-  return POLL_MS;
+  if (!profile) return false;
+  if (isInProgress(profile.researchStatus)) return POLL_MS;
+
+  // The overall comparison generates feature scores after competitor research
+  // is marked complete. Update the chart automatically for a short window,
+  // but never poll older, permanently unscored profiles indefinitely.
+  if (profile.researchStatus === "success" && profile.chartSeries.scores.length === 0) {
+    const completedAt = profile.lastResearchedAt
+      ? new Date(profile.lastResearchedAt).getTime()
+      : NaN;
+    const elapsed = Date.now() - completedAt;
+    if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed < 10 * 60 * 1000) {
+      return 10_000;
+    }
+  }
+  return false;
 }
 
 /** Poll while any agent run is still pending/running. */
@@ -27,3 +42,6 @@ export function runsPollInterval(runs: AgentRun[] | undefined): number | false {
   if (!runs?.some((r) => isInProgress(r.status))) return false;
   return POLL_MS;
 }
+
+
+

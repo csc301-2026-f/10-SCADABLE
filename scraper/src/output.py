@@ -23,6 +23,8 @@ from .models import (
     UncrawledUrl,
 )
 
+logger = logging.getLogger(__name__)
+
 _RESERVED = {
     "CON",
     "PRN",
@@ -281,6 +283,20 @@ def export_competitor(
             ) as trace:
                 for record in result.decision_trace:
                     trace.write(record.model_dump_json(exclude_none=True) + "\n")
+        tracking_file = None
+        reference = result.decision_tracking
+        if reference is not None and reference.finished_at is not None:
+            try:
+                candidate = stage / "decision_tracking.json"
+                candidate.write_text(
+                    reference.model_dump_json(indent=2, exclude_none=True) + "\n",
+                    encoding="utf-8", newline="\n",
+                )
+                tracking_file = candidate
+            except (OSError, ValueError):
+                logger.warning(
+                    "Decisions tracking companion could not be staged; export continues."
+                )
         payload = summary.model_dump(mode="json", exclude_none=True)
         diagnostics_staged = False
         try:
@@ -315,6 +331,12 @@ def export_competitor(
                 logger.warning(
                     "Crawl diagnostics publication failed (%s); export continues",
                     type(error).__name__,
+        if tracking_file is not None:
+            try:
+                os.rename(tracking_file, target / tracking_file.name)
+            except OSError:
+                logger.warning(
+                    "Decisions tracking companion could not be published; export continues."
                 )
         os.rename(stage / "crawl_summary.json", target / "crawl_summary.json")
     return summary

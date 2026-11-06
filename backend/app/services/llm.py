@@ -7,9 +7,12 @@ mock analysis during offline testing.
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
+
+from app.services.open_roles import count_open_roles, normalize_job_postings
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +24,20 @@ class AnalyzerProtocol(Protocol):
         self,
         scraped_data: dict[str, Any],
         baseline_context: dict[str, Any],
+        trace_prefix: str | None = None,
     ) -> dict[str, Any]: ...
 
     async def compare(
         self,
         baseline_context: dict[str, Any],
         competitors: list[dict[str, Any]],
+        trace_prefix: str | None = None,
     ) -> dict[str, Any]: ...
+
+
+def _comparison_time() -> str:
+    """Stands in for SCADABLE's crawl time, which the backend never has (static baseline)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _pick_source_url(urls: list[str], scadable_url: str) -> str | None:
@@ -71,6 +81,7 @@ class MockOpenAIAnalyzer:
         self,
         scraped_data: dict[str, Any],
         baseline_context: dict[str, Any],
+        trace_prefix: str | None = None,
     ) -> dict[str, Any]:
         if self.delay_seconds > 0:
             await asyncio.sleep(self.delay_seconds)
@@ -153,6 +164,7 @@ class MockOpenAIAnalyzer:
         self,
         baseline_context: dict[str, Any],
         competitors: list[dict[str, Any]],
+        trace_prefix: str | None = None,
     ) -> dict[str, Any]:
         if self.delay_seconds > 0:
             await asyncio.sleep(self.delay_seconds)
@@ -210,10 +222,11 @@ class OpenAIAdapter:
         self,
         scraped_data: dict[str, Any],
         baseline_context: dict[str, Any],
+        trace_prefix: str | None = None,
     ) -> dict[str, Any]:
+        # Names of paid OpenAI calls started, kept even if we fall back to the mock
+        llm_calls: list[str] = []
         try:
-            from datetime import datetime, timezone
-
             from llm.analyzer import Analyzer
             from llm.inputs import deduplicate_analysis_pages, load_analysis_input
             from llm.schemas import (
@@ -293,11 +306,20 @@ class OpenAIAdapter:
 
             client = _build_openai_client()
             try:
-                analyzer = Analyzer(client)
+                analyzer = Analyzer(client, trace_prefix=trace_prefix)
+                if trace_prefix:
+                    llm_calls.append(f"{trace_prefix}:extraction")
                 facts = await analyzer.extract_information(analysis_input)
+                if trace_prefix:
+                    llm_calls.append(f"{trace_prefix}:analysis")
                 company_analysis = await analyzer.analyze_company(facts)
             finally:
                 await client.close()
+
+            # The LLM already extracts cited job postings in its first step.
+            # Preserve them before CompanyAnalysis (which omits those fields)
+            # is converted to the backend's saved analysis shape.
+            job_postings = normalize_job_postings(getattr(facts, "job_postings", None))
 
             # Map cited strengths and weaknesses
             swot_entries = to_swot_entries(company_analysis)
@@ -340,7 +362,10 @@ class OpenAIAdapter:
                 "competitor_name": competitor_name,
                 "summary": getattr(company_analysis, "summary", ""),
                 "features": list(getattr(company_analysis, "features", [])),
+                "job_postings": job_postings,
+                "open_roles": count_open_roles(job_postings),
                 "swot_entries": swot_entries,
+                "llm_calls": llm_calls,
             }
 
         except (ImportError, ValueError, Exception) as exc:
@@ -349,12 +374,16 @@ class OpenAIAdapter:
                 exc,
             )
             mock = MockOpenAIAnalyzer()
-            return await mock.analyze(scraped_data, baseline_context)
+            result = await mock.analyze(scraped_data, baseline_context)
+            if llm_calls:
+                result["llm_calls"] = llm_calls
+            return result
 
     async def compare(
         self,
         baseline_context: dict[str, Any],
         competitors: list[dict[str, Any]],
+        trace_prefix: str | None = None,
     ) -> dict[str, Any]:
         """Compare SCADABLE against all researched competitors with Analyzer.compare().
 
@@ -390,6 +419,7 @@ class OpenAIAdapter:
                 summary=baseline_context.get("summary", ""),
                 summary_page_urls=[scadable_url],
                 features=list(baseline_context.get("core_capabilities", [])),
+                crawl_time_string=_comparison_time(),
                 claims_cited=[
                     ClaimCitedByURL(category="strength", claim=claim, claim_page_url=scadable_url)
                     for claim in scadable_claims
@@ -402,6 +432,8 @@ class OpenAIAdapter:
                     # The backend doesn't store which page the summary came from
                     summary_page_urls=[c["website_url"]],
                     features=list(c.get("features", [])),
+                    # Only used to name calls when no trace_prefix is given
+                    crawl_time_string=c.get("crawl_time_string", ""),
                     claims_cited=[
                         ClaimCitedByURL(
                             category=claim["category"],
@@ -416,7 +448,7 @@ class OpenAIAdapter:
         )
 
         try:
-            swot = await Analyzer(client).compare(comparison_input)
+            swot = await Analyzer(client, trace_prefix=trace_prefix).compare(comparison_input)
         finally:
             await client.close()
 

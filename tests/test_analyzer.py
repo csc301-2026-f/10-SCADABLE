@@ -13,7 +13,7 @@ from llm.schemas import (
     PartialCompanyAnalysisByIndex,
     PartialExtractedInformationByIndex,
 )
-from tests.helpers import MARKDOWN, make_page, make_result, write_export
+from tests.helpers import CRAWL_TIME, MARKDOWN, make_page, make_result, write_export
 
 pytestmark = pytest.mark.asyncio
 
@@ -38,6 +38,7 @@ def facts(url="https://example.com/"):
         claims_cited=[
             ClaimCitedByURL(category="features", claim="Collects evidence", claim_page_url=url)
         ],
+        crawl_time_string=CRAWL_TIME,
     )
 
 
@@ -88,6 +89,7 @@ async def test_company_analysis_adds_name_summary_features_and_resolves_urls():
     assert [(c.claim, c.claim_page_url) for c in result.claims_cited] == [
         ("Collects evidence", "https://example.com/")
     ]
+    assert result.crawl_time_string == CRAWL_TIME  # copied from facts
     assert client.requests[0]["output_schema"] is PartialCompanyAnalysisByIndex
 
 
@@ -112,6 +114,8 @@ async def test_extraction_resolves_page_numbers_to_urls_and_uses_the_export_name
     assert result.summary_page_urls == ["https://example.com/"]
     assert result.claims_cited[0].claim_page_url == "https://example.com/"
     assert result.job_postings[0].job_page_url == "https://example.com/"
+    # The crawl's finish time, formatted, is kept with the extracted facts.
+    assert result.crawl_time_string == CRAWL_TIME
 
 
 async def test_extraction_prompt_has_markdown_and_page_numbers_but_no_urls(tmp_path):

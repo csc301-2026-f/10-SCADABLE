@@ -11,7 +11,7 @@ from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Annotated, Literal
 
-from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI
+from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .config import SelectionConfig
@@ -28,6 +28,7 @@ from .decision_models import (
     UnitScore,
 )
 from .decision_prompts import candidate_batches, candidate_request, content_request
+from .decision_tracking import DecisionTracker, DecisionTrackingContext, DecisionTrackingReference
 from .reliability import TRANSIENT_STATUSES, parse_retry_after
 from .types import PageCategory
 
@@ -115,6 +116,7 @@ class OpenAIDecisionProvider:
         request_limiter: asyncio.Semaphore | None = None,
         client_factory: Callable = AsyncOpenAI,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        tracking_context: DecisionTrackingContext | None = None,
     ):
         self.settings = settings
         self._limiter = request_limiter or asyncio.Semaphore(settings.max_concurrency)
@@ -130,6 +132,9 @@ class OpenAIDecisionProvider:
         self._fatal: DecisionAccessError | None = None
         self._operation_lock = asyncio.Lock()
         self._coverage_context: CoverageContext | None = None
+        self._tracker = DecisionTracker(
+            mode=settings.mode, model=settings.model, context=tracking_context
+        )
 
     async def __aenter__(self):
         if self._used:
@@ -141,6 +146,7 @@ class OpenAIDecisionProvider:
                 max_retries=0,
                 timeout=self.settings.timeout_seconds,
             )
+        self._tracker.start()
         self._used = self._opened = True
         return self
 
@@ -151,6 +157,11 @@ class OpenAIDecisionProvider:
         finally:
             self._client = None
             self._opened = False
+            await self._tracker.aclose()
+
+    @property
+    def decision_tracking(self) -> DecisionTrackingReference | None:
+        return self._tracker.reference
 
     @property
     def summary(self) -> DecisionUsageSummary:
@@ -209,6 +220,11 @@ class OpenAIDecisionProvider:
                         return None
                     started = time.monotonic()
                     common = {"operation": operation, "attempt": attempt, "request": payload}
+                    observation = self._tracker.start_attempt(
+                        operation=operation, attempt=attempt, sequence=self._budget.request_count
+                    )
+                    outcome = "invalid_response"
+                    reported_tokens = None
                     try:
                         async with asyncio.timeout(self.settings.timeout_seconds):
                             response = await self._client.decisions.create(**payload)
@@ -223,6 +239,11 @@ class OpenAIDecisionProvider:
                                 if isinstance(error, asyncio.CancelledError)
                                 else "api_error"
                             )
+                        )
+                        outcome = (
+                            "timeout"
+                            if isinstance(error, (TimeoutError, APITimeoutError))
+                            else code
                         )
                         self._record(
                             **common,
@@ -262,6 +283,7 @@ class OpenAIDecisionProvider:
                         usage = data.get("usage") if isinstance(data, dict) else None
                         tokens = usage.get("input_tokens") if isinstance(usage, dict) else None
                         valid_usage = type(tokens) is int and tokens >= 0
+                        reported_tokens = tokens if valid_usage else None
                         self._budget.settle(
                             reservation, reported_input_tokens=tokens if valid_usage else None
                         )
@@ -272,6 +294,11 @@ class OpenAIDecisionProvider:
                             else {}
                         )
                         valid = valid_usage and isinstance(raw_answers, list)
+                        outcome = (
+                            "success"
+                            if valid and all(a["type"] != "invalid" for a in answers.values())
+                            else "invalid_response"
+                        )
                         self._record(
                             **common,
                             duration_seconds=time.monotonic() - started,
@@ -284,6 +311,10 @@ class OpenAIDecisionProvider:
                             self._fallback("invalid_response")
                             return None
                         return answers
+                    finally:
+                        self._tracker.finish_attempt(
+                            observation, outcome=outcome, input_tokens=reported_tokens
+                        )
                 # Capacity is released before waiting, and every retry reserves anew.
                 if retry:
                     await self._sleep(delay)

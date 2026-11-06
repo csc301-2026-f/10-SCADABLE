@@ -11,6 +11,7 @@ from contextlib import AsyncExitStack
 import httpx
 
 from .config import CompetitorInput, ScraperConfig, resolve_config
+from .decision_tracking import DecisionTrackingContext, DecisionTrackingReference
 from .discovery.engine import DiscoveryCrawler
 from .discovery.http import GuardedHttpClient, RequestBlocked
 from .discovery.sitemaps import BoundedSitemapDiscoverer
@@ -36,10 +37,12 @@ DecisionProviderFactory = Callable[
 ]
 
 
-def _decision_factory(competitor, settings, limiter):
+def _decision_factory(competitor, settings, limiter, *, tracking_context=None):
     from .decisions import OpenAIDecisionProvider
 
-    return OpenAIDecisionProvider(settings.selection, request_limiter=limiter)
+    return OpenAIDecisionProvider(
+        settings.selection, request_limiter=limiter, tracking_context=tracking_context
+    )
 
 
 def _browser_factory(competitor, settings, guard, host_limiter):
@@ -174,11 +177,26 @@ class CompetitorScraper:
         extractor: ContentExtractor | None = None,
         http_transport: httpx.AsyncBaseTransport | None = None,
         decision_provider_factory: DecisionProviderFactory | None = None,
+        decision_tracking_context_factory: Callable[
+            [CompetitorInput], DecisionTrackingContext
+        ] | None = None,
     ):
         self._fetcher_factory = fetcher_factory
         self._extractor = extractor or MarkdownExtractor()
         self._transport = http_transport
         self._decision_provider_factory = decision_provider_factory
+        self._decision_tracking_context_factory = decision_tracking_context_factory
+
+    def _decision_provider(self, competitor, settings, limiter):
+        if self._decision_provider_factory is not None:
+            return self._decision_provider_factory(competitor, settings, limiter)
+        context = None
+        if self._decision_tracking_context_factory is not None:
+            try:
+                context = self._decision_tracking_context_factory(competitor)
+            except Exception:
+                logger.warning("Decisions tracking context failed; using a separate crawl trace.")
+        return _decision_factory(competitor, settings, limiter, tracking_context=context)
 
     def _preflight_selection(self, settings):
         if self._decision_provider_factory is None:
@@ -200,6 +218,7 @@ class CompetitorScraper:
     async def _crawl(self, competitor, global_settings, cli_overrides, capacity):
         settings = resolve_config(global_settings, competitor.overrides, cli_overrides)
         started = utc_now()
+        decision_provider = None
         logger.info("Starting %s", competitor.homepage_url)
         try:
             async with GuardedHttpClient(
@@ -215,6 +234,9 @@ class CompetitorScraper:
                     else _browser_factory(competitor, settings, guard, capacity.hosts)
                 )
                 fetcher = _LimitedFetcher(owned, capacity, guard, limit_source_host=custom)
+                decision_provider = self._decision_provider(
+                    competitor, settings, capacity.decisions
+                )
                 discovery = await DiscoveryCrawler(
                     fetcher,
                     BoundedSitemapDiscoverer(
@@ -222,9 +244,7 @@ class CompetitorScraper:
                     ),
                     robots_guard=guard,
                     managed_attempts=True,
-                    decision_provider=(self._decision_provider_factory or _decision_factory)(
-                        competitor, settings, capacity.decisions
-                    ),
+                    decision_provider=decision_provider,
                 ).run(competitor, global_settings, cli_overrides=cli_overrides)
             pages = []
             for page in discovery.fetched_pages:
@@ -311,6 +331,12 @@ class CompetitorScraper:
                 effective_config=settings,
                 warnings=[f"{type(error).__name__}: {error}"],
             )
+        try:
+            reference = getattr(decision_provider, "decision_tracking", None)
+            if isinstance(reference, DecisionTrackingReference):
+                result._decision_tracking = reference
+        except Exception:
+            logger.warning("Decisions tracking reference unavailable; crawling continues.")
         logger.info(
             "Finished %s: %s (%d successful, %d failed)",
             competitor.homepage_url,

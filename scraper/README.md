@@ -65,6 +65,7 @@ Decisions adapter used by adaptive traversal. Lxml supplies network-free HTML co
 | [Quickstart](docs/quickstart.md) | Installation, manual runner, CLI and output inspection |
 | [Optimization controls](docs/optimizations.md) | Conservative cleanup, exact duplicates, approximate coverage and independent opt-outs |
 | [Decisions](docs/decisions.md) | Prompts, adaptive selection, credentials, usage and fallback |
+| [Decisions cost tracking](docs/decision-cost-tracking.md) | Optional Langfuse setup, correlation references and team handoff |
 | [Discovery](docs/discovery.md) | URL policy, frontier, sitemap and robots behavior |
 | [Extraction](docs/extraction-and-output.md) | Browser interactions, Markdown cleanup and categorization |
 | [Output layout](docs/output-layout.md) | File naming, schema, provenance and publication |

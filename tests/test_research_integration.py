@@ -75,6 +75,8 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
                 claim_page_url="https://example.com/pricing",
             ),
         ],
+        # The real crawl's finish time is only known after the run; filled in below.
+        crawl_time_string="",
     )
 
     # What the model returns for the analysis. The analysis step numbers its own page list
@@ -103,6 +105,7 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
             )
         ],
         features=["Evidence collection"],
+        crawl_time_string="",
     )
 
     class FixtureFetcher:
@@ -248,8 +251,11 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
             analyzer=analyzer,
         )
         result = results[0]
-        assert result.analysis == analysis
-        assert result.extracted_information == facts
+        crawl_time = result.crawl_summary.finished_at.strftime("%Y-%m-%d %H:%M:%S")
+        assert result.analysis == analysis.model_copy(update={"crawl_time_string": crawl_time})
+        assert result.extracted_information == facts.model_copy(
+            update={"crawl_time_string": crawl_time}
+        )
         assert result.crawl_summary.counts.successful == 2
         assert result.crawl_summary.decision_usage.effective_mode == "llm"
         assert (

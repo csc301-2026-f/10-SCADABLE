@@ -128,6 +128,11 @@ failed without its corresponding page outcome is rejected as inconsistent input.
 
 ## API, CLI and publication
 
+Optional Langfuse references are written to `decision_tracking.json`, separate from the
+schema `2.1` summary. The companion is published before the completion marker; its failure
+does not block the normal export. It is absent when tracking is disabled. See
+[Decisions cost tracking](decision-cost-tracking.md) for its schema and limitations.
+
 ```python
 from scraper.output import export_competitor
 
