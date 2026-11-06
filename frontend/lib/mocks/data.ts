@@ -13,7 +13,7 @@ export const mockCompetitors: CompetitorSummary[] = [
     website: "https://northstarlabs.example",
     trend: "up",
     researchStatus: "success",
-    lastResearchedAt: "2026-10-10T14:00:00Z",
+    lastResearchedAt: "2026-10-31T14:00:00Z",
     recentChangeSummary: "Posted 4 new automation engineering roles",
   },
   {
@@ -22,7 +22,7 @@ export const mockCompetitors: CompetitorSummary[] = [
     website: "https://orbitworks.example",
     trend: "up",
     researchStatus: "success",
-    lastResearchedAt: "2026-10-11T11:00:00Z",
+    lastResearchedAt: "2026-11-01T11:00:00Z",
     recentChangeSummary: "Announced workflow automation product update",
   },
   {
@@ -40,7 +40,7 @@ export const mockCompetitors: CompetitorSummary[] = [
     website: "https://brightpath.example",
     trend: "up",
     researchStatus: "failed",
-    lastResearchedAt: "2026-10-12T09:00:00Z",
+    lastResearchedAt: "2026-11-02T09:00:00Z",
     recentChangeSummary: "Expanded analytics integrations",
   },
   {
@@ -196,7 +196,7 @@ export const mockProfiles: Record<string, CompetitorProfile> = {
         text: "Announced a major workflow automation product update",
         sourceUrl: "https://orbitworks.example/blog/workflow-update",
         sourceLabel: "Product blog",
-        detectedAt: "2026-10-09T11:00:00Z",
+        detectedAt: "2026-10-30T11:00:00Z",
         isNew: true,
       },
       {
@@ -215,7 +215,7 @@ export const mockProfiles: Record<string, CompetitorProfile> = {
       {
         id: "oa1",
         text: "Announced workflow automation product update",
-        detectedAt: "2026-10-09T11:00:00Z",
+        detectedAt: "2026-10-30T11:00:00Z",
       },
       {
         id: "oa2",
@@ -337,7 +337,7 @@ export const mockProfiles: Record<string, CompetitorProfile> = {
         text: "Expanded analytics integrations across three platforms",
         sourceUrl: "https://brightpath.example/integrations",
         sourceLabel: "Integrations",
-        detectedAt: "2026-10-11T09:00:00Z",
+        detectedAt: "2026-11-01T09:00:00Z",
         isNew: true,
       },
       {
@@ -348,14 +348,14 @@ export const mockProfiles: Record<string, CompetitorProfile> = {
         text: "Marketing push around automated reporting",
         sourceUrl: "https://brightpath.example/blog/reporting",
         sourceLabel: "Product blog",
-        detectedAt: "2026-10-10T09:00:00Z",
+        detectedAt: "2026-10-31T09:00:00Z",
       },
     ],
     recentActivity: [
       {
         id: "ba1",
         text: "Launched three new analytics integrations",
-        detectedAt: "2026-10-11T09:00:00Z",
+        detectedAt: "2026-11-01T09:00:00Z",
       },
       {
         id: "ba2",
@@ -552,8 +552,8 @@ export const mockRuns: AgentRun[] = [
     stepCount: 6,
     cacheHits: 4,
     cacheMisses: 2,
-    startedAt: "2026-10-15T12:00:00Z",
-    finishedAt: "2026-10-15T12:02:00Z",
+    startedAt: "2026-11-05T12:00:00Z",
+    finishedAt: "2026-11-05T12:02:00Z",
     pullRequestUrl: null,
     errorMessage: null,
     steps: [
@@ -582,8 +582,8 @@ export const mockRuns: AgentRun[] = [
     stepCount: 7,
     cacheHits: 6,
     cacheMisses: 1,
-    startedAt: "2026-10-15T11:00:00Z",
-    finishedAt: "2026-10-15T11:02:00Z",
+    startedAt: "2026-11-05T11:00:00Z",
+    finishedAt: "2026-11-05T11:02:00Z",
     pullRequestUrl: null,
     errorMessage: null,
     steps: [
@@ -625,8 +625,8 @@ export const mockRuns: AgentRun[] = [
     stepCount: 4,
     cacheHits: 2,
     cacheMisses: 2,
-    startedAt: "2026-10-15T09:00:00Z",
-    finishedAt: "2026-10-15T09:01:00Z",
+    startedAt: "2026-11-05T09:00:00Z",
+    finishedAt: "2026-11-05T09:01:00Z",
     pullRequestUrl: null,
     errorMessage:
       "Generate competitor summary failed: model timed out while synthesizing BrightPath findings from careers and product sources.",
@@ -654,8 +654,8 @@ export const mockRuns: AgentRun[] = [
     stepCount: 5,
     cacheHits: 4,
     cacheMisses: 1,
-    startedAt: "2026-10-14T16:00:00Z",
-    finishedAt: "2026-10-14T16:02:00Z",
+    startedAt: "2026-11-04T16:00:00Z",
+    finishedAt: "2026-11-04T16:02:00Z",
     pullRequestUrl: null,
     errorMessage: null,
     steps: [
@@ -683,8 +683,8 @@ export const mockRuns: AgentRun[] = [
     stepCount: 5,
     cacheHits: 3,
     cacheMisses: 2,
-    startedAt: "2026-10-14T10:00:00Z",
-    finishedAt: "2026-10-14T10:02:00Z",
+    startedAt: "2026-11-04T10:00:00Z",
+    finishedAt: "2026-11-04T10:02:00Z",
     pullRequestUrl: null,
     errorMessage: null,
     steps: [
@@ -713,7 +713,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 6,
     cacheHits: 5,
     cacheMisses: 1,
-    startedAt: "2026-10-13T12:00:00Z",
+    startedAt: "2026-11-03T12:00:00Z",
   }),
   weekRun({
     id: "run-northstar-3",
@@ -724,7 +724,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 6,
     cacheHits: 3,
     cacheMisses: 3,
-    startedAt: "2026-10-11T12:00:00Z",
+    startedAt: "2026-11-01T12:00:00Z",
   }),
   weekRun({
     id: "run-northstar-4",
@@ -735,7 +735,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 6,
     cacheHits: 4,
     cacheMisses: 2,
-    startedAt: "2026-10-09T12:00:00Z",
+    startedAt: "2026-10-30T12:00:00Z",
   }),
   weekRun({
     id: "run-orbit-2",
@@ -746,7 +746,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 7,
     cacheHits: 5,
     cacheMisses: 2,
-    startedAt: "2026-10-13T11:00:00Z",
+    startedAt: "2026-11-03T11:00:00Z",
   }),
   weekRun({
     id: "run-orbit-3",
@@ -757,7 +757,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 7,
     cacheHits: 6,
     cacheMisses: 1,
-    startedAt: "2026-10-11T11:00:00Z",
+    startedAt: "2026-11-01T11:00:00Z",
   }),
   weekRun({
     id: "run-orbit-4",
@@ -768,7 +768,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 7,
     cacheHits: 4,
     cacheMisses: 3,
-    startedAt: "2026-10-09T11:00:00Z",
+    startedAt: "2026-10-30T11:00:00Z",
   }),
   weekRun({
     id: "run-brightpath-2",
@@ -779,7 +779,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 5,
     cacheHits: 3,
     cacheMisses: 2,
-    startedAt: "2026-10-13T09:00:00Z",
+    startedAt: "2026-11-03T09:00:00Z",
   }),
   weekRun({
     id: "run-brightpath-3",
@@ -790,7 +790,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 5,
     cacheHits: 4,
     cacheMisses: 1,
-    startedAt: "2026-10-11T09:00:00Z",
+    startedAt: "2026-11-01T09:00:00Z",
   }),
   weekRun({
     id: "run-brightpath-4",
@@ -801,7 +801,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 4,
     cacheHits: 2,
     cacheMisses: 2,
-    startedAt: "2026-10-09T09:00:00Z",
+    startedAt: "2026-10-30T09:00:00Z",
   }),
   weekRun({
     id: "run-harbor-2",
@@ -812,7 +812,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 5,
     cacheHits: 4,
     cacheMisses: 1,
-    startedAt: "2026-10-12T16:00:00Z",
+    startedAt: "2026-11-02T16:00:00Z",
   }),
   weekRun({
     id: "run-harbor-3",
@@ -823,7 +823,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 5,
     cacheHits: 3,
     cacheMisses: 2,
-    startedAt: "2026-10-10T16:00:00Z",
+    startedAt: "2026-10-31T16:00:00Z",
   }),
   weekRun({
     id: "run-harbor-4",
@@ -845,7 +845,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 5,
     cacheHits: 3,
     cacheMisses: 2,
-    startedAt: "2026-10-12T10:00:00Z",
+    startedAt: "2026-11-02T10:00:00Z",
   }),
   weekRun({
     id: "run-vertex-3",
@@ -856,7 +856,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 5,
     cacheHits: 2,
     cacheMisses: 3,
-    startedAt: "2026-10-10T10:00:00Z",
+    startedAt: "2026-10-31T10:00:00Z",
   }),
   weekRun({
     id: "run-vertex-4",
@@ -878,7 +878,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 6,
     cacheHits: 5,
     cacheMisses: 1,
-    startedAt: "2026-10-14T08:00:00Z",
+    startedAt: "2026-11-04T08:00:00Z",
   }),
   weekRun({
     id: "run-orbit-5",
@@ -889,7 +889,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 7,
     cacheHits: 5,
     cacheMisses: 2,
-    startedAt: "2026-10-14T07:00:00Z",
+    startedAt: "2026-11-04T07:00:00Z",
   }),
   weekRun({
     id: "run-brightpath-5",
@@ -900,7 +900,7 @@ export const mockRuns: AgentRun[] = [
     stepCount: 5,
     cacheHits: 3,
     cacheMisses: 2,
-    startedAt: "2026-10-12T07:00:00Z",
+    startedAt: "2026-11-02T07:00:00Z",
   }),
   weekRun({
     id: "run-harbor-5",
@@ -911,6 +911,6 @@ export const mockRuns: AgentRun[] = [
     stepCount: 5,
     cacheHits: 4,
     cacheMisses: 1,
-    startedAt: "2026-10-13T07:00:00Z",
+    startedAt: "2026-11-03T07:00:00Z",
   }),
 ];

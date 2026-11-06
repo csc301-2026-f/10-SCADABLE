@@ -5,7 +5,8 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 export type WeeklyRunStats = {
   runsThisWeek: number;
   successful: number;
-  estimatedCostUsd: number;
+  /** Sum of known run costs this week; null if no run has costUsd yet. */
+  estimatedCostUsd: number | null;
   cacheHitRatePct: number;
 };
 
@@ -70,7 +71,11 @@ export function latestSuccessfulRunForCompetitor(
 export function computeWeeklyRunStats(runs: AgentRun[]): WeeklyRunStats {
   const week = filterRunsThisWeek(runs);
   const successful = week.filter((r) => r.status === "success").length;
-  const estimatedCostUsd = week.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+  const priced = week.filter((r) => r.costUsd != null);
+  const estimatedCostUsd =
+    priced.length === 0
+      ? null
+      : priced.reduce((sum, r) => sum + (r.costUsd as number), 0);
   const hits = week.reduce((sum, r) => sum + (r.cacheHits ?? 0), 0);
   const misses = week.reduce((sum, r) => sum + (r.cacheMisses ?? 0), 0);
   const total = hits + misses;
@@ -90,8 +95,10 @@ export function formatRunStatus(status: AgentRun["status"]): string {
   return "Pending";
 }
 
+/** Format API `costUsd` for the runs UI. Null means not available yet (Langfuse lag). */
 export function formatRunCost(costUsd: number | null): string {
   if (costUsd == null) return "—";
+  if (costUsd > 0 && costUsd < 0.01) return `$${costUsd.toFixed(4)}`;
   return `$${costUsd.toFixed(2)}`;
 }
 
