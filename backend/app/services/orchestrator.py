@@ -186,10 +186,21 @@ async def refresh_overall_swot(
             publish_overall_swot(db, [], revision)
             return
 
-        logger.info("Comparing SCADABLE against %d competitors", len(profiles))
+        # Overall comparisons grow with every researched competitor and can
+        # take longer than one company's crawl/analysis. Allow the comparison
+        # deadline to be configured separately on Railway.
+        comparison_timeout = float(
+            os.getenv("OVERALL_SWOT_TIMEOUT_SECONDS", str(timeout_seconds))
+        )
+        if comparison_timeout <= 0:
+            raise ValueError("OVERALL_SWOT_TIMEOUT_SECONDS must be positive")
+        logger.info(
+            "Comparing SCADABLE against %d competitors (timeout=%ss)",
+            len(profiles), comparison_timeout,
+        )
         comparison = await asyncio.wait_for(
             analyzer.compare(get_scadable_baseline(), profiles, trace_prefix=trace_prefix),
-            timeout=timeout_seconds,
+            timeout=comparison_timeout,
         )
         overall_entries = comparison.get("swot_entries", [])
         scores_by_company = _scores_by_company(comparison.get("scores"))
