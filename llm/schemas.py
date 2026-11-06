@@ -236,12 +236,40 @@ class SWOTAnalysis(BaseModel):
     competitor_notes: list[CompetitorNote]
 
 # NOTE THIS IS ONLY USED FOR THE LLM OUTPUT
+class CompetitorSWOTByIndex(BaseModel):
+    """Competitor-owned findings, produced in the same comparison request."""
+    company_index: int
+    SWOT_entries: list[SWOTEntryByIndex]
+
+
+class CompetitorSWOTByURL(BaseModel):
+    company_name: str
+    SWOT_entries: list[SWOTEntryByURL]
+
+
+class FeaturePairByIndex(BaseModel):
+    """An explicitly comparable pair of already-scored feature names."""
+    company_index: int
+    competitor_feature: str
+    scadable_feature: str | None
+
+
+class FeaturePair(BaseModel):
+    company_name: str
+    competitor_feature: str
+    scadable_feature: str | None
+
+
 class SWOTAnalysisByIndex(SWOTAnalysis):
     SWOT_entries: list[SWOTEntryByIndex]
     scores: list[FeatureScoreByIndex]
+    competitor_swots: list[CompetitorSWOTByIndex] = Field(default_factory=list)
+    feature_pairs: list[FeaturePairByIndex] = Field(default_factory=list)
 
 # NOTE THIS IS USED FOR THE FINAL OUTPUT
 class SWOTAnalysisByURL(SWOTAnalysis):
     SWOT_entries: list[SWOTEntryByURL]
     scores: list[FeatureScore]
     conflicting_data: list[ConflictEntry]
+    competitor_swots: list[CompetitorSWOTByURL] = Field(default_factory=list)
+    feature_pairs: list[FeaturePair] = Field(default_factory=list)
