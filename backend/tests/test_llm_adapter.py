@@ -96,7 +96,9 @@ def test_analyze_uses_real_llm_schemas(fake_client, monkeypatch, duplicate):
 
     if duplicate:
         scraped["pages"].append({"url": "https://vanta.com/copy", "text": "Evidence collection"})
-    result = asyncio.run(OpenAIAdapter().analyze(scraped, get_scadable_baseline()))
+    result = asyncio.run(
+        OpenAIAdapter().analyze(scraped, get_scadable_baseline(), trace_prefix="run-42:vanta")
+    )
     assert len(observed[0].pages) == 1
     assert len(observed[0].crawl_summary.pages) == (2 if duplicate else 1)
     assert len(scraped["pages"]) == (2 if duplicate else 1)

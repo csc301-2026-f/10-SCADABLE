@@ -290,7 +290,8 @@ def export_competitor(
                 candidate = stage / "decision_tracking.json"
                 candidate.write_text(
                     reference.model_dump_json(indent=2, exclude_none=True) + "\n",
-                    encoding="utf-8", newline="\n",
+                    encoding="utf-8",
+                    newline="\n",
                 )
                 tracking_file = candidate
             except (OSError, ValueError):
@@ -331,6 +332,7 @@ def export_competitor(
                 logger.warning(
                     "Crawl diagnostics publication failed (%s); export continues",
                     type(error).__name__,
+                )
         if tracking_file is not None:
             try:
                 os.rename(tracking_file, target / tracking_file.name)

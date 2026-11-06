@@ -16,8 +16,12 @@ def tracked_result():
 
     source = result()
     source._decision_tracking = DecisionTrackingReference(
-        crawl_id="crawl-test", trace_id="a" * 32, observation_id="b" * 16,
-        model="test", started_at=NOW, finished_at=NOW + timedelta(seconds=1),
+        crawl_id="crawl-test",
+        trace_id="a" * 32,
+        observation_id="b" * 16,
+        model="test",
+        started_at=NOW,
+        finished_at=NOW + timedelta(seconds=1),
         research_run_id="42",
     )
     return source
@@ -41,7 +45,9 @@ def test_tracking_companion_is_published_before_summary_without_changing_contrac
     summary = output.export_competitor(source, tmp_path)
     companion = tmp_path / "example.com/decision_tracking.json"
     assert json.loads(companion.read_text()) == source.decision_tracking.model_dump(mode="json")
-    assert published == ["pages", "decision_tracking.json", "crawl_summary.json"]
+    assert published[0] == "pages"
+    assert set(published[1:-1]) == {"decision_tracking.json", "crawl_diagnostics.json"}
+    assert published[-1] == "crawl_summary.json"
     assert summary.schema_version == "2.1"
     assert "decision_tracking" not in summary.model_dump()
     assert "decision_tracking" not in expected
