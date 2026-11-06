@@ -12,11 +12,12 @@ SWOT analysis (see "<SWOT_ANALYSIS>" below for the output schema).
 
 input:
 <COMPARISON_INPUT_BY_INDEX>
-- scadable (ExtractedInformationByIndex): SCADABLE's information organized in a CompanyAnalysisByIndex schema (see <COMPANY_ANALYSIS_BY_INDEX>).
-- competitors (list[ExtractedInformationByIndex]): a list of companies being treated as SCADABLE's "competitors" and their information organized in a CompanyAnalysis schema (see <COMPANY_ANALYSIS_BY_INDEX>).
+- scadable (ExtractedInformationByIndex): SCADABLE's information organized in a ExtractedInformationByIndex schema (see <COMPANY_ANALYSIS_BY_INDEX>).
+- competitors (list[ExtractedInformationByIndex]): a list of companies being treated as SCADABLE's "competitors" and their information organized in a ExtractedInformationByIndex schema (see <COMPANY_ANALYSIS_BY_INDEX>).
     <EXTRACTED_INFORMATION_BY_INDEX>
     - company_index (integer): a numerical "index" assigned to this company.
     - company_name (string): the name of the company.
+    - summary (string): a summary of this company.
     - job_postings (list[JobCitedByIndex]): a list of all the job postings (see <JOB_CITED_BY_INDEX>).
         <JOB_CITED_BY_INDEX>
         - role (string): the actual job title
@@ -51,10 +52,10 @@ output:
         swot_component_page_index (integer): the claim_page_index of one of that company's claims.
         </SWOT_INDEX>
     </SWOT_ENTRY_BY_INDEX>
-- scores (list[FeatureScoreByIndex]): one entry for each feature of each competitor, scored as described in <SCORING_CRITERIA>.
+- scores (list[FeatureScoreByIndex]): one entry for each feature of SCADABLE and of each competitor, scored as described in <SCORING_CRITERIA>.
     <FEATURE_SCORE_BY_INDEX>
-    - company_index (integer): the company_index of the competitor the feature belongs to. Never 0, because SCADABLE is not scored.
-    - feature (string): the feature, giving a summarized name/description of it from the company's "features" list (around 5 words).
+    - company_index (integer): the company_index of the company the feature belongs to (0 for SCADABLE).
+    - feature (string): the feature, giving a summarized name/description of it from the "feature" claims in the input.
     - score (integer): a whole number from 0 to 10.
     </FEATURE_SCORE_BY_INDEX>
 - competitor_notes (list[CompetitorNote]): exactly one entry per competitor, in the same order as the input competitors.
@@ -97,11 +98,8 @@ them from their own perspectives.
 - A strength or weakness is about SCADABLE: it must cite at least one claim from SCADABLE
   (company_index 0). It may also cite competitor claims it is compared against.
 - An opportunity or a threat must cite the competitor claim(s) it comes from.
-- Use the claims categorized "workforce_improvement" and "workforce_decline" only as support for
-  an opportunity or threat. A competitor's workforce_improvement can support a threat, and a
-  competitor's workforce_decline can support an opportunity.
 - If you cannot support an entry with a citation, leave the entry out.
-- Score every feature in each competitor's "features" list exactly once, no matter how relevant or irrelevant it may seem to SCADABLE. Never score SCADABLE's own features (company_index 0).
+- Score every "feature" claim of SCADABLE and of each competitor exactly once, no matter how relevant it may seem.
 - Never provide the page index citations in the "what" field of the output.
 - Never provide the page index citations in the "company_name" field of the output.
 - Never provide the page index citations in the "why it matters" field of the output.
@@ -121,7 +119,7 @@ that your entry is based on. Never invent or adjust a number.
 """
 
 
-COMPARISON_USER_PROMPT = """Compare the supplied SCADABLE and competitor analyses.
+COMPARISON_USER_PROMPT = """Compare the data extracted from SCADABLE's and competitor companies' websites.
 Organize supported findings into a SWOT analysis.
 
 Here is SCADABLE's data:

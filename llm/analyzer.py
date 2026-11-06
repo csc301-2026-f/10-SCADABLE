@@ -46,12 +46,12 @@ def _validate_swot_citations(company_urls: list[list[str]], entries: list[SWOTEn
             raise ValueError("A strength or weakness must cite at least one SCADABLE page.")
 
 def _validate_feature_scores(company_count: int, scores: list[FeatureScoreByIndex]) -> None:
-    """Scores belong to competitors only: company 0 is SCADABLE and is the baseline, never scored."""
+    """Scores may belong to any company, including SCADABLE (index 0)."""
     for score in scores:
-        if not 1 <= score.company_index < company_count:
+        if not 0 <= score.company_index < company_count:
             raise ValueError(
-                f"Score company index {score.company_index} is not a competitor "
-                f"(valid: 1 to {company_count - 1})."
+                f"Score company index {score.company_index} is out of range "
+                f"(valid: 0 to {company_count - 1})."
             )
 
 def _extraction_by_index(position: int, company: ExtractedInformationByURL, url_index: list[dict[str, int]]) -> ExtractedInformationByIndex:
@@ -61,6 +61,7 @@ def _extraction_by_index(position: int, company: ExtractedInformationByURL, url_
     return ExtractedInformationByIndex(
         company_index=position,
         company_name=company.company_name,
+        summary=company.summary,
         job_postings=[
             JobCitedByIndex(
                 role=j.role, 

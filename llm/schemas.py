@@ -182,40 +182,11 @@ class ExtractedInformationByURL(ExtractedInformation):
     conflicting_data: ConflictEntry
     crawl_time_string: str
 
-class ExtractedInformationByIndex(BaseModel):
+class ExtractedInformationByIndex(ExtractedInformation):
     """Used for input conversion for comparison LLM prompt."""
     company_index: int
-    company_name: str
     job_postings: list[JobCitedByIndex]
     claims_cited: list[ClaimCitedByIndex]
-
-
-# class PartialCompanyAnalysisByIndex(BaseModel):
-#     """Used for LLM output schema."""
-#     claims_cited: list[ClaimCitedByIndex]
-
-# class CompanyAnalysis(BaseModel):
-#     """Shared analysis shape for a competitor or SCADABLE."""
-
-#     company_name: str
-#     summary: str
-#     summary_page_urls: list[str]
-#     claims_cited: list[ClaimCitedByURL]
-#     conflicting_data: ConflictEntry
-#     # The company's features, as extracted. They are scored later, in compare().
-#     features: list[str]
-#     crawl_time_string: str
-
-#     def claims_in(self, category: Category) -> list[str]:
-#         return [c.claim for c in self.claims_cited if c.category == category]
-
-#     @property
-#     def strengths(self) -> list[str]:
-#         return self.claims_in("strength")
-
-#     @property
-#     def weaknesses(self) -> list[str]:
-#         return self.claims_in("weakness")
 
 class CompanyAnalysisByIndex(BaseModel):
     company_index: int
