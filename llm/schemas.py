@@ -79,7 +79,6 @@ class JobCitedByURL(JobCited):
     job_page_url: str
 
 
-
 class ClaimCited(BaseModel):
     """One fact or finding about a company, with the page that supports it.
     
@@ -105,6 +104,36 @@ def _check_score_range(value: int) -> int:
     if not 0 <= value <= 10:
         raise ValueError("score must be between 0 and 10")
     return value
+
+
+class ConflictCited(BaseModel):
+    """
+    Contains the conflicting data found (claim 1 and claim 2 conflict).
+    """
+    claim_a: str
+    claim_b: str
+
+class ConflictCitedByURL(ConflictCited):
+    """
+    Contains the conflicting data found, along with its citations (only used for final output).
+    """
+    claim_a_page_URL: str
+    claim_b_page_URL: str
+
+class ConflictCitedByIndex(ConflictCited):
+    """
+    Contains the conflicting data found, along with its citations (only used for LLM output).
+    """
+    claim_a_page_index: int
+    claim_b_page_index: int
+
+
+class ConflictEntry(BaseModel):
+    """
+    A model containing all the conflicting pieces of data found for a company.
+    """
+    company_name: str
+    conflicts: list[ConflictCitedByURL]
 
 
 # AfterValidator (not Field limits) keeps the range out of the JSON schema sent to
@@ -137,6 +166,7 @@ class PartialExtractedInformationByIndex(PartialExtractedInformation):
     summary_page_indexes: list[int]
     job_postings: list[JobCitedByIndex]
     claims_cited: list[ClaimCitedByIndex]
+    conflicting_data: list[ConflictCitedByIndex]
 
     def claims_in(self, category: Category) -> list[str]:
         return [c.claim for c in self.claims_cited if c.category == category]
@@ -150,6 +180,7 @@ class ExtractedInformationByURL(ExtractedInformation):
     summary_page_urls: list[str]
     job_postings: list[JobCitedByURL]
     claims_cited: list[ClaimCitedByURL]
+    conflicting_data: ConflictEntry
     crawl_time_string: str
 
 class ExtractedInformationByIndex(ExtractedInformation):
@@ -169,6 +200,7 @@ class CompanyAnalysis(BaseModel):
     summary: str
     summary_page_urls: list[str]
     claims_cited: list[ClaimCitedByURL]
+    conflicting_data: ConflictEntry
     # The company's features, as extracted. They are scored later, in compare().
     features: list[str]
     crawl_time_string: str
@@ -240,3 +272,4 @@ class SWOTAnalysisByIndex(SWOTAnalysis):
 class SWOTAnalysisByURL(SWOTAnalysis):
     SWOT_entries: list[SWOTEntryByURL]
     scores: list[FeatureScore]
+    conflicting_data: list[ConflictEntry]

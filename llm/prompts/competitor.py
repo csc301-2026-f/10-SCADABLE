@@ -49,6 +49,13 @@ and cite the page indices from where the claims were made, all organized into an
     - claim (string): the fact, written once, exactly as the page states it.
     - claim_page_index (integer): the "page_index" to the page that actually supports this claim.
     </CLAIM_CITED_BY_INDEX>
+- conflicting_data (list[ConflictCitedByIndex]): a list of "conflicting" claims (claims that show different data) from the scraped pages (see <CONFLICT_CITED_BY_INDEX>).
+    <CONFLICT_CITED_BY_INDEX>
+    - claim_a (string): the "original" claim.
+    - claim_a_source_page_index (integer): the page_index from where claim_a came from.
+    - claim_b (string): the claim that has information which differs from that of claim_b.
+    - claim_b_source_page_index (integer): the page_index from where claim_b came from.
+    </CONFLICT_CITED_BY_INDEX>
 </EXTRACTED_DATA>
 
 You must follow the following rules:
@@ -78,6 +85,8 @@ is a deliberately limited selection of pages. Always extract claims solely based
 - Never return a "None" for any of the page_index values.
 - The summary and every claim must be plain prose. Never write page numbers, brackets or indexes inside any text field except.
 - A feature should be something that is usable. Documentation and company's internal workflow tools (which aren't open to public use) should not count as a "feature".
+- Conflicting data must never be in claims_cited, as claims_cited are "sure-shot" claims which do not seem to have any opposing information. 
+- Conflicting data includes difference in pricing for the same feature, or customer information about a company, any statistics of the company, etc.
 </RULES>
 """
 

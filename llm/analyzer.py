@@ -15,6 +15,8 @@ from llm.schemas import (
     AnalysisInput,
     ClaimCitedByURL,
     ClaimCitedByIndex,
+    ConflictCitedByURL,
+    ConflictEntry,
     PartialCompanyAnalysisByIndex,
     PartialExtractedInformationByIndex,
     CompanyAnalysis,
@@ -106,14 +108,17 @@ class Analyzer:
             last_index=len(page_urls) - 1,
             index_directory={"Claim": [p.claim_page_index for p in partial.claims_cited], 
                             "Job posting": [p.job_page_index for p in partial.job_postings],
-                            "Summary": partial.summary_page_indexes
+                            "Summary": partial.summary_page_indexes,
+                            "Conflicting data": [c.claim_a_page_index for c in partial.conflicting_data] + [c.claim_b_page_index for c in partial.conflicting_data]
                             }
+
         )
         result = ExtractedInformationByURL(company_name=data.company_name, 
                                       summary=partial.summary,
                                       summary_page_urls=[page_urls[p] for p in partial.summary_page_indexes], 
                                       job_postings=[JobCitedByURL(role=job.role, category=job.category, job_families=job.job_families, job_page_url=page_urls[job.job_page_index]) for job in partial.job_postings],
                                       claims_cited=[ClaimCitedByURL(category=c.category, claim=c.claim, claim_page_url=page_urls[c.claim_page_index]) for c in partial.claims_cited],
+                                      conflicting_data=ConflictEntry(company_name=data.company_name, conflicts=[ConflictCitedByURL(claim_a=c.claim_a, claim_a_page_URL=page_urls[c.claim_a_page_index], claim_b=c.claim_b, claim_b_page_URL=page_urls[c.claim_b_page_index]) for c in partial.conflicting_data]),
                                       crawl_time_string=crawl_time_str
                                       )
         return result
@@ -197,6 +202,7 @@ class Analyzer:
                 )
                 for score in response.scores
             ],
+            conflicting_data=[data.scadable.conflicting_data] + [c.conflicting_data for c in data.competitors]
         )
 
 
@@ -211,5 +217,6 @@ def build_company_analysis(partial: PartialCompanyAnalysisByIndex, data: Extract
                            summary_page_urls=data.summary_page_urls,
                            features=[c.claim for c in data.claims_cited if c.category == "features"],
                            company_name=data.company_name,
+                           conflicting_data=data.conflicting_data,
                            crawl_time_string=data.crawl_time_string
                            )
