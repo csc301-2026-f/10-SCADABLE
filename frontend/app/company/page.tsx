@@ -3,9 +3,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCompanyProfile } from "@/lib/api/company";
 import { Button } from "@/components/ui/Button";
-import { Pill } from "@/components/ui/Pill";
+// import { Pill } from "@/components/ui/Pill"; // restore with GitHub block
 import styles from "./company.module.css";
 
+/*
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-CA", {
     year: "numeric",
@@ -13,6 +14,7 @@ function formatDate(iso: string) {
     day: "numeric",
   });
 }
+*/
 
 export default function CompanyPage() {
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -38,15 +40,14 @@ export default function CompanyPage() {
     );
   }
 
-  const { offerings, positioningNotes, github } = data;
+  const { offerings, positioningNotes /* , github */ } = data;
 
   return (
     <main className={styles.page}>
       <header>
         <h1 className={styles.title}>Our company</h1>
         <p className={styles.sub}>
-          How SCADABLE is described to the research agents, and the source
-          they track for changes.
+          How SCADABLE is described to the research agents.
         </p>
       </header>
 
@@ -85,6 +86,7 @@ export default function CompanyPage() {
           )}
         </section>
 
+        {/* GitHub sync — uncomment this block (+ Pill import, formatDate, github) when ready
         <section
           className={`${styles.card} ${styles.wide}`}
           aria-labelledby="github-heading"
@@ -113,7 +115,9 @@ export default function CompanyPage() {
               <div>
                 <dt>Last synced</dt>
                 <dd>
-                  {github.lastSyncedAt ? formatDate(github.lastSyncedAt) : "—"}
+                  {github.lastSyncedAt
+                    ? formatDate(github.lastSyncedAt)
+                    : "—"}
                 </dd>
               </div>
               <div>
@@ -131,6 +135,7 @@ export default function CompanyPage() {
             </div>
           )}
         </section>
+        */}
       </div>
     </main>
   );

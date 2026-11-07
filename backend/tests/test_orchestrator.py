@@ -142,6 +142,19 @@ def test_mock_compare():
     ]
 
 
+def test_scores_by_company_pairs_independent_scadable_scores():
+    scores = [
+        {"company_name": "SCADABLE", "feature": "Continuous automated evidence collection from cloud providers", "score": 6},
+        {"company_name": "SCADABLE", "feature": "Native EU CRA tracking", "score": 9},
+        {"company_name": "Vanta", "feature": "Automated evidence collection", "score": 8},
+        {"company_name": "Vanta", "feature": "Pricing transparency", "score": 7},
+    ]
+    assert _scores_by_company(scores) == {"Vanta": [
+        {"feature": "Automated evidence collection", "score": 8, "scadable_score": 6},
+        {"feature": "Pricing transparency", "score": 7},
+    ]}
+
+
 def test_scores_by_company_drops_invalid_items():
     raw = [
         {"company_name": "Vanta", "feature": " Audits ", "score": 6, "scadable_score": 4},
@@ -286,6 +299,48 @@ if test_url:
         assert res2.status == ResearchStatus.COMPLETED
         assert res2.analysis_result.get("skipped_llm") is True
         assert res2.analysis_result.get("reused_from_run_id") == run1.id
+
+    def test_processing_policy_change_forces_reanalysis(db, competitor, monkeypatch):
+        import app.services.orchestrator as orchestrator
+
+        analyzer = MockOpenAIAnalyzer()
+        crawler = MockCrawl4AICrawler()
+        initial = create_research_run(db, competitor.id)
+        asyncio.run(execute_research_run(db, initial.id, crawler, analyzer))
+        assert initial.analysis_result["analysis_policy_version"]
+
+        # Unchanged pages with a new policy must not reuse stale findings.
+        monkeypatch.setattr(orchestrator, "ANALYSIS_POLICY_VERSION", "policy-next")
+        rerun = create_research_run(db, competitor.id)
+        asyncio.run(execute_research_run(db, rerun.id, crawler, analyzer))
+        assert rerun.analysis_result["analysis_policy_version"] == "policy-next"
+        assert not rerun.analysis_result.get("skipped_llm")
+
+        same_policy = create_research_run(db, competitor.id)
+        asyncio.run(execute_research_run(db, same_policy.id, crawler, analyzer))
+        assert same_policy.analysis_result["skipped_llm"] is True
+        assert same_policy.analysis_result["analysis_policy_version"] == "policy-next"
+
+    def test_run_id_forwarded_to_crawler_and_reference_persisted(db, competitor):
+        class TrackingCrawler:
+            received = None
+
+            async def crawl(self, competitor_name, website_url, *, research_run_id=None):
+                self.received = research_run_id
+                payload = await MockCrawl4AICrawler().crawl(competitor_name, website_url)
+                payload["decision_tracking"] = {
+                    "trace_id": "a" * 32, "observation_id": "b" * 16,
+                    "research_run_id": str(research_run_id),
+                }
+                payload["decision_usage"] = {"request_count": 2, "estimated_cost_usd": 0.005}
+                return payload
+
+        crawler = TrackingCrawler()
+        run = create_research_run(db, competitor.id)
+        asyncio.run(execute_research_run(db, run.id, crawler, MockOpenAIAnalyzer()))
+        assert crawler.received == run.id
+        assert run.scraped_data["decision_tracking"]["research_run_id"] == str(run.id)
+        assert run.scraped_data["decision_usage"]["request_count"] == 2
 
     def test_execute_research_run_saves_overall_swot(db, competitor):
         crawler = MockCrawl4AICrawler()
@@ -496,7 +551,7 @@ if test_url:
 
     def test_execute_research_run_real_crawl_failure_fails_run(db, competitor):
         class FailingRealCrawler:
-            async def crawl(self, competitor_name, website_url):
+            async def crawl(self, competitor_name, website_url, *, research_run_id=None):
                 raise CrawlFailedError("Could not crawl the competitor's website. (blocked)")
 
         run = create_research_run(db, competitor.id)
@@ -540,3 +595,71 @@ if test_url:
         assert run.status == ResearchStatus.PENDING
         assert len(bg_tasks.tasks) == 1
 
+
+
+def test_scores_by_company_uses_explicit_llm_pairing_without_guessing():
+    raw = [
+        {"company_name": "SCADABLE", "feature": "AI audit assistance", "score": 9},
+        {"company_name": "SCADABLE", "feature": "Compliance evidence collector", "score": 4},
+        {"company_name": "Vanta", "feature": "Audit AI copilots", "score": 8},
+        {"company_name": "Vanta", "feature": "Pricing dashboard", "score": 7},
+    ]
+    pairs = [
+        {"company_name": "Vanta", "competitor_feature": "Audit AI copilots", "scadable_feature": "AI audit assistance"},
+        {"company_name": "Vanta", "competitor_feature": "Pricing dashboard", "scadable_feature": None},
+    ]
+    assert _scores_by_company(raw, pairs) == {"Vanta": [
+        {"feature": "Audit AI copilots", "score": 8, "scadable_score": 9},
+        {"feature": "Pricing dashboard", "score": 7},
+    ]}
+    # Absence of an explicit pairing must not invent a baseline number.
+    assert _scores_by_company(raw, [pairs[1]])["Vanta"][0] == {
+        "feature": "Audit AI copilots", "score": 8,
+    }
+
+
+def test_stale_comparison_cannot_overwrite_competitor_swot_or_scores():
+    """Both kinds of findings respect the same overall comparison revision."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import Session
+    from app.db.database import Base
+    from app.db.repository import (
+        get_overall_swot_revision, save_comparison_scores_if_current,
+    )
+
+    @compiles(JSONB, "sqlite")
+    def _jsonb_on_sqlite(element, compiler, **kw):
+        return "JSON"
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine) as db:
+            competitor = create_competitor(db, "Example", "https://example.com")
+            run = create_research_run(db, competitor.id)
+            save_analysis_result(db, run.id, {"scores": [{"feature": "Old", "score": 3}]})
+            save_swot_entries(db, run.id, [{
+                "category": "strength", "content": "Previously confirmed",
+                "source_url": "https://example.com/features",
+            }])
+            old_revision = get_overall_swot_revision(db)
+            mark_overall_swot_stale(db)
+            assert get_overall_swot_revision(db) != old_revision
+            saved = save_comparison_scores_if_current(
+                db, old_revision,
+                {run.id: [{"feature": "New", "score": 9}]},
+                overall_entries=[{"category": "strength", "content": "Stale overall", "source_url": None}],
+                competitor_swots_by_run={run.id: [{
+                    "category": "weakness", "content": "Stale competitor",
+                    "source_url": "https://example.com/pricing",
+                }]},
+            )
+            assert saved is False
+            assert get_research_run(db, run.id).analysis_result["scores"] == [{"feature": "Old", "score": 3}]
+            assert [entry.content for entry in get_research_run(db, run.id).swot_entries] == [
+                "Previously confirmed"
+            ]
+    finally:
+        engine.dispose()

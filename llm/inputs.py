@@ -1,12 +1,31 @@
 """Load the scraper's published Markdown bundles without recrawling or cleaning."""
 
+from collections.abc import Iterable
 from pathlib import Path
+
+from scraper.content_identity import markdown_fingerprint
 
 from llm.schemas import AnalysisInput, AnalysisPage
 from scraper import CrawlExportSummary
 
 
-def load_analysis_input(summary_path: str | Path) -> AnalysisInput:
+def deduplicate_analysis_pages(pages: Iterable[AnalysisPage]) -> list[AnalysisPage]:
+    """Keep the first exact body, unchanged; callers retain their complete source summary."""
+    seen = set()
+    unique = []
+    for page in pages:
+        fingerprint = markdown_fingerprint(page.markdown)
+        if fingerprint is None:
+            continue
+        if fingerprint not in seen:
+            seen.add(fingerprint)
+            unique.append(page)
+    return unique
+
+
+def load_analysis_input(
+    summary_path: str | Path, *, deduplicate: bool = True
+) -> AnalysisInput:
     """Validate a completion index and follow its successful content references.
 
     Partial-run warnings and failed-page metadata remain in ``crawl_summary``.
@@ -39,4 +58,9 @@ def load_analysis_input(summary_path: str | Path) -> AnalysisInput:
             f"({summary.homepage_url}, status={summary.status}). "
             f"Export: {index}. Crawl details: {explanation}"
         )
-    return AnalysisInput(crawl_summary=summary, pages=pages)
+    # Read and validate every reference before filtering: duplicates must not hide
+    # corrupt exports or missing files.
+    return AnalysisInput(
+        crawl_summary=summary,
+        pages=deduplicate_analysis_pages(pages) if deduplicate else pages,
+    )

@@ -10,6 +10,7 @@ output/run-001/
   competitor-a.example/
     crawl_summary.json
     decisions.jsonl          # only when tracing is enabled
+    crawl_diagnostics.json  # best effort duplicate and approximate coverage diagnostics
     pages/
       index.md
       pricing.md
@@ -147,7 +148,9 @@ unrelated files in the root can coexist and are not changed.
 
 All content is staged in a temporary directory under the same root. An exclusive mkdir
 reserves the final competitor directory; pages and optional `decisions.jsonl` move first
-and `crawl_summary.json` moves last. The summary is the completion marker. A write/staging
+and best-effort `crawl_diagnostics.json` publishes before `crawl_summary.json` moves last.
+Diagnostics failures warn without preventing the ordinary export. Its version `1.0`
+payload is documented in [optimization controls](optimizations.md). The summary is the completion marker. A write/staging
 error cleans the owned temporary directory. An interruption/publication failure can leave an incomplete folder
 without a summary; a hard process kill can leave a hidden staging folder. Consumers
 should require the index before accepting an export and use a fresh root for retries.

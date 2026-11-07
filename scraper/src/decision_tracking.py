@@ -50,9 +50,7 @@ class DecisionTrackingReference(ContractModel):
 
 
 class DecisionTracker:
-    def __init__(
-        self, *, mode: str, model: str, context: DecisionTrackingContext | None = None
-    ):
+    def __init__(self, *, mode: str, model: str, context: DecisionTrackingContext | None = None):
         self.context = context if context is not None else DecisionTrackingContext()
         self.mode = mode
         self.model = model
@@ -114,14 +112,19 @@ class DecisionTracker:
                 trace_context["parent_span_id"] = self.context.parent_observation_id
             started = utc_now()
             self._parent = self._client.start_observation(
-                as_type="span", name="scraper.decisions", trace_context=trace_context,
+                as_type="span",
+                name="scraper.decisions",
+                trace_context=trace_context,
                 metadata=self._metadata(),
             )
             if not _valid_id(self._parent.trace_id, 32) or not _valid_id(self._parent.id, 16):
                 raise ValueError("SDK did not create a recording observation")
             self.reference = DecisionTrackingReference(
-                crawl_id=self.context.crawl_id, trace_id=self._parent.trace_id,
-                observation_id=self._parent.id, model=self.model, started_at=started,
+                crawl_id=self.context.crawl_id,
+                trace_id=self._parent.trace_id,
+                observation_id=self._parent.id,
+                model=self.model,
+                started_at=started,
                 research_run_id=self.context.research_run_id,
             )
         except Exception:
@@ -132,13 +135,17 @@ class DecisionTracker:
             return None
         try:
             return self._client.start_observation(
-                as_type="generation", name=f"scraper.decisions.{operation}", model=self.model,
+                as_type="generation",
+                name=f"scraper.decisions.{operation}",
+                model=self.model,
                 trace_context={
                     "trace_id": self.reference.trace_id,
                     "parent_span_id": self.reference.observation_id,
                 },
                 metadata={
-                    **self._metadata(), "operation": operation, "attempt": attempt,
+                    **self._metadata(),
+                    "operation": operation,
+                    "attempt": attempt,
                     "request_sequence": sequence,
                 },
             )

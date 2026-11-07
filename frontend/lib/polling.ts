@@ -23,14 +23,14 @@ export function profilePollInterval(
   if (isInProgress(profile.researchStatus)) return POLL_MS;
 
   // The overall comparison generates feature scores after competitor research
-  // is marked complete. Update the chart automatically for a few minutes,
+  // is marked complete. Update the chart automatically for a short window,
   // but never poll older, permanently unscored profiles indefinitely.
   if (profile.researchStatus === "success" && profile.chartSeries.scores.length === 0) {
     const completedAt = profile.lastResearchedAt
       ? new Date(profile.lastResearchedAt).getTime()
       : NaN;
     const elapsed = Date.now() - completedAt;
-    if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed < 4 * 60 * 1000) {
+    if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed < 10 * 60 * 1000) {
       return 10_000;
     }
   }

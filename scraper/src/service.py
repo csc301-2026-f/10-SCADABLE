@@ -177,9 +177,8 @@ class CompetitorScraper:
         extractor: ContentExtractor | None = None,
         http_transport: httpx.AsyncBaseTransport | None = None,
         decision_provider_factory: DecisionProviderFactory | None = None,
-        decision_tracking_context_factory: Callable[
-            [CompetitorInput], DecisionTrackingContext
-        ] | None = None,
+        decision_tracking_context_factory: Callable[[CompetitorInput], DecisionTrackingContext]
+        | None = None,
     ):
         self._fetcher_factory = fetcher_factory
         self._extractor = extractor or MarkdownExtractor()

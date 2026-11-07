@@ -34,6 +34,8 @@ class CrawlerProtocol(Protocol):
         self,
         competitor_name: str,
         website_url: str,
+        *,
+        research_run_id: int | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -52,6 +54,8 @@ class MockCrawl4AICrawler:
         self,
         competitor_name: str,
         website_url: str,
+        *,
+        research_run_id: int | None = None,
     ) -> dict[str, Any]:
         if self.delay_seconds > 0:
             await asyncio.sleep(self.delay_seconds)
@@ -65,6 +69,8 @@ class MockCrawl4AICrawler:
         scraped_at = datetime.now(timezone.utc).isoformat()
 
         return {
+            "mode": "mock",
+            "decision_usage": {"request_count": 0, "effective_mode": "structural"},
             "competitor_name": competitor_name,
             "base_url": base_url,
             "scraped_at": scraped_at,
@@ -117,12 +123,15 @@ class Crawl4AIAdapter:
         self,
         competitor_name: str,
         website_url: str,
+        *,
+        research_run_id: int | None = None,
     ) -> dict[str, Any]:
         try:
             from scraper import CompetitorInput, ScraperConfig, SelectionConfig
             from scraper.environment import load_environment
             from scraper.output import competitor_directory, export_competitor
             from scraper.service import CompetitorScraper
+            from scraper.decision_tracking import DecisionTrackingContext
 
             load_environment()
 
@@ -146,7 +155,12 @@ class Crawl4AIAdapter:
                 max_pages=3,
                 selection=SelectionConfig(mode=selection_mode),
             )
-            scraper = CompetitorScraper()
+            # Each research run receives its own Decisions trace and backend correlation.
+            scraper = CompetitorScraper(
+                decision_tracking_context_factory=lambda _: DecisionTrackingContext(
+                    research_run_id=str(research_run_id) if research_run_id is not None else None,
+                ),
+            )
             result = await scraper.crawl(competitor, config)
 
             pages = [
@@ -196,6 +210,16 @@ class Crawl4AIAdapter:
                 "status": result.run_status,
                 "pages": pages,
                 "summary_path": summary_path,
+                # Runtime reference must survive export failure; it is not part of
+                # result.model_dump() or the scrape summary's public schema.
+                "decision_tracking": (
+                    result.decision_tracking.model_dump(mode="json", exclude_none=True)
+                    if result.decision_tracking is not None else None
+                ),
+                "decision_usage": (
+                    result.decision_usage.model_dump(mode="json", exclude_none=True)
+                    if result.decision_usage is not None else None
+                ),
             }
         except Exception as exc:
             if not mock_crawler_allowed():
@@ -206,7 +230,9 @@ class Crawl4AIAdapter:
                 "ALLOW_MOCK_CRAWLER is set, so using mock pages.",
                 exc,
             )
-            mock_data = await MockCrawl4AICrawler().crawl(competitor_name, website_url)
+            mock_data = await MockCrawl4AICrawler().crawl(
+                competitor_name, website_url, research_run_id=research_run_id
+            )
             return {**mock_data, "mode": "mock"}
 
 

@@ -61,11 +61,14 @@ def telemetry(monkeypatch):
     return client, options
 
 
-@pytest.mark.parametrize("mode,public,secret", [
-    ("structural", "public", "secret"),
-    ("llm", "", "secret"),
-    ("llm", "public", "   "),
-])
+@pytest.mark.parametrize(
+    "mode,public,secret",
+    [
+        ("structural", "public", "secret"),
+        ("llm", "", "secret"),
+        ("llm", "public", "   "),
+    ],
+)
 def test_disabled_tracking_does_not_initialize_sdk(monkeypatch, telemetry, mode, public, secret):
     client, options = telemetry
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", public)
@@ -113,11 +116,14 @@ def test_disabled_sdk_does_not_expose_nonrecording_reference(monkeypatch, teleme
     assert recorder.reference is None
 
 
-@pytest.mark.parametrize("context", [
-    tracking.DecisionTrackingContext(trace_id="invalid"),
-    tracking.DecisionTrackingContext(trace_id="0" * 32),
-    tracking.DecisionTrackingContext(parent_observation_id="a" * 16),
-])
+@pytest.mark.parametrize(
+    "context",
+    [
+        tracking.DecisionTrackingContext(trace_id="invalid"),
+        tracking.DecisionTrackingContext(trace_id="0" * 32),
+        tracking.DecisionTrackingContext(parent_observation_id="a" * 16),
+    ],
+)
 def test_invalid_parent_context_disables_tracking_instead_of_misattributing(telemetry, context):
     recorder = tracking.DecisionTracker(mode="llm", model="test", context=context)
     recorder.start()
@@ -135,15 +141,20 @@ def test_parent_and_generation_use_explicit_context(telemetry):
     observation = recorder.start_attempt(operation="candidates", attempt=2, sequence=3)
     recorder.finish_attempt(observation, outcome="success", input_tokens=0)
     parent, generation = client.observations
-    assert options == [{
-        "public_key": "public-test", "secret_key": "secret-test",
-        "base_url": "https://telemetry.example",
-    }]
+    assert options == [
+        {
+            "public_key": "public-test",
+            "secret_key": "secret-test",
+            "base_url": "https://telemetry.example",
+        }
+    ]
     assert parent.options["trace_context"] == {
-        "trace_id": "b" * 32, "parent_span_id": "c" * 16,
+        "trace_id": "b" * 32,
+        "parent_span_id": "c" * 16,
     }
     assert generation.options["trace_context"] == {
-        "trace_id": parent.trace_id, "parent_span_id": parent.id,
+        "trace_id": parent.trace_id,
+        "parent_span_id": parent.id,
     }
     assert generation.options["name"] == "scraper.decisions.candidates"
     assert generation.options["metadata"]["research_run_id"] == "42"
@@ -188,13 +199,16 @@ async def test_provider_records_only_reported_usage_and_metadata(
     openai.close.assert_awaited_once()
 
 
-@pytest.mark.parametrize("body,tokens", [
-    ({"answers": "invalid", "usage": {"input_tokens": 12}}, 12),
-    ({"answers": [{}], "usage": {"input_tokens": 12}}, 12),
-    ({"answers": [ANSWER]}, None),
-    ({"answers": [ANSWER], "usage": {"input_tokens": -1}}, None),
-    ({"answers": [ANSWER], "usage": {"input_tokens": True}}, None),
-])
+@pytest.mark.parametrize(
+    "body,tokens",
+    [
+        ({"answers": "invalid", "usage": {"input_tokens": 12}}, 12),
+        ({"answers": [{}], "usage": {"input_tokens": 12}}, 12),
+        ({"answers": [ANSWER]}, None),
+        ({"answers": [ANSWER], "usage": {"input_tokens": -1}}, None),
+        ({"answers": [ANSWER], "usage": {"input_tokens": True}}, None),
+    ],
+)
 async def test_invalid_response_preserves_known_usage(monkeypatch, telemetry, body, tokens):
     monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
     openai = sdk([body])
@@ -231,9 +245,7 @@ async def test_failed_attempts_end_and_do_not_invent_usage(monkeypatch, telemetr
 
     monkeypatch.setenv("OPENAI_API_KEY", "offline-key")
     if kind == "auth":
-        response = httpx2.Response(
-            401, request=httpx2.Request("POST", "https://api.openai.com")
-        )
+        response = httpx2.Response(401, request=httpx2.Request("POST", "https://api.openai.com"))
         error = APIStatusError("sensitive-body", response=response, body=None)
         expected = DecisionAccessError
     else:
@@ -250,9 +262,14 @@ async def test_failed_attempts_end_and_do_not_invent_usage(monkeypatch, telemetr
             assert await provider._request(PAYLOAD, "content") is None
     generation = telemetry[0].observations[-1]
     assert generation.ended
-    assert generation.updates[-1]["status_message"] == {
-        "auth": "http_401", "timeout": "timeout", "cancelled": "cancelled",
-    }[kind]
+    assert (
+        generation.updates[-1]["status_message"]
+        == {
+            "auth": "http_401",
+            "timeout": "timeout",
+            "cancelled": "cancelled",
+        }[kind]
+    )
     assert "usage_details" not in generation.updates[-1]
 
 
@@ -277,11 +294,18 @@ async def test_service_propagates_context_and_separates_concurrent_crawls(monkey
     original = decisions.OpenAIDecisionProvider
 
     async def answer(**payload):
-        return {"answers": [
-            {"name": q["name"], "type": q["type"], "confidence": 0.9,
-             **({"score": 2.0} if q["type"] == "score" else {"choice": "features"})}
-            for q in payload["questions"]
-        ], "usage": {"input_tokens": 10}}
+        return {
+            "answers": [
+                {
+                    "name": q["name"],
+                    "type": q["type"],
+                    "confidence": 0.9,
+                    **({"score": 2.0} if q["type"] == "score" else {"choice": "features"}),
+                }
+                for q in payload["questions"]
+            ],
+            "usage": {"input_tokens": 10},
+        }
 
     clients = []
 
@@ -300,7 +324,9 @@ async def test_service_propagates_context_and_separates_concurrent_crawls(monkey
 
         async def fetch(self, url, settings):
             return FetchedPage(
-                source_url=url, crawl_timestamp=utc_now(), crawl_status="success",
+                source_url=url,
+                crawl_timestamp=utc_now(),
+                crawl_status="success",
                 raw_markdown="# Features\nConcrete evidence.",
             )
 
@@ -314,16 +340,26 @@ async def test_service_propagates_context_and_separates_concurrent_crawls(monkey
     monkeypatch.setattr(decisions, "OpenAIDecisionProvider", provider)
     service = CompetitorScraper(
         fetcher_factory=lambda *_: Fetcher(),
-        http_transport=httpx.MockTransport(lambda req: httpx.Response(
-            200, text="User-agent: *\nAllow: /\n"
-        ) if req.url.path == "/robots.txt" else httpx.Response(404)),
+        http_transport=httpx.MockTransport(
+            lambda req: (
+                httpx.Response(200, text="User-agent: *\nAllow: /\n")
+                if req.url.path == "/robots.txt"
+                else httpx.Response(404)
+            )
+        ),
         decision_tracking_context_factory=context_for,
     )
     settings = ScraperConfig(max_pages=1, request_delay_seconds=(0.0, 0.0))
-    results = [r async for r in service.crawl_many([
-        CompetitorInput(homepage_url="https://one.example"),
-        CompetitorInput(homepage_url="https://two.example"),
-    ], settings)]
+    results = [
+        r
+        async for r in service.crawl_many(
+            [
+                CompetitorInput(homepage_url="https://one.example"),
+                CompetitorInput(homepage_url="https://two.example"),
+            ],
+            settings,
+        )
+    ]
     assert len(contexts) == 2
     assert len({r.decision_tracking.crawl_id for r in results}) == 2
     assert len({r.decision_tracking.trace_id for r in results}) == 2
@@ -371,9 +407,7 @@ async def test_slow_flush_has_bounded_wait(monkeypatch, telemetry, caplog):
     openai = sdk([])
     try:
         async with asyncio.timeout(0.5):
-            async with OpenAIDecisionProvider(
-                SelectionConfig(), client_factory=lambda **_: openai
-            ):
+            async with OpenAIDecisionProvider(SelectionConfig(), client_factory=lambda **_: openai):
                 pass
         assert "flush" in caplog.text
         openai.close.assert_awaited_once()

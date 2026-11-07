@@ -13,9 +13,9 @@ The full pipeline guide, including browser setup and failure handling, is
 ```text
 scraper export: crawl_summary.json + pages/*.md
   -> load_analysis_input()          read and validate the bundle
-  -> Analyzer.extract_information() summary, categorized claims, job postings (1 call)
+  -> Analyzer.extract_information() summary, categorized claims, job postings, conflicting data (1 call)
   -> Analyzer.analyze_company()     strengths, weaknesses, workforce changes (1 call)
-  -> Analyzer.compare()             SWOT entries, feature scores, competitor notes
+  -> Analyzer.compare()             SWOT entries, feature scores, competitor notes,
                                     across SCADABLE and all competitors (1 call)
 ```
 
@@ -106,12 +106,11 @@ Run it with `asyncio.run(analyze("path/to/crawl_summary.json"))` from a script.
 
 ## Output
 
-- `ExtractedInformationByURL`: the summary with `summary_page_urls`, `job_postings` and
-  `claims_cited`, each claim with a `category` and a `claim_page_url`.
-- `CompanyAnalysis`: `company_name`, `summary` with `summary_page_urls`, `features`, and
-  `claims_cited`. `strengths` and `weaknesses` are shortcuts over those claims.
+- `ExtractedInformationByURL`: the summary with `summary_page_urls`, `job_postings`,
+  `claims_cited`, each claim with a `category` and a `claim_page_url`, and `conflicting_data`, containing the company name, the original claim (with a cited URL), and the claim which differs from it (with a cited URL). 
+- `CompanyAnalysis`: `company_name`, `summary` with `summary_page_urls`, `claims_cited`, `conflicting_data`,  and `features`. In `claims_cited`, the `workforce_improvement`, `workforce_decline`, `strength`, and `weakness` are what the LLM was able to infer from the `claims_cited` in `ExtractedInformationByURL`.
 - `SWOTAnalysisByURL`: `SWOT_entries` (strength, weakness, opportunity or threat, each with
-  its supporting page URLs), `scores` (0-10 per competitor feature) and `competitor_notes`.
+  its supporting page URLs), `scores` (0-10 per competitor feature), `conflicting_data`, and `competitor_notes`.
 
 `ExtractedInformationByURL` and `CompanyAnalysis` also carry `crawl_time_string`: the
 crawl's finish time as `YYYY-MM-DD HH:MM:SS`, copied from the scraper's `crawl_summary`.
