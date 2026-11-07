@@ -72,5 +72,16 @@
 - Fixed failed runs showing "Analyze with LLM: Success" after their cost was saved, and added a regression test for a failed crawl ([PR #69](https://github.com/csc301-2026-f/10-SCADABLE/pull/69)).
 - Answered Question 3 (Before vs. After) in `product-evolution.md`.
 
-**[Name]**, [Role]
-> [Specific contributions]
+## Saad Qureshi
+
+**Role:** Frontend development (competitor scoring, refresh scheduling, and open roles UI), accessibility, and backend PR review, Team coordinator.
+
+**Contributions:**
+
+- Built the Scores vs SCADABLE chart (`ScoresChart`) on competitor profiles: a horizontal bar chart comparing each feature's competitor and SCADABLE scores out of 10, with truncated long labels and a height that adjusts to the number of features. It replaces the "coming in D3" placeholder, and Scores is now the default tab ([PR #64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64)).
+- Added graceful handling when SCADABLE scores are unavailable: the chart shows a status notice and still displays competitor scores.
+- Made the chart accessible by adding a screen-reader-only data table and ARIA tab/panel labelling, so chart data is available without a duplicate visible table.
+- Updated profile polling so the Scores chart appears automatically after a research run completes. The page polls for a short window after completion and stops for older, permanently unscored profiles.
+- Integrated the backend's Open Roles data into competitor profiles, replacing the placeholder with the role count and an "Not available" fallback ([PR #64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64)).
+- Integrated scheduled refreshes into competitor profiles. "Next refresh" now shows a readable date from the API (new `formatRefreshDate` helper) and "Not scheduled" when none is set ([PR #64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64)).
+- Reviewed and approved the backend changes for refresh scheduling, SCADABLE scoring API support, and Open Roles integration, then merged them to main ([PR #63](https://github.com/csc301-2026-f/10-SCADABLE/pull/63)).
