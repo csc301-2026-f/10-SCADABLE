@@ -1,4 +1,4 @@
-# YOUR PRODUCT/TEAM NAME
+# Live SWOT (Scadable) - Team 10 (Niche)
 
 > Aim for 1000-2000 words. Be concise and analytical. We care about reasoning, impact, and integration quality, not length.
 
@@ -9,7 +9,9 @@ We identified these limitations through D2 demonstrations, multi-competitor test
 
 ## 2. What You Did
 
-Describe what was implemented, key architectural or design changes, and integration challenges.
+We reorganized research into two LLM stages: source-cited fact extraction followed by a comparison that generates SCADABLE-relative SWOT findings, competitor findings, and feature scores. This removed the intermediate company-analysis step and preserved complete extractions for later comparisons. Citation and feature-pair validation keep findings tied to the correct companies and comparable capabilities. Revision guards prevent older comparisons from overwriting newer results, while valid previous scores remain available when comparisons fail. Scraping now uses analysis-aligned objectives, conservative consent/carousel cleanup, exact duplicate detection, and approximate topic-coverage hints. Duplicate pages retain their source files but avoid repeated assessments and analysis inputs. At each scoring checkpoint, we update Decisions with topic hints from useful, unique pages so similarly relevant candidates can address research gaps. We also skip known redirect duplicates and use exact Markdown fingerprints to reuse assessments, reducing repeated API work while preserving source files and links. Production crawl and LLM failures surface as failed runs instead of silently returning mock findings. These changes required coordinating scraper exports, extraction schemas, citation indexes, and backend persistence without losing source evidence.
+
+We also connected scraper Decisions and LLM usage to Langfuse and backend research-run IDs, added cost retrieval with incomplete-data handling, and displayed available costs on Agent Runs. Analysis-policy versioning prevents unchanged-content reuse from bypassing updated processing rules. An opt-in scheduler queues refreshes from persisted run history, prevents overlapping research, and recovers abandoned jobs. Competitor profiles now use backend feature scores, job-posting counts, activity, and refresh information, with improved chart behavior and polling. Source-cited conflict extraction and an optional conflicting-data table were added, although mapping stored conflicts into the profile API remains incomplete. Accessibility work added keyboard navigation, focus management, and clearer form validation; sanitized errors avoid exposing internal details. GitHub Actions now runs backend and scraper tests, scraper lint/format checks, and frontend lint. Integration work included adapting mocks and package installation, combining tracking with coverage-aware selection, and testing failure, reuse, citation, cost, and freshness behavior across layers.
 
 ## 3. Before vs. After
 
