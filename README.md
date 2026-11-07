@@ -50,60 +50,59 @@ Users can view tracked competitors, search and filter the list, and add new comp
 
 ### 3. Automated Competitor Research
 
-Live SWOT uses a research pipeline to collect information from competitor websites and analyze it with an AI language model.
+Live SWOT collects content from competitor websites using Crawl4AI and processes it through an OpenAI-powered **two-stage research pipeline**:
 
-The pipeline extracts relevant company information, identifies competitive strengths and weaknesses, and generates structured findings supported by source URLs when available.
+1. **Extract information:** Gather structured, source-linked facts, product capabilities, supporting citations, and conflicting evidence from crawled pages.
+2. **Compare and score:** Compare the extracted competitor information with SCADABLE's baseline to produce the overall SWOT, competitor-specific SWOT findings, and feature scores for both sides.
 
-Research results are stored in a PostgreSQL database, allowing users to revisit findings and compare companies without repeating the entire research process manually.
+Research results are saved in PostgreSQL, allowing users to revisit completed findings without manually repeating the entire process. The scraper also tracks research decisions and supports cost instrumentation.
 
-**Example use case:** After adding Vanta as a competitor, a SCADABLE team member monitors its automated research run and reviews the AI-generated findings to better understand Vanta's products, capabilities, and competitive strengths and weaknesses.
+After a successful research and comparison run, the SWOT overview and score visualizations update with the newly saved results. During D3 deployment testing, the research-to-results workflow completed successfully and the SWOT and feature scores appeared after the run finished.
+
+**Example use case:** After adding Vanta as a competitor, a SCADABLE team member opens Agent Runs to monitor the crawl, extraction, comparison, and saved results, then reviews the competitor's cited findings and scores.
 
 ![Vanta automated competitor research results](docs/screenshots/image4.png)
 
 ### 4. Competitor Profiles
 
-Each tracked company has a profile displaying available information such as its website, summary, research status, recent activity, and research sources.
+Each tracked company has a profile showing its website, company summary, research status, recent activity, citations, and researched findings.
 
-Competitor profiles include **Feature & Automation Score** and **Scores vs SCADABLE** visualizations. The frontend reads values from the backend API and displays unavailable scores as missing rather than inventing a zero. SCADABLE-side ratings only appear once the LLM produces them. Profiles also include an Open Roles field connected to the backend API, but automated extraction of job openings is not yet implemented. The Next Refresh field is connected to the backend scheduling data, but reliable automatic refresh execution is not yet available in D3. The field may show "Not scheduled"; it should not be treated as a confirmed upcoming refresh.
+The **Feature & Automation Score** and **Scores vs SCADABLE** charts are connected to the backend research results. The updated comparison pipeline generates competitor and SCADABLE feature ratings, pairs comparable capabilities, and displays the scores after a successful research/comparison run. During D3 deployment testing, the comparison scores populated consistently. Unavailable values remain missing rather than being shown as an invented 0/10.
 
-An **Activity over time** chart displays historical research activity for the competitor.
+The **Activity over time** chart displays past research activity.
 
-**Example use case:** A sales team member opens Vanta's profile to review its product positioning, research findings, recent activity, and supporting sources. Feature scores can also be reviewed when available.
+**Not completed for D3:** The **Open Roles** field is visible and connected to an API field, but automated extraction and reliable population of job-opening counts are not complete. The **Next Refresh** field has API/UI support and scheduling-related backend logic, but automatic scheduled refreshes are not operational or verified in the deployed D3 system. It may display **Not scheduled**; this is not a promise of an upcoming refresh.
+
+**Example use case:** A sales team member opens Vanta's profile to inspect researched capabilities and citations, compare feature scores with SCADABLE, and review research history.
 
 ![Vanta competitor profile and research activity](docs/screenshots/image5.png)
 
 ### 5. Overall SWOT Analysis
 
-The SWOT Overview organizes SCADABLE's competitive position into four categories:
+The SWOT Overview presents SCADABLE's competitive position in four categories:
 
 - **Strengths:** SCADABLE's competitive advantages and capabilities.
 - **Weaknesses:** Supported limitations or disadvantages.
 - **Opportunities:** Areas for growth or improved competitive positioning.
 - **Threats:** Market and competitor-related challenges.
 
-The analysis uses SCADABLE's current product baseline and research from tracked competitors.
+The two-stage comparison uses SCADABLE's current **static product baseline** alongside extracted competitor evidence to produce an overall SWOT and cited competitor-specific findings. Live GitHub synchronization is not part of the D3 evaluation flow.
 
-SCADABLE's product information uses a static baseline in the current comparison workflow; live GitHub synchronization is not part of this documented evaluation flow.
+The previous issue in which the overview frequently stayed stale after a completed research run has been addressed in the updated integration. **During D3 deployment testing, a successful research/comparison run populated the SWOT Overview reliably once processing finished.** The interface still distinguishes running, failed, and unavailable analysis; success is not guaranteed if a website blocks crawling or an external service fails.
 
-**Example use case:** A SCADABLE founder opens the SWOT Overview to examine the available competitive findings across tracked companies such as Vanta and Drata, helping identify potential strengths, weaknesses, opportunities, and threats.
+**Example use case:** A SCADABLE founder completes research for Vanta or Drata, opens SWOT Overview, and reviews the updated four-quadrant findings with supporting evidence.
 
 ![Live SWOT Overview showing competitive analysis](docs/screenshots/image-7.png)
 
-**Known limitation:** Depending on the researched evidence and model response, the overall SWOT may contain fewer findings in some categories. The overall comparison can also time out after competitor research; when that happens, the overview may appear stale or unavailable until a successful comparison completes.
+### 6. Agent Runs, Research History, and API Costs
 
-### 6. Agent Runs and Research History
+The **Agent Runs** page lets users monitor automated competitor research with run status, workflow steps, cached results, and estimated API costs.
 
-The Agent Runs page allows users to monitor automated research tasks.
+A research run includes website crawling, information extraction, AI comparison/scoring, and persistence of the results. The cost dashboard is connected to the backend's cost-tracking data and displays recorded usage costs for completed research runs. The updated integration supports LLM usage accounting and scraper Decisions API tracking. **The Agent Runs cost dashboard was tested on the deployed D3 application and displayed costs successfully.**
 
-Users can inspect run status, the competitor being researched, workflow steps, and available caching information.
+Estimated costs reflect the usage successfully recorded at the time of viewing. A missing cost is displayed as unavailable rather than implying the API call was free; external cost reporting can be delayed or incomplete.
 
-Each research run displays its main stages:
-
-- Crawling the competitor website
-- Analyzing the collected information with an LLM
-- Saving the resulting SWOT findings
-
-**Example use case:** A user opens Agent Runs to check whether website crawling, LLM analysis, and saving research findings have completed successfully.
+**Example use case:** A team member starts competitor research, checks Agent Runs for successful completion, verifies the estimated API cost, and then opens the updated competitor profile and SWOT Overview.
 
 ![Completed research run with workflow steps](docs/screenshots/image6.png)
 
@@ -121,22 +120,32 @@ Each research run displays its main stages:
 
 ### Suggested Evaluation Workflow
 
-1. Open https://10-scadable.vercel.app/competitors (or http://localhost:3000 after local setup).
-2. If redirected to sign-in, click **Go to dashboard** at the top right; no account is required for course evaluation.
-3. Visit **Competitors** and inspect an existing tracked company.
-4. Select **Add Competitor**, enter a unique company name and a reachable homepage URL, and submit.
-5. Open **Agent Runs** to observe the pending/running/completed/failed state. Some sites restrict crawling; failed runs should display a clear error rather than silently returning fabricated scraped pages.
-6. Open the competitor profile to inspect the summary, findings, citations, and feature scores. The Open Roles field is present without automated job-opening extraction; Next Refresh may show "Not scheduled" because automatic scheduling is not fully operational for D3.
-7. Use **Scores vs SCADABLE** to compare scores. A missing SCADABLE rating should be shown as unavailable, not 0/10.
-8. Visit **SWOT Overview** to inspect the overall analysis. Some categories may be empty, and an overall comparison timeout can leave the overview marked stale even after an individual competitor research run finishes.
+1. Open https://10-scadable.vercel.app/competitors (or http://localhost:3000 for local setup).
+2. If redirected to sign-in, click **Dev only → Go to dashboard** at the top right; no account is required for course evaluation.
+3. Browse **Competitors** and open an existing researched company.
+4. To test a new run, use **Add Competitor** with a unique company name and a reachable homepage URL.
+5. Open **Agent Runs** to follow the research progress and inspect the recorded API cost once available. Some websites block automated crawling; those runs may fail rather than return fabricated results.
+6. When the run succeeds and its comparison finishes, return to the competitor profile to inspect its summary, cited findings, and **Feature & Automation Score**.
+7. Open **Scores vs SCADABLE** to review the paired competitor and SCADABLE ratings generated by the comparison stage.
+8. Visit **SWOT Overview** to see the refreshed overall SWOT. In D3 deployment testing, the SWOT and feature scores were available after completed successful runs.
 
-New live research can incur OpenAI costs and take time; use an existing completed competitor profile for a quick evaluation.
+**Known incomplete fields:** **Open Roles** is not yet reliably populated through automated extraction, and **Next Refresh** does not represent an operational automatic refresh schedule in D3.
+
+Live research incurs external API usage and may take time. For a quick evaluation, use an existing competitor with a completed run.
 
 ### D3 Improvements Since D2
 
-D3 strengthens research reliability and profile usability: crawler failures are surfaced as failed runs instead of silently replacing real website data with mock pages, and the backend includes automatic refresh scheduling logic with retry/restart handling (PRs [#62](https://github.com/csc301-2026-f/10-SCADABLE/pull/62), [#63](https://github.com/csc301-2026-f/10-SCADABLE/pull/63)). The frontend connects competitor feature scores, Open Roles, and Next Refresh to backend API data, with explicit unavailable-data states (PR [#64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64)). Open Roles has frontend and backend display support, but automated LLM extraction remains incomplete. Next Refresh has frontend/API integration and backend scheduling logic, but scheduled execution has not been verified as reliable in the deployed D3 environment and remains disabled. Research cost instrumentation and associated tests have also been added to the research pipeline.
+D3 delivers substantial improvements to the core research experience:
 
-**Current limitations:** Automatic competitor refresh is **not fully working for D3**. Although scheduling logic and the Next Refresh API/UI field have been implemented, reliable end-to-end scheduled runs are not verified; the automatic scheduler remains disabled (`AUTO_REFRESH_ENABLED=false`) and Next Refresh may display "Not scheduled." SCADABLE-side scores depend on LLM output and may be unavailable. Automated extraction of competitor job openings is not implemented, so Open Roles data may be unavailable. Some sites refuse automated crawling. The overall SWOT comparison may time out after research and remain marked stale, so a complete four-quadrant overview is not guaranteed.
+- **Reliable research results:** Crawl failures are reported rather than silently replaced by mock data in normal deployment. The updated backend connects the new two-stage LLM extraction/comparison workflow to persistent competitor research and the overall SWOT.
+- **SWOT after research:** The comparison stage generates SCADABLE-focused SWOT findings and cited competitor findings. During deployed D3 testing, the SWOT updated reliably after successful research and comparison.
+- **Feature scores and SCADABLE comparisons:** Competitor and SCADABLE feature scores are generated in the comparison stage and shown in the profile charts after completed runs, with explicit unavailable-data handling.
+- **API cost reporting:** The Agent Runs dashboard displays estimated recorded costs. Backend integrations add research-run cost/tracing support for LLM requests and scraper Decisions API usage, with handling for incomplete usage data.
+- **Scraper improvements:** Updated discovery, content cleaning, and decisions tracing support the research pipeline; changes to processing rules can trigger reanalysis when necessary.
+- **CI/CD:** GitHub Actions now has **three checks**—backend tests, frontend linting, and **LLM/pipeline tests**—alongside automatic deployments through Railway and Vercel.
+- **Refresh and profile infrastructure:** The API/UI includes Open Roles and Next Refresh fields, and the backend includes scheduling logic (PRs [#62](https://github.com/csc301-2026-f/10-SCADABLE/pull/62), [#63](https://github.com/csc301-2026-f/10-SCADABLE/pull/63), [#64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64)). These features remain incomplete for D3 as described below.
+
+**Current D3 limitations:** Automatic scheduled research refresh is **not fully operational**; `AUTO_REFRESH_ENABLED=false` remains the intended D3 setting and Next Refresh may show **Not scheduled**. Automatic job-opening extraction for **Open Roles** is also incomplete. Some sites restrict crawling, and occasional external LLM, scraper, or cost-reporting failures remain possible. Research costs are estimates based on successfully recorded usage, not guaranteed invoices. SCADABLE's product baseline is static rather than synced live from GitHub.
 
 ## Technical Overview
 
@@ -153,21 +162,22 @@ Live SWOT uses the following technologies:
 | Frontend deployment | Vercel | Hosted web application |
 | Backend and database deployment | Railway | Hosted API and PostgreSQL |
 
-The research workflow follows these main steps:
+The current research workflow follows these main stages:
 
-```
+```text
 Add competitor
       ↓
 Queue research run
       ↓
-Collect website content with Crawl4AI
+Crawl company website with Crawl4AI
       ↓
-Analyze competitor information with OpenAI
+Extract structured, cited facts with OpenAI
       ↓
-Save findings in PostgreSQL
+Compare with SCADABLE, generate SWOT and feature scores
       ↓
-Display competitor profiles, agent runs,
-and SWOT analysis
+Save findings, scores, run status, and available costs to PostgreSQL
+      ↓
+Display competitor profiles, Agent Runs, and SWOT Overview
 ```
 
 ## Local Development and TA Onboarding
@@ -264,7 +274,7 @@ mkdir -p scraper/.uv-cache/playwright
 PLAYWRIGHT_BROWSERS_PATH="$PWD/scraper/.uv-cache/playwright" python -m playwright install chromium
 ```
 
-The backend requirements alone do **not** install the separate scraper/LLM packages. The additional `pip` command matches the dependency groups used by CI. Chromium is required for live Crawl4AI research but not for the default offline tests. On Linux, Playwright may additionally need system dependencies; see the [pipeline guide](docs/research-pipeline.md#setup).
+The backend requirements alone do **not** install the separate scraper/LLM packages. The additional `pip` command installs the scraper normally (not editable) and the LLM/repository in editable mode, matching the dependency groups used by CI. Chromium is required for live Crawl4AI research but not for the default offline tests. On Linux, Playwright may additionally need system dependencies; see the [pipeline guide](docs/research-pipeline.md#setup).
 
 **macOS troubleshooting — virtual environment fails during `ensurepip`:** During the D3 fresh-clone test, Homebrew Python 3.12 failed while bootstrapping pip (`truststore/_macos.py`, macOS version detection). The working alternative was `uv`, which can manage a separate Python installation and create the virtual environment without `ensurepip`:
 
@@ -277,7 +287,7 @@ uv pip install -r backend/requirements.txt
 uv pip install ./scraper -e ./llm -e ".[dev]"
 ```
 
-Run these from the repository root. Use the `uv` commands **instead of** the failed `python3.12 -m venv` / `pip` installation steps above; you do not need to reinstall the system Python. Once installed, run the same Playwright Chromium command shown above. `--clear` only replaces the test checkout's `backend/.venv`.
+Run these from the repository root. Use the `uv` commands **instead of** the failed `python3.12 -m venv` / `pip` installation steps above; you do not need to reinstall the system Python. Once installed, run the same Playwright Chromium command shown above. If `scraper.content_identity` or scraper model exports are missing after switching branches, reinstall the scraper in non-editable mode with `uv pip install --reinstall-package scraper ./scraper` from the repository root. `--clear` only replaces the test checkout's `backend/.venv`.
 
 Initialize the database and launch FastAPI (same Terminal A):
 
@@ -324,7 +334,7 @@ DATABASE_URL="sqlite:///:memory:" python -m pytest \
 
 This is the standard **offline backend suite used by CI**; the crawler and LLM are mocked where appropriate, so it should not make billable API calls. The repository also has additional backend and pipeline tests; run them separately when needed.
 
-For frontend quality checks (from the repository root):
+For frontend quality checks (open another terminal at the repository root):
 
 ```bash
 cd frontend
@@ -332,7 +342,7 @@ npm run lint
 npx tsc --noEmit
 ```
 
-For the **PostgreSQL API integration test**, use a dedicated `_test` database; it never uses the application database. After the database container is running:
+For the **PostgreSQL API integration test**, use a dedicated `_test` database; it never uses the application database. After the database container is running, return to the repository root before executing the following commands:
 
 ```bash
 docker exec scadable-dev-postgres createdb -U scadable live_swot_test
@@ -343,7 +353,7 @@ DATABASE_URL="postgresql+psycopg://scadable:scadable_local_only@localhost:5432/l
 python -m pytest tests/test_api_db_integration.py -q
 ```
 
-If PostgreSQL was started on **host port 5436**, substitute `5436` for `5432` in the two integration-test URLs above. The integration test uses a **mock crawler/LLM by default**, but persists results through the real PostgreSQL database and API. Do not set `RUN_LIVE_PIPELINE_TEST=1` unless you explicitly want external crawling and billable OpenAI calls. The current GitHub Actions workflow runs the five specified backend test modules plus frontend ESLint; it does **not** currently run the PostgreSQL integration test module as a job step.
+If PostgreSQL was started on **host port 5436**, substitute `5436` for `5432` in the two integration-test URLs above. The integration test uses a **mock crawler/LLM by default**, but persists results through the real PostgreSQL database and API. Do not set `RUN_LIVE_PIPELINE_TEST=1` unless you explicitly want external crawling and billable OpenAI calls. GitHub Actions runs three CI checks: backend tests, frontend ESLint, and LLM/pipeline tests. The PostgreSQL API integration test is not part of the standard PR checks unless separately configured.
 
 ### 6. Local setup verification results
 
@@ -362,10 +372,15 @@ Our team uses GitHub for version control and Discord for development coordinatio
 We follow a feature-branch and pull-request workflow:
 
 1. Team members discuss and divide tasks before beginning development.
+
 2. Each developer creates a separate branch instead of committing directly to `main`.
+
 3. Work is committed and pushed to the developer's branch.
+
 4. The developer opens a pull request targeting `main`.
+
 5. Another team member reviews the changes before merging.
+
 6. Integrated changes are tested before deployment.
 
 We divide responsibilities across frontend development, backend research, LLM analysis, database integration, deployment, and documentation.
@@ -382,36 +397,35 @@ The frontend is deployed on **Vercel**, while the backend API and PostgreSQL dat
 
 **Backend API:** https://backend-d3-production.up.railway.app/
 
-The frontend is hosted on Vercel; the backend API and database are hosted on Railway. GitHub Actions runs backend tests and frontend ESLint on pull requests to `main`, with five-minute job timeouts. The team uses reviewed pull requests and hosted deployments to keep frontend and backend changes coordinated.
+The frontend is hosted on Vercel; the backend API and database are hosted on Railway. GitHub Actions runs three CI checks on pull requests to `main`: backend tests, frontend ESLint, and LLM/pipeline tests. Reviewed pull requests and hosted deployments help keep frontend and backend changes coordinated.
 
 ### CI/CD Pipeline and Automated Deployment Evidence
 
-Our project uses GitHub Actions for continuous integration and
-Vercel/Railway for hosted deployments.
+Live SWOT uses **GitHub Actions** for continuous integration and **Railway / Vercel** for deployment.
 
 **Continuous Integration (GitHub Actions)**
 
-GitHub Actions runs automated backend tests and frontend ESLint
-checks on pull requests targeting `main`. These checks help detect
-regressions before changes are merged.
+The updated D3 CI workflow includes **three checks** on pull requests to `main`:
 
-![Successful GitHub Actions CI pipeline](docs/screenshots/ci-pipeline.png)
+1. **Backend tests:** Verify API behaviour, service orchestration, validation, and regression coverage.
+2. **Frontend linting:** Run ESLint checks for the Next.js/React frontend.
+3. **LLM/pipeline tests:** Verify the standalone research pipeline, extraction/comparison schemas, scoring, and related integration logic using test fixtures and mocked external calls.
+
+These checks catch regressions before merge; they do not replace live OpenAI, crawling, or production deployment verification.
+
+![Successful GitHub Actions CI pipeline with backend, frontend, and LLM checks](docs/screenshots/ci-pipeline.png)
 
 **Verification:** [View GitHub Actions workflow runs](https://github.com/csc301-2026-f/10-SCADABLE/actions)
 
 **Backend Automatic Deployment (Railway)**
 
-The backend is hosted on Railway. Railway is configured to deploy
-updates automatically from the connected GitHub repository
-when changes are merged into `main`.
+The FastAPI backend and PostgreSQL database are hosted on Railway. The backend is configured to deploy from the connected GitHub repository when updates reach the deployment branch.
 
 ![Railway backend automatic deployment](docs/screenshots/railway-auto-deploy.png)
 
 **Frontend Automatic Deployment (Vercel)**
 
-The Next.js frontend is hosted on Vercel. Vercel is configured to
-deploy updates automatically from the connected GitHub repository
-when changes are merged into `main`.
+The Next.js frontend is hosted on Vercel, which is configured to deploy from the connected repository when updates reach the deployment branch.
 
 ![Vercel frontend automatic deployment](docs/screenshots/vercel-auto-deploy.png)
 
@@ -440,7 +454,6 @@ D3 non-functional goals: Lighthouse accessibility **> 80**, keyboard-usable core
 
 ![Lighthouse accessibility score 96](docs/screenshots/lighthouse-accessibility-96.png)
 
-
 ### Security
 
 | Requirement | Status / evidence |
@@ -463,8 +476,7 @@ SCADABLE follows a mixed licensing approach, maintaining proprietary repositorie
 ## Deliverable History
 
 - **D1:** Interactive frontend prototype and initial project design.
-- **D2:** Deployed full-stack application with competitor research, persistent data, research-run monitoring, authentication UI, and SWOT analysis.
-- **D3:** Research-failure handling, backend refresh-scheduling implementation (not fully operational in D3), frontend API integration for competitor scores and profile data, Open Roles display support (without automated extraction), and expanded research cost instrumentation. See [PR #62](https://github.com/csc301-2026-f/10-SCADABLE/pull/62), [PR #63](https://github.com/csc301-2026-f/10-SCADABLE/pull/63), and [PR #64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64).
+- **D2:** Deployed full-stack application with competitor management, research, persistent data, run monitoring, and initial SWOT output.
+- **D3:** Working two-stage LLM extraction/comparison integrated with the backend; competitor and SCADABLE feature-score comparisons; cited competitor SWOT and overall SWOT shown after completed research; operational Agent Runs cost display; improved scraper tracking and analysis reliability; three-part CI (backend, frontend, LLM); and Railway/Vercel deployment. Open Roles extraction and automatic Next Refresh remain incomplete. See [PR #58](https://github.com/csc301-2026-f/10-SCADABLE/pull/58), [PR #63](https://github.com/csc301-2026-f/10-SCADABLE/pull/63), [PR #64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64), and [PR #73](https://github.com/csc301-2026-f/10-SCADABLE/pull/73).
 
 The original D1 prototype remains available [here](https://csc301-2026-f.github.io/10-SCADABLE/deliverables/D1/mockups/final-prototype.html).
-
