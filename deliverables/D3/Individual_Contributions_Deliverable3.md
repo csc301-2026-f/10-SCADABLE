@@ -2,6 +2,17 @@
 
 > For each team member: name, role, and specific contributions. Be precise about what you did, not how much you wrote.
 
+### Jaynik Sheth
+
+**Role:** Scraper optimization, Decisions API tracking, and research pipeline integration.
+
+**Contributions:**
+
+- Implemented optional Langfuse tracking for scraper Decisions API attempts, recording token usage, outcomes, and crawl references without exposing page content or allowing tracking failures to interrupt scraping (`decisions-api-cost-tracking` branch; [PR #57](https://github.com/csc301-2026-f/10-SCADABLE/pull/57)).
+- Aligned the scraper's research objective and usefulness rubrics with downstream extraction, and added approximate coverage hints that update candidate scoring based on useful pages already collected (`d3_scraper_optimizations` branch; [PR #58](https://github.com/csc301-2026-f/10-SCADABLE/pull/58)).
+- Added scraper tests, lint, and formatting checks (CI) to GitHub Actions
+- Answered Q2 in `product-evolution.md` doc
+
 ### Essam Elmancy
 
 **Role:** Backend API development and data reliability.
