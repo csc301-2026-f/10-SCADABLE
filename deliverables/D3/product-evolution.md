@@ -3,7 +3,7 @@
 > Aim for 1000-2000 words. Be concise and analytical. We care about reasoning, impact, and integration quality, not length.
 
 ## 1. What Needed to Improve
-## 1. What Needed to Improve
+
 
 Following D2, the most significant limitation of Live SWOT was the reliability and consistency of its end-to-end competitor research workflow. Although users could add competitors, initiate research, and view AI-generated SWOT findings, successful execution did not always produce complete or dependable results. Feature scores were inconsistently generated across competitors, some SWOT findings lacked reliable source attribution, and the overall comparison did not always maintain a consistent perspective between SCADABLE and its competitors. Additionally, failures in the scraping and LLM pipeline could be obscured by fallback behavior, making it difficult to distinguish genuine research from incomplete results. **Another significant limitation was the lack of detailed API cost tracking. The application did not consistently record or display the costs associated with individual AI operations or research runs, making it difficult to evaluate resource consumption and the efficiency of the research pipeline.** Research was also primarily initiated manually, meaning previously generated intelligence could become outdated without further user intervention. These issues directly affected the application's core purpose: providing SCADABLE with trustworthy, up-to-date competitive intelligence. A dashboard that displays incomplete, inconsistently scored, or outdated findings, while offering limited visibility into research costs, cannot reliably support informed competitive analysis or efficient resource management.
 
