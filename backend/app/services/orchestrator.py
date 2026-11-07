@@ -8,6 +8,7 @@ Add Competitor -> Trigger Crawler -> Diff Snapshot -> Invoke LLM -> Persist to D
 import asyncio
 import logging
 import os
+import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -103,25 +104,82 @@ def _get_latest_completed_run(db: Session, competitor_id: int) -> ResearchRun | 
     return db.scalars(stmt).first()
 
 
-def _scores_by_company(raw_scores: Any) -> dict[str, list[dict[str, Any]]]:
-    """Group compare() scores by company, dropping malformed or out-of-range items."""
+def _score_feature_key(feature: str) -> str:
+    """Normalize feature names for high-confidence SCADABLE score pairing."""
+    return " ".join(re.findall(r"[a-z0-9]+", feature.casefold()))
+
+
+def _matching_scadable_score(feature: str, baseline: dict[str, float]) -> float | None:
+    """Pair a competitor feature only with the same or very similar baseline feature.
+
+    Comparison scores are per-company, not directly side-by-side pairs. Do not
+    assign an unrelated SCADABLE score just to populate the chart.
+    """
+    key = _score_feature_key(feature)
+    if key in baseline:
+        return baseline[key]
+    # Very conservative word containment: e.g. "Evidence collection" matches
+    # "Continuous automated evidence collection from cloud providers".
+    words = set(key.split())
+    matches = []
+    for baseline_key, value in baseline.items():
+        baseline_words = set(baseline_key.split())
+        overlap = words & baseline_words
+        shorter = min(len(words), len(baseline_words))
+        if shorter >= 2 and len(overlap) >= 2 and len(overlap) / shorter >= 0.8:
+            matches.append(value)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _scores_by_company(
+    raw_scores: Any, feature_pairs: Any = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Convert independent company scores into chart-ready competitor score rows."""
     grouped: dict[str, list[dict[str, Any]]] = {}
     if not isinstance(raw_scores, list):
         return grouped
-    for score in raw_scores:
-        if not isinstance(score, dict):
+    scadable: dict[str, float] = {}
+    for item in raw_scores:
+        if not isinstance(item, dict):
             continue
-        name, feature, value = score.get("company_name"), score.get("feature"), score.get("score")
-        if not isinstance(name, str) or not isinstance(feature, str) or not feature.strip():
+        name, feature, score = item.get("company_name"), item.get("feature"), item.get("score")
+        if (isinstance(name, str) and name.casefold() == "scadable"
+                and isinstance(feature, str) and feature.strip()
+                and type(score) in (int, float) and 0 <= score <= 10):
+            scadable[_score_feature_key(feature)] = score
+    # Explicit LLM pairings take precedence; a null pairing intentionally
+    # leaves the baseline score empty rather than inventing an equivalence.
+    pairs = {}
+    if isinstance(feature_pairs, list):
+        for pair in feature_pairs:
+            if not isinstance(pair, dict):
+                continue
+            company, competitor_feature = pair.get("company_name"), pair.get("competitor_feature")
+            if isinstance(company, str) and isinstance(competitor_feature, str):
+                pairs[(company, competitor_feature)] = pair.get("scadable_feature")
+    for item in raw_scores:
+        if not isinstance(item, dict):
             continue
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 10:
+        name, feature, score = item.get("company_name"), item.get("feature"), item.get("score")
+        if (not isinstance(name, str) or name.casefold() == "scadable"
+                or not isinstance(feature, str) or not feature.strip()
+                or type(score) not in (int, float) or not 0 <= score <= 10):
             continue
-        result = {"feature": feature.strip(), "score": value}
-        scadable_score = score.get("scadable_score")
-        if (not isinstance(scadable_score, bool) and isinstance(scadable_score, (int, float))
-                and 0 <= scadable_score <= 10):
-            result["scadable_score"] = scadable_score
-        grouped.setdefault(name, []).append(result)
+        row = {"feature": feature.strip(), "score": score}
+        # Preserve explicit paired scores from old test/mock adapters.
+        explicit = item.get("scadable_score")
+        if type(explicit) in (int, float) and 0 <= explicit <= 10:
+            row["scadable_score"] = explicit
+        elif isinstance(feature_pairs, list):
+            selected = pairs.get((name, feature))
+            if isinstance(selected, str) and _score_feature_key(selected) in scadable:
+                row["scadable_score"] = scadable[_score_feature_key(selected)]
+        else:
+            # Legacy comparison/mock results lack explicit pairings.
+            match = _matching_scadable_score(feature, scadable)
+            if match is not None:
+                row["scadable_score"] = match
+        grouped.setdefault(name, []).append(row)
     return grouped
 
 
@@ -173,8 +231,12 @@ async def refresh_overall_swot(
                 else {}
             )
             features = analysis.get("features", [])
-            # Still compare a competitor with no strengths/weaknesses so its features get scored
-            if not claims and not features:
+            # The two-stage extractor may return facts other than SWOT claims
+            # or features; keep those competitors in the comparison as well.
+            extracted = analysis.get("extracted_information")
+            if not claims and not features and not (
+                isinstance(extracted, dict) and extracted.get("claims_cited")
+            ):
                 continue
             latest_runs[competitor.name] = latest_run
             profiles.append({
@@ -183,6 +245,7 @@ async def refresh_overall_swot(
                 "summary": analysis.get("summary", ""),
                 "features": features,
                 "claims": claims,
+                "extracted_information": extracted,
             })
 
         if not profiles:
@@ -207,7 +270,9 @@ async def refresh_overall_swot(
             timeout=comparison_timeout,
         )
         overall_entries = comparison.get("swot_entries", [])
-        scores_by_company = _scores_by_company(comparison.get("scores"))
+        scores_by_company = _scores_by_company(
+            comparison.get("scores"), comparison.get("feature_pairs")
+        )
         # Even when SWOT is empty, valid feature scores still matter. Both score
         # writes and publishing are guarded against newer competitor changes.
         scores_by_run = {
@@ -216,7 +281,19 @@ async def refresh_overall_swot(
             if scores_by_company.get(name)
         }
         valid_entries = overall_entries if isinstance(overall_entries, list) and overall_entries else None
-        if not save_comparison_scores_if_current(db, revision, scores_by_run, valid_entries):
+        competitor_swots_by_run = {}
+        blocks = comparison.get("competitor_swots")
+        if isinstance(blocks, list):
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                name, entries = block.get("company_name"), block.get("swot_entries")
+                if name in latest_runs and isinstance(entries, list):
+                    competitor_swots_by_run[latest_runs[name].id] = entries
+        if not save_comparison_scores_if_current(
+            db, revision, scores_by_run, valid_entries,
+            competitor_swots_by_run=competitor_swots_by_run,
+        ):
             logger.warning("Overall comparison superseded by newer competitor data.")
         elif valid_entries is None:
             logger.warning("Overall SWOT comparison returned no findings; valid scores saved.")
@@ -309,8 +386,8 @@ async def execute_research_run(
                     "reused_from_run_id", previous_run.id
                 ),
             }
-            for key in ("summary", "features", "scores"):
-                if prev_analysis.get(key):
+            for key in ("summary", "features", "scores", "extracted_information", "conflicting_data"):
+                if key in prev_analysis:
                     reused_payload[key] = prev_analysis[key]
             # A skipped refresh must retain role counts, including an explicit 0,
             # without making another paid LLM call.

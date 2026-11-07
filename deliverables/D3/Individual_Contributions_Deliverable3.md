@@ -13,6 +13,11 @@
 - Made failed website crawls mark the research run as failed instead of silently using mock data ([PR #62](https://github.com/csc301-2026-f/10-SCADABLE/pull/62)).
 - Wrote API, crawler, and orchestrator tests for each change.
 
+**[Yash Khanchandani]**, [AI analysis]
+- Optimized prompts for company data extraction and SWOT analysis.
+- Added OpenAI API call cost tracking using Langfuse (https://github.com/csc301-2026-f/10-SCADABLE/issues/53)
+- Added "conflicting data" flagging to LLM outputs to let the user decide which claim to believe in (https://github.com/csc301-2026-f/10-SCADABLE/issues/67).
+
 ### Ibraheem Hussain
 
 **Role:** Frontend development (accessibility, competitor profiles, agent runs).

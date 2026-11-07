@@ -10,7 +10,6 @@ from openai import AsyncOpenAI
 import llm.client as client_module
 from llm.config import Settings
 from llm.schemas import (
-    PartialCompanyAnalysisByIndex,
     PartialExtractedInformationByIndex,
     SWOTAnalysisByIndex,
 )
@@ -30,10 +29,16 @@ def test_openai_requires_model():
 
 
 @pytest.mark.parametrize(
-    "schema", [PartialExtractedInformationByIndex, PartialCompanyAnalysisByIndex]
+    ("schema", "citation_schema", "index_field"),
+    [
+        (PartialExtractedInformationByIndex, "ClaimCitedByIndex", "claim_page_index"),
+        (SWOTAnalysisByIndex, "SWOTIndex", "swot_component_page_index"),
+    ],
 )
-def test_output_page_citations_use_plain_integer_json_schema(schema):
-    prop = schema.model_json_schema()["$defs"]["ClaimCitedByIndex"]["properties"]["claim_page_index"]
+def test_output_page_citations_use_plain_integer_json_schema(
+    schema, citation_schema, index_field
+):
+    prop = schema.model_json_schema()["$defs"][citation_schema]["properties"][index_field]
     assert prop["type"] == "integer"
     assert "format" not in prop
 
