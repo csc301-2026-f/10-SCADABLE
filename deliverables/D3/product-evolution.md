@@ -17,7 +17,18 @@ We also connected scraper Decisions and LLM usage to Langfuse and backend resear
 
 ## 3. Before vs. After
 
-Show concrete improvements: workflow clarity, speed, error reduction, reliability, etc.
+| Area | Before (D2) | After (D3) |
+|---|---|---|
+| **AI research pipeline** | Research used several LLM steps, including a separate company analysis step. Findings could cite the wrong company or switch whose point of view the SWOT was written from. | We have to two stages now. Fact extraction with citations, then a comparison that writes the SWOT from SCADABLE's point of view and scores features. Citations and feature pairs are checked so each finding belongs to the right company. |
+| **Feature scores** | Scoring was inconsistent. Foresite had 13 features and no scores, and Drata had 2 features and no scores. A failed comparison could wipe out existing scores. | Any competitor with features is scored, and the chart shows SCADABLE's score next to the competitor's. Previous scores are kept if a comparison fails, and a longer comparison timeout lets slower comparisons finish. |
+| **Scraping quality** | Cookie banners, duplicate pages and redirect aliases were all sent for assessment and analysis, which repeated API work. | Boilerplate cleanup, exact duplicate detection and coverage hints steer the crawl toward missing topics. Duplicates reuse earlier assessments while keeping their source files and links. |
+| **Failed research** | When a site blocked the scraper, the backend used sample pages and marked the run successful. Drata's profile was built this way. | A failed crawl or LLM step fails the run with a clear message. Sample data is only used in local development when turned on explicitly. |
+| **Cost visibility** | Nobody could see what a run cost so we couldn't reliably keep track. | Each run records its LLM and scraper page selection costs from Langfuse, and the Agent Runs page shows the cost per run and a weekly total. Incomplete costs are never shown as final, and run steps now show what actually happened, including on failed runs. |
+| **Freshness** | Research ran only when a user started it. The overall SWOT could show old results after a failed comparison. | A scheduler can refresh competitors from run history, prevent overlapping runs and recover stuck jobs. It is built but turned off for D3. The overall SWOT only shows results that match the latest data, and analysis version checks stop old results from being reused after the analysis rules change. |
+| **Competitor profile** | Open roles and next refresh time were not analyzed and displayed. | The profile shows job posting counts, the next refresh time, recent activity and feature scores from the backend, with better polling while scores are being generated. |
+| **Conflicting data** | Not supported. | The LLM extracts conflicting claims with sources, and the frontend has an optional table for them. *Partial: stored conflicts are not yet sent to the profile page.* |
+| **Accessibility and errors** | Forms had limited validation and focus handling, and raw internal errors could reach users. | Keyboard navigation, focus traps in dialogs, clearer form validation and Lighthouse evidence. Error messages are sanitized in both the API and the UI. |
+| **Testing and CI** | No automated checks ran on pull requests. | GitHub Actions runs three checks on every pull request. The scraper check runs lint, formatting and tests. The backend check runs tests against PostgreSQL, including LLM adapter and cost tests that don't spend OpenAI tokens. The frontend check runs lint. |
 
 ## 4. Reflection
 

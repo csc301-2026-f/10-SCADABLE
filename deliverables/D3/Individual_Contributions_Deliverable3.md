@@ -60,8 +60,17 @@
 
 - Reviewed and merged four teammates' pull requests: [PR #51](https://github.com/csc301-2026-f/10-SCADABLE/pull/51), [PR #52](https://github.com/csc301-2026-f/10-SCADABLE/pull/52), [PR #62](https://github.com/csc301-2026-f/10-SCADABLE/pull/62), and [PR #64](https://github.com/csc301-2026-f/10-SCADABLE/pull/64), contributing to code review, team integration, and maintaining the shared `main` branch.
 
-**[Name]**, [Role]
-> [Specific contributions]
+### Houssam Yaacoub
+
+**Role:** Backend research pipeline, LLM cost tracking, and CI test coverage.
+
+**Contributions:**
+
+- Made the overall comparison score every competitor that has features, even when the LLM returned no strengths or weaknesses for it, by using each competitor's latest complete run instead of only runs with SWOT entries ([PR #52](https://github.com/csc301-2026-f/10-SCADABLE/pull/52)).
+- Built cost tracking for each research run: named every LLM call by run and company in Langfuse (for example `run-42:vanta:extraction`), looked up the cost of each run a few minutes after it finished, saved it with the run, and returned it in the runs API as `costUsd`. Fixed a bug where only the first run's cost was recorded ([PR #59](https://github.com/csc301-2026-f/10-SCADABLE/pull/59)).
+- Updated the backend LLM adapter for the new analyzer schema, and made CI install the local `llm` package so the adapter and cost tests run on every pull request without spending OpenAI tokens ([PR #59](https://github.com/csc301-2026-f/10-SCADABLE/pull/59)).
+- Fixed failed runs showing "Analyze with LLM: Success" after their cost was saved, and added a regression test for a failed crawl ([PR #69](https://github.com/csc301-2026-f/10-SCADABLE/pull/69)).
+- Answered Question 3 (Before vs. After) in `product-evolution.md`.
 
 **[Name]**, [Role]
 > [Specific contributions]
