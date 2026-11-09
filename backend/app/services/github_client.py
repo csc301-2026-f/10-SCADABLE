@@ -17,6 +17,7 @@ from urllib.parse import quote
 import httpx
 
 GITHUB_API = "https://api.github.com"
+MAX_GITHUB_FEATURE_FILE_BYTES = 128 * 1024
 
 
 class GitHubClientError(RuntimeError):
@@ -38,6 +39,12 @@ class GitHubRepo:
             default_branch=str(value.get("default_branch") or "main"),
             private=bool(value.get("private", False)),
         )
+
+
+@dataclass(frozen=True)
+class GitHubFileContents:
+    text: str
+    blob_sha: str
 
 
 class GitHubAppClient:
@@ -169,19 +176,10 @@ class GitHubAppClient:
             page += 1
         return repos
 
-    def read_repository_file(
-        self,
-        installation_id: int,
-        full_name: str,
-        file_path: str,
-        *,
-        ref: str = "main",
-    ) -> str:
-        """Fetch a known text file. Its path will be chosen after Ali replies.
-
-        This reads one path only; it deliberately does not recursively analyze
-        arbitrary source code or choose product features on its own.
-        """
+    def read_repository_file_with_metadata(
+        self, installation_id: int, full_name: str, file_path: str, *, ref: str = "main"
+    ) -> GitHubFileContents:
+        """Read a small UTF-8 file at a branch or immutable commit reference."""
         parts = full_name.split("/")
         if len(parts) != 2 or not all(parts):
             raise ValueError("full_name must be owner/repository")
@@ -199,8 +197,23 @@ class GitHubAppClient:
             raise GitHubClientError("Requested path is not a file")
         if data.get("encoding") != "base64" or not isinstance(data.get("content"), str):
             raise GitHubClientError("GitHub did not return inline file contents")
+        if not isinstance(data.get("size"), (int, type(None))) or (data.get("size") or 0) > MAX_GITHUB_FEATURE_FILE_BYTES:
+            raise GitHubClientError("Repository file exceeds the 128 KiB limit")
+        sha = data.get("sha")
+        if not isinstance(sha, str) or len(sha) != 40 or any(c not in "0123456789abcdefABCDEF" for c in sha):
+            # The metadata endpoint should always include the Git blob SHA.
+            raise GitHubClientError("GitHub returned an invalid file SHA")
         try:
-            raw = base64.b64decode(data["content"], validate=False)
-            return raw.decode("utf-8")
+            encoded = "".join(data["content"].split())
+            raw = base64.b64decode(encoded, validate=True)
+            if len(raw) > MAX_GITHUB_FEATURE_FILE_BYTES:
+                raise GitHubClientError("Repository file exceeds the 128 KiB limit")
+            return GitHubFileContents(text=raw.decode("utf-8"), blob_sha=sha.lower())
         except (binascii.Error, UnicodeDecodeError) as exc:
-            raise GitHubClientError("Repository file is not UTF-8 text") from exc
+            raise GitHubClientError("Repository file is not valid base64-encoded UTF-8") from exc
+
+    def read_repository_file(
+        self, installation_id: int, full_name: str, file_path: str, *, ref: str = "main"
+    ) -> str:
+        """Backwards-compatible plain-text reader (prefer metadata for sync)."""
+        return self.read_repository_file_with_metadata(installation_id, full_name, file_path, ref=ref).text

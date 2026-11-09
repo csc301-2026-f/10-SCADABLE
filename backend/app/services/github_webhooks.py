@@ -20,6 +20,7 @@ class MainPushEvent:
     repository_full_name: str
     commit_sha: str
     delivery_id: str
+    branch: str = "main"
 
 
 def verify_github_signature(body: bytes, signature: str | None, secret: str) -> None:
@@ -36,7 +37,7 @@ def parse_main_push(
     delivery_id: str | None,
     body: bytes,
 ) -> MainPushEvent | None:
-    """Return only non-deleted pushes to `main` from an app installation.
+    """Return non-deleted branch pushes from an app installation.
 
     Merging a PR into main normally produces a push event as well; no extra PR
     subscription is needed. Unknown event types/branches are safely ignored.
@@ -51,7 +52,8 @@ def parse_main_push(
         raise InvalidWebhook("Invalid JSON webhook payload") from exc
     if not isinstance(data, dict):
         raise InvalidWebhook("Invalid webhook payload shape")
-    if data.get("ref") != "refs/heads/main" or data.get("deleted") is True:
+    ref = data.get("ref")
+    if not isinstance(ref, str) or not ref.startswith("refs/heads/") or not ref[11:] or data.get("deleted") is True:
         return None
     try:
         installation_id = int(data["installation"]["id"])
@@ -62,4 +64,4 @@ def parse_main_push(
         raise InvalidWebhook("Missing installation or repository in push event") from exc
     if installation_id <= 0 or repo_id <= 0 or len(sha) != 40 or not all(c in "0123456789abcdefABCDEF" for c in sha):
         raise InvalidWebhook("Invalid installation, repository or commit SHA")
-    return MainPushEvent(installation_id, repo_id, full_name, sha.lower(), delivery_id)
+    return MainPushEvent(installation_id, repo_id, full_name, sha.lower(), delivery_id, ref[11:])

@@ -16,7 +16,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.routes import github
 from app.db.database import get_db
-from app.db.models import GitHubRepositorySelection, GitHubWebhookDelivery
+from app.db.models import GitHubRepositorySelection, GitHubWebhookDelivery, GitHubFeatureState
 from app.db.github_store import DatabaseGitHubSelectionStore
 from app.main import create_app
 from app.services.github_client import GitHubRepo
@@ -28,6 +28,7 @@ def session_factory():
     engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
     GitHubRepositorySelection.__table__.create(engine)
     GitHubWebhookDelivery.__table__.create(engine)
+    GitHubFeatureState.__table__.create(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     yield session_factory
     engine.dispose()

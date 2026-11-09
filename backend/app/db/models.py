@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import (
     CheckConstraint,
     BigInteger,
+    JSON,
     DateTime,
     Integer,
     Enum,
@@ -230,4 +231,26 @@ class GitHubWebhookDelivery(Base):
     commit_sha: Mapped[str] = mapped_column(String(40), nullable=False)
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class GitHubFeatureState(Base):
+    """Chosen GitHub feature file and last successfully validated baseline.
+
+    Separate table allows automatic create_all migration on existing deployments:
+    no ALTER TABLE is needed for the older GitHub repository selection table.
+    """
+
+    __tablename__ = "github_feature_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    file_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    baseline_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    blob_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    synced_commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

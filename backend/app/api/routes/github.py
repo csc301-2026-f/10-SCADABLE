@@ -8,10 +8,11 @@ connecting the Our Company page. Webhooks use GitHub's HMAC verification.
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from collections.abc import Generator
 from typing import Protocol
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -19,6 +20,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from app.services.github_client import GitHubAppClient, GitHubClientError, GitHubRepo
+from app.services.github_features import DEFAULT_FEATURE_PATH, FeatureFileError, validate_feature_path
+from app.services.github_sync import GitHubSyncError, sync_selected_repository
 from app.services.github_webhooks import InvalidWebhook, MainPushEvent, parse_main_push, verify_github_signature
 
 router = APIRouter(prefix="/github", tags=["github"])
@@ -39,6 +42,16 @@ class SelectedRepository(BaseModel):
     default_branch: str
     last_commit_sha: str | None = None
     sync_status: str = "not_synced"
+    file_path: str = DEFAULT_FEATURE_PATH
+    revision: int = 0
+    file_sha: str | None = None
+    last_synced_at: datetime | None = None
+    last_error: str | None = None
+
+
+class FeatureFileSelection(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    file_path: str = Field(min_length=1, max_length=512)
 
 
 class SelectionStore(Protocol):
@@ -53,6 +66,8 @@ class SelectionStore(Protocol):
     def save_selected(self, selection: SelectedRepository) -> None: ...
 
     def record_push(self, event: MainPushEvent) -> bool: ...
+
+    def select_file(self, path: str) -> SelectedRepository: ...
 
 
 def require_admin(authorization: str | None = Header(default=None)) -> None:
@@ -128,6 +143,48 @@ def set_selection(
     return stored
 
 
+@router.post("/file", dependencies=[Depends(require_admin)])
+def configure_feature_file(
+    payload: FeatureFileSelection,
+    store: SelectionStore = Depends(get_selection_store),
+) -> SelectedRepository:
+    """Choose the team-defined JSON product feature file within the selected repo."""
+    try:
+        return store.select_file(validate_feature_path(payload.file_path))
+    except (ValueError, FeatureFileError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/sync", dependencies=[Depends(require_admin)])
+def sync_features(
+    background_tasks: BackgroundTasks,
+    recompare: bool = Query(False, description="Run billable LLM comparisons after a baseline change"),
+    db: Session = Depends(get_db),
+    client: GitHubAppClient = Depends(get_github_client),
+) -> dict[str, str | bool]:
+    """Sync a selected file; optionally schedule a potentially billable recompare."""
+    try:
+        result = sync_selected_repository(db, client)
+        if result["baselineChanged"] and recompare:
+            from app.services.orchestrator import trigger_overall_swot_refresh
+            trigger_overall_swot_refresh(background_tasks)
+        return result
+    except GitHubSyncError as exc:
+        raise HTTPException(422 if "No GitHub repository" in str(exc) else 502, str(exc)) from exc
+
+
+@router.get("/features", dependencies=[Depends(require_admin)])
+def synced_features(db: Session = Depends(get_db)) -> dict:
+    """Inspect the currently effective SCADABLE baseline used by the LLM."""
+    from app.core.baseline import get_scadable_baseline
+    store = get_selection_store(db)
+    selected = store.get_selected()
+    return {
+        "source": "github" if selected and selected.last_synced_at else "static",
+        "baseline": get_scadable_baseline(db),
+    }
+
+
 @router.post("/webhook", status_code=202)
 async def webhook(
     request: Request,
@@ -154,7 +211,13 @@ async def webhook(
     if event is None:
         return {"status": "ignored"}
     selected = store.get_selected()
-    if selected is None or event.installation_id != selected.installation_id or event.repository_id != selected.repository_id:
+    if (
+        selected is None
+        or event.installation_id != selected.installation_id
+        or event.repository_id != selected.repository_id
+        or event.branch != selected.default_branch
+        or event.repository_full_name.casefold() != selected.full_name.casefold()
+    ):
         return {"status": "ignored"}
     was_new = store.record_push(event)
     # An event is recorded/pending, not queued for background processing yet.

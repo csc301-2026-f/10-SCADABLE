@@ -175,7 +175,7 @@ def test_client_reads_file_when_path_is_known():
             return httpx.Response(201, json={"token": "token"})
         if request.url.path == "/repos/scadable/product/contents/docs/features.md":
             assert request.url.params["ref"] == "main"
-            return httpx.Response(200, json={"type": "file", "encoding": "base64", "content": base64.b64encode(b"# Features\n- SOC 2").decode()})
+            return httpx.Response(200, json={"type": "file", "encoding": "base64", "sha": "b" * 40, "content": base64.b64encode(b"# Features\n- SOC 2").decode()})
         raise AssertionError(str(request.url))
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http:
