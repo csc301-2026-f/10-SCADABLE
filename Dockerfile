@@ -1,3 +1,4 @@
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -16,6 +17,11 @@ COPY pyproject.toml README.md ./
 COPY scraper ./scraper
 COPY llm ./llm
 COPY backend/app ./backend/app
+
+# Required by Playwright's bundled Node.js executable
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libatomic1 \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN pip install -r backend/requirements.txt ./scraper ./llm . \
     && python -m playwright install --with-deps chromium
