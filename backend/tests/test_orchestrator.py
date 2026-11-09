@@ -5,12 +5,14 @@ import os
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, delete
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 from starlette.datastructures import State
 
-from app.db.models import ResearchStatus, SWOTCategory, SWOTScope
+from app.db.models import (
+    OverallSwotState, ResearchStatus, SWOTCategory, SWOTEntry, SWOTScope,
+)
 from app.db.repository import (
     create_competitor,
     create_research_run,
@@ -245,6 +247,13 @@ if test_url:
             expire_on_commit=False,
         )
         try:
+            # Other PostgreSQL integration tests use committed API sessions and
+            # can leave overall SWOT rows and a published freshness revision in
+            # this shared CI database. Clear those inside this test's outer
+            # transaction so every orchestrator test starts fresh; the outer
+            # rollback restores any pre-existing database state afterward.
+            session.execute(delete(SWOTEntry).where(SWOTEntry.scope == SWOTScope.OVERALL))
+            session.execute(delete(OverallSwotState))
             yield session
         finally:
             session.close()
