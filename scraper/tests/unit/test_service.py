@@ -67,6 +67,57 @@ async def test_service_composes_discovery_extraction_and_competitor_overrides():
     assert FixtureFetcher.closed == 1
 
 
+async def test_tracking_context_error_does_not_fail_crawl(caplog):
+    from scraper.service import CompetitorScraper
+
+    def context(_):
+        raise RuntimeError("sensitive-context-error")
+
+    service = CompetitorScraper(
+        fetcher_factory=lambda *args: FixtureFetcher(),
+        http_transport=httpx.MockTransport(http_fixture),
+        decision_tracking_context_factory=context,
+    )
+    result = await service.crawl(
+        CompetitorInput(homepage_url="https://example.com"),
+        ScraperConfig(
+            selection={"mode": "structural"}, max_pages=1, request_delay_seconds=(0.0, 0.0)
+        ),
+    )
+    assert result.summary.successful == 1
+    assert result.decision_tracking is None
+    assert "sensitive-context-error" not in caplog.text
+
+
+async def test_custom_provider_factory_keeps_original_signature():
+    from scraper.decisions import OpenAIDecisionProvider
+    from scraper.service import CompetitorScraper
+
+    calls = []
+
+    def provider(competitor, settings, limiter):
+        calls.append(competitor)
+        return OpenAIDecisionProvider(settings.selection, request_limiter=limiter)
+
+    def unused(_):
+        pytest.fail("Custom providers own their tracking context")
+
+    service = CompetitorScraper(
+        fetcher_factory=lambda *args: FixtureFetcher(),
+        http_transport=httpx.MockTransport(http_fixture),
+        decision_provider_factory=provider,
+        decision_tracking_context_factory=unused,
+    )
+    result = await service.crawl(
+        CompetitorInput(homepage_url="https://example.com"),
+        ScraperConfig(
+            selection={"mode": "structural"}, max_pages=1, request_delay_seconds=(0.0, 0.0)
+        ),
+    )
+    assert result.summary.successful == 1
+    assert len(calls) == 1
+
+
 async def test_many_limits_global_page_concurrency_even_if_competitor_requests_more():
     from scraper.service import CompetitorScraper
 

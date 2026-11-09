@@ -7,9 +7,13 @@ mock analysis during offline testing.
 
 import asyncio
 import logging
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
+
+from app.services.open_roles import count_open_roles, normalize_job_postings
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +25,20 @@ class AnalyzerProtocol(Protocol):
         self,
         scraped_data: dict[str, Any],
         baseline_context: dict[str, Any],
+        trace_prefix: str | None = None,
     ) -> dict[str, Any]: ...
 
     async def compare(
         self,
         baseline_context: dict[str, Any],
         competitors: list[dict[str, Any]],
+        trace_prefix: str | None = None,
     ) -> dict[str, Any]: ...
+
+
+def _comparison_time() -> str:
+    """Stands in for SCADABLE's crawl time, which the backend never has (static baseline)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _pick_source_url(urls: list[str], scadable_url: str) -> str | None:
@@ -71,6 +82,7 @@ class MockOpenAIAnalyzer:
         self,
         scraped_data: dict[str, Any],
         baseline_context: dict[str, Any],
+        trace_prefix: str | None = None,
     ) -> dict[str, Any]:
         if self.delay_seconds > 0:
             await asyncio.sleep(self.delay_seconds)
@@ -153,6 +165,7 @@ class MockOpenAIAnalyzer:
         self,
         baseline_context: dict[str, Any],
         competitors: list[dict[str, Any]],
+        trace_prefix: str | None = None,
     ) -> dict[str, Any]:
         if self.delay_seconds > 0:
             await asyncio.sleep(self.delay_seconds)
@@ -200,7 +213,7 @@ class MockOpenAIAnalyzer:
 class OpenAIAdapter:
     """Adapter wrapping Yash & Jaynik's OpenAI analysis engine.
 
-    Delegates to the LLM analyzer when available; falls back to mock analysis.
+    Delegates to the LLM analyzer, using mock data only when explicitly enabled.
     """
 
     def __init__(self) -> None:
@@ -210,12 +223,13 @@ class OpenAIAdapter:
         self,
         scraped_data: dict[str, Any],
         baseline_context: dict[str, Any],
+        trace_prefix: str | None = None,
     ) -> dict[str, Any]:
+        # Names of paid OpenAI calls started, kept even if we fall back to the mock
+        llm_calls: list[str] = []
         try:
-            from datetime import datetime, timezone
-
             from llm.analyzer import Analyzer
-            from llm.inputs import load_analysis_input
+            from llm.inputs import deduplicate_analysis_pages, load_analysis_input
             from llm.schemas import (
                 AnalysisInput,
                 AnalysisPage,
@@ -288,140 +302,195 @@ class OpenAIAdapter:
                 )
                 analysis_input = AnalysisInput(
                     crawl_summary=export_summary,
-                    pages=analysis_pages,
+                    pages=deduplicate_analysis_pages(analysis_pages),
                 )
 
             client = _build_openai_client()
             try:
-                analyzer = Analyzer(client)
+                analyzer = Analyzer(client, trace_prefix=trace_prefix)
+                if trace_prefix:
+                    llm_calls.append(f"{trace_prefix}:extraction")
                 facts = await analyzer.extract_information(analysis_input)
-                company_analysis = await analyzer.analyze_company(facts)
             finally:
                 await client.close()
 
-            # Map cited strengths and weaknesses
-            swot_entries = to_swot_entries(company_analysis)
-
-            competitor_name = getattr(
-                company_analysis,
-                "company_name",
-                scraped_data.get("competitor_name", "Competitor"),
-            )
-            base_url = scraped_data.get("base_url", "https://example.com")
-            primary_source = (
-                swot_entries[0]["source_url"]
-                if swot_entries
-                else f"{base_url.rstrip('/')}/pricing"
-            )
-
-            # Synthesize SCADABLE-relative opportunities and threats
-            swot_entries.append({
-                "category": "opportunity",
-                "content": (
-                    f"SCADABLE can position against {competitor_name} using automated code-level "
-                    "remediation and native EU Cyber Resilience Act (CRA) workflows."
-                ),
-                "source_url": primary_source,
-            })
-            swot_entries.append({
-                "category": "threat",
-                "content": (
-                    f"{competitor_name}'s established market presence and broad integration ecosystem "
-                    "pose competitive customer acquisition hurdles."
-                ),
-                "source_url": primary_source,
-            })
-
-            # Features are scored later by compare(), which saves the scores on this run
+            # Stage 1 now extracts cited facts only. Stage 2 generates SCADABLE's
+            # SWOT and scores during refresh_overall_swot(), not here.
+            job_postings = normalize_job_postings(facts.job_postings)
+            features = list(dict.fromkeys(
+                claim.claim for claim in facts.claims_cited
+                if claim.category == "feature" and claim.claim.strip()
+            ))
             return {
-                "schema_version": "backend-analysis-v1",
+                "schema_version": "backend-analysis-v2",
                 "mode": "real",
-                "perspective": "scadable_relative",
-                "competitor_name": competitor_name,
-                "summary": getattr(company_analysis, "summary", ""),
-                "features": list(getattr(company_analysis, "features", [])),
-                "swot_entries": swot_entries,
+                "perspective": "competitor_facts",
+                "competitor_name": scraped_data.get("competitor_name") or facts.company_name,
+                "summary": facts.summary,
+                "features": features,
+                # Persist the complete source-backed extraction for later overall
+                # comparisons. Do not reduce the claims to just SWOT rows.
+                "extracted_information": facts.model_dump(mode="json"),
+                "conflicting_data": facts.conflicting_data.model_dump(mode="json"),
+                "job_postings": job_postings,
+                "open_roles": count_open_roles(job_postings),
+                "swot_entries": to_swot_entries(facts),
+                "llm_calls": llm_calls,
             }
 
-        except (ImportError, ValueError, Exception) as exc:
+        except Exception as exc:
+            if os.getenv("ALLOW_MOCK_LLM", "").lower() not in {"1", "true", "yes"}:
+                # A real run must not be marked successful with fictitious data.
+                logger.exception("Real OpenAI extraction failed")
+                raise
             logger.warning(
-                "Real OpenAI analyzer unavailable or unconfigured (%s); falling back to mock analyzer.",
-                exc,
+                "Real OpenAI extraction failed (%s); ALLOW_MOCK_LLM enabled, using mock data.", exc
             )
             mock = MockOpenAIAnalyzer()
-            return await mock.analyze(scraped_data, baseline_context)
+            result = await mock.analyze(scraped_data, baseline_context)
+            result["mode"] = "mock"
+            if llm_calls:
+                result["llm_calls"] = llm_calls
+            return result
 
     async def compare(
         self,
         baseline_context: dict[str, Any],
         competitors: list[dict[str, Any]],
+        trace_prefix: str | None = None,
     ) -> dict[str, Any]:
-        """Compare SCADABLE against all researched competitors with Analyzer.compare().
+        """Run stage-2 SWOT comparison using the stored stage-1 extractions.
 
-        Falls back to the mock only when the LLM package or API key is missing.
-        Errors from the OpenAI call itself are raised, so the orchestrator keeps
-        the previous overall SWOT instead of replacing it with mock findings.
+        Legacy stored profiles are converted for compatibility. Real comparison
+        errors are not silently replaced with mock results in production.
         """
-        try:
-            from llm.analyzer import Analyzer
-            from llm.schemas import ClaimCitedByURL, CompanyAnalysis, ComparisonInput
+        from llm.analyzer import Analyzer
+        from llm.schemas import (
+            ClaimCitedByURL,
+            ComparisonInput,
+            ConflictEntry,
+            ExtractedInformationByURL,
+        )
 
-            client = _build_openai_client()
-        except Exception as exc:
-            logger.warning(
-                "Real OpenAI comparison unavailable or unconfigured (%s); falling back to mock analyzer.",
-                exc,
-            )
-            return await MockOpenAIAnalyzer().compare(baseline_context, competitors)
-
-        # SCADABLE has no scraped pages in D2, so its claims cite its homepage.
-        scadable_url = baseline_context.get("website_url", "https://scadable.com")
-        scadable_claims = [
-            *baseline_context.get("differentiators", []),
-            *baseline_context.get("core_capabilities", []),
+        # SCADABLE is a configured baseline, not a crawled company. Each static
+        # capability is cited to the configured baseline URL for this comparison.
+        scadable_url = baseline_context.get("website_url") or "https://scadable.com"
+        baseline_name = baseline_context.get("company_name") or "SCADABLE"
+        baseline_claims = [
+            ClaimCitedByURL(category="feature", claim=feature, claim_page_url=scadable_url)
+            for feature in baseline_context.get("core_capabilities", [])
+            if isinstance(feature, str) and feature.strip()
+        ] + [
+            ClaimCitedByURL(category="differentiator", claim=claim, claim_page_url=scadable_url)
+            for claim in baseline_context.get("differentiators", [])
+            if isinstance(claim, str) and claim.strip()
         ]
         frameworks = baseline_context.get("supported_frameworks", [])
         if frameworks:
-            scadable_claims.append(f"Supports {', '.join(frameworks)}.")
-
-        comparison_input = ComparisonInput(
-            scadable=CompanyAnalysis(
-                company_name=baseline_context.get("company_name", "SCADABLE"),
-                summary=baseline_context.get("summary", ""),
-                summary_page_urls=[scadable_url],
-                features=list(baseline_context.get("core_capabilities", [])),
-                claims_cited=[
-                    ClaimCitedByURL(category="strength", claim=claim, claim_page_url=scadable_url)
-                    for claim in scadable_claims
-                ],
-            ),
-            competitors=[
-                CompanyAnalysis(
-                    company_name=c["company_name"],
-                    summary=c.get("summary", ""),
-                    # The backend doesn't store which page the summary came from
-                    summary_page_urls=[c["website_url"]],
-                    features=list(c.get("features", [])),
-                    claims_cited=[
-                        ClaimCitedByURL(
-                            category=claim["category"],
-                            claim=claim["content"],
-                            claim_page_url=claim.get("source_url") or c["website_url"],
-                        )
-                        for claim in c["claims"]
-                    ],
-                )
-                for c in competitors
-            ],
+            baseline_claims.append(ClaimCitedByURL(
+                category="differentiator",
+                claim=f"Supported frameworks: {', '.join(frameworks)}",
+                claim_page_url=scadable_url,
+            ))
+        baseline = ExtractedInformationByURL(
+            company_name=baseline_name,
+            summary=baseline_context.get("summary", ""),
+            summary_page_urls=[scadable_url],
+            claims_cited=baseline_claims,
+            job_postings=[],
+            conflicting_data=ConflictEntry(company_name=baseline_name, conflicts=[]),
+            crawl_time_string=_comparison_time(),
         )
 
+        comparison_competitors = []
+        for competitor in competitors:
+            stored = competitor.get("extracted_information")
+            if isinstance(stored, dict):
+                # Fully source-backed, including pricing, integrations, jobs,
+                # and conflicting-data citations from extraction.
+                facts = ExtractedInformationByURL.model_validate(stored)
+                # The DB's canonical competitor name must be used for scores.
+                facts = facts.model_copy(update={"company_name": competitor["company_name"]})
+            else:
+                # Historical D2 records lack the full extracted-information
+                # schema. Keep old research usable until it is refreshed.
+                website = competitor["website_url"]
+                claims = []
+                for row in competitor.get("claims", []):
+                    if row.get("category") not in {"strength", "weakness", "feature", "differentiator", "pricing", "integrations", "target_customers"}:
+                        continue
+                    claims.append(ClaimCitedByURL(
+                        category=row["category"],
+                        claim=row["content"],
+                        claim_page_url=row.get("source_url") or website,
+                    ))
+                for feature in competitor.get("features", []):
+                    if isinstance(feature, str) and feature.strip() and not any(
+                        claim.category == "feature" and claim.claim == feature for claim in claims
+                    ):
+                        claims.append(ClaimCitedByURL(
+                            category="feature", claim=feature, claim_page_url=website,
+                        ))
+                facts = ExtractedInformationByURL(
+                    company_name=competitor["company_name"],
+                    summary=competitor.get("summary", ""),
+                    summary_page_urls=[website],
+                    claims_cited=claims,
+                    job_postings=[],
+                    conflicting_data=ConflictEntry(company_name=competitor["company_name"], conflicts=[]),
+                    crawl_time_string=competitor.get("crawl_time_string") or "",
+                )
+            comparison_competitors.append(facts)
+
         try:
-            swot = await Analyzer(client).compare(comparison_input)
+            client = _build_openai_client()
+        except Exception:
+            if os.getenv("ALLOW_MOCK_LLM", "").lower() not in {"1", "true", "yes"}:
+                raise
+            logger.exception("OpenAI comparison client unavailable; ALLOW_MOCK_LLM enabled")
+            result = await MockOpenAIAnalyzer().compare(baseline_context, competitors)
+            result["mode"] = "mock"
+            return result
+        try:
+            swot = await Analyzer(client, trace_prefix=trace_prefix).compare(
+                ComparisonInput(scadable=baseline, competitors=comparison_competitors)
+            )
+        except Exception:
+            if os.getenv("ALLOW_MOCK_LLM", "").lower() not in {"1", "true", "yes"}:
+                raise
+            logger.exception("Real comparison failed; ALLOW_MOCK_LLM enabled, using mock data")
+            result = await MockOpenAIAnalyzer().compare(baseline_context, competitors)
+            result["mode"] = "mock"
+            return result
         finally:
             await client.close()
 
+        # Each competitor SWOT should cite the company it describes. Prefer
+        # that company's own source when a finding cites multiple websites.
+        claims_by_name = {
+            company.company_name: {claim.claim_page_url for claim in company.claims_cited}
+            for company in comparison_competitors
+        }
+        competitor_swots = []
+        for block in swot.competitor_swots:
+            own_pages = claims_by_name.get(block.company_name, set())
+            competitor_swots.append({
+                "company_name": block.company_name,
+                "swot_entries": [
+                    {
+                        "category": entry.component,
+                        "content": entry.what,
+                        "source_url": next(
+                            (url for url in entry.swot_component_page_urls if url in own_pages),
+                            entry.swot_component_page_urls[0] if entry.swot_component_page_urls else None,
+                        ),
+                    }
+                    for entry in block.SWOT_entries if entry.what.strip()
+                ],
+            })
+
         return {
-            "schema_version": "backend-comparison-v2",
+            "schema_version": "backend-comparison-v4",
             "mode": "real",
             "swot_entries": [
                 {
@@ -433,6 +502,10 @@ class OpenAIAdapter:
                 if entry.what.strip()
             ],
             "scores": [score.model_dump() for score in swot.scores],
+            "feature_pairs": [pair.model_dump() for pair in swot.feature_pairs],
+            "competitor_swots": competitor_swots,
+            "conflicting_data": [item.model_dump(mode="json") for item in swot.conflicting_data],
+            "competitor_notes": [item.model_dump(mode="json") for item in swot.competitor_notes],
         }
 
 

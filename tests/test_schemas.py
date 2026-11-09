@@ -1,167 +1,113 @@
-"""Check the cited-claims schema helpers and constraints."""
+"""Schema contracts for two-stage extraction and SWOT comparison."""
 
 import pytest
 from pydantic import ValidationError
 
-from llm.analyzer import build_company_analysis
 from llm.schemas import (
     ClaimCited,
     ClaimCitedByIndex,
     ClaimCitedByURL,
-    CompanyAnalysis,
+    ConflictCitedByIndex,
+    ConflictCitedByURL,
+    ConflictEntry,
     ExtractedInformationByURL,
     JobFamily,
-    PartialCompanyAnalysisByIndex,
     PartialExtractedInformationByIndex,
-    SWOTEntry
+    SWOTEntry,
 )
 
 
-def claim(category, text, url="https://example.com/"):
+def claim(category="feature", text="Evidence collection", url="https://example.com/"):
     return ClaimCitedByURL(category=category, claim=text, claim_page_url=url)
 
 
-def index_claim(category, text, index=0):
-    return ClaimCitedByIndex(category=category, claim=text, claim_page_index=index)
-
-
-def analysis_fields(**changes):
-    """The fields CompanyAnalysis needs."""
+def extraction_fields(**overrides):
     return {
-        "company_name": "Acme", "summary": "s",
+        "company_name": "Acme",
+        "summary": "Acme collects evidence",
         "summary_page_urls": ["https://example.com/"],
-        "claims_cited": [], "features": [], **changes,
+        "job_postings": [],
+        "claims_cited": [claim()],
+        "conflicting_data": ConflictEntry(company_name="Acme", conflicts=[]),
+        "crawl_time_string": "2026-10-19 12:00:01",
+        **overrides,
     }
 
-def test_company_analysis_exposes_strengths_and_weaknesses_from_claims():
-    analysis = CompanyAnalysis(
-        **analysis_fields(claims_cited=[
-            claim("strength", "Fast"), claim("weakness", "Pricey"), claim("strength", "Reliable"),
-        ])
-    )
-    assert analysis.strengths == ["Fast", "Reliable"]
-    assert analysis.weaknesses == ["Pricey"]
+
+def partial_fields(**overrides):
+    return {
+        "summary": "Collects evidence", "summary_page_indexes": [0],
+        "job_postings": [],
+        "claims_cited": [ClaimCitedByIndex(category="feature", claim="Evidence", claim_page_index=0)],
+        "conflicting_data": [],
+        **overrides,
+    }
 
 
-def test_partial_extraction_filters_claims_by_category():
-    partial = PartialExtractedInformationByIndex(
-        summary="s", summary_page_indexes=[0], job_postings=[],
-        claims_cited=[index_claim("pricing", "Pro, $9"), index_claim("features", "Reports")],
-    )
-    assert partial.claims_in("pricing") == ["Pro, $9"]
-    assert partial.claims_in("integrations") == []
+def test_extraction_schema_contains_source_linked_fields_and_conflicts():
+    schema = ExtractedInformationByURL.model_json_schema()
+    assert set(schema["required"]) == set(extraction_fields())
+    assert ExtractedInformationByURL(**extraction_fields()).company_name == "Acme"
 
 
-def test_unknown_category_is_rejected():
+def test_extraction_requires_all_fields():
+    for missing in extraction_fields():
+        fields = extraction_fields()
+        del fields[missing]
+        with pytest.raises(ValidationError):
+            ExtractedInformationByURL(**fields)
+
+
+def test_extraction_rejects_null_company_name_and_summary():
     with pytest.raises(ValidationError):
-        ClaimCited(category="opportunity", claim="x")
+        ExtractedInformationByURL(**extraction_fields(company_name=None, summary=None))
 
 
-def test_json_schema_restricts_category_to_known_values():
-    schema = ClaimCited.model_json_schema()
-    assert set(schema["properties"]["category"]["enum"]) == {
-        "features", "target_customers", "pricing",
-        "integrations", "differentiators", "strength", "weakness", 
-        "workforce_improvement", "workforce_decline"
-    }
-
-
-def test_partial_analysis_schema_only_asks_the_model_for_new_data():
-    # The schema sent to OpenAI must not contain the fields we copy in ourselves.
-    schema = PartialCompanyAnalysisByIndex.model_json_schema()
-    assert set(schema["properties"]) == {"claims_cited"}
-    assert set(schema["required"]) == {"claims_cited"}
-
-def test_claim_citation_rejects_invalid_categrories():
-    # The ClaimCitedByIndex rejects if the "category" of claim is 
-    # not a strength, weakness, workforce_improvement, or workforce_decline
-    with pytest.raises(ValidationError) as test_error_info:
-        ClaimCitedByIndex(category="not_real_category", claim="not_real_claim", claim_page_index=0)
-
-    errors = test_error_info.value.errors()
-    assert len(errors) == 1
-    assert errors[0]["type"] == "literal_error"
-    assert errors[0]["loc"] == ("category",)
-    assert errors[0]["input"] == "not_real_category"
-
-def test_job_family_rejects_invalid_families():
-    # Tests if JobFamily construction raises an error if an invalid job family is used for construction 
-    # (not in the "Family" literals)
-    with pytest.raises(ValidationError) as test_error_info:
-        JobFamily(job_family="trainee", count=10)
-    errors = test_error_info.value.errors()
-    assert len(errors) == 1
-    assert errors[0]["type"] == "literal_error"
-    assert errors[0]["loc"] == ("job_family",)
-    assert errors[0]["input"] == "trainee"
-
-def test_swot_component_rejects_invalid_families():
-    # Tests if SWOTEntry construction raises an error if an invalid component is used for construction 
-    # (not in the "SWOTComponent" literals)
-    with pytest.raises(ValidationError) as test_error_info:
-        SWOTEntry(component="invalid-component", what="invalid entry")
-    errors = test_error_info.value.errors()
-    assert len(errors) == 1
-    assert errors[0]["type"] == "literal_error"
-    assert errors[0]["loc"] == ("component",)
-    assert errors[0]["input"] == "invalid-component"
-
-
-def test_full_analysis_schema_keeps_every_field():
-    schema = CompanyAnalysis.model_json_schema()
-    assert set(schema["properties"]) == {
-        "company_name",
-        "summary",
-        "summary_page_urls",
-        "claims_cited",
-        "features",
-    }
-
-
-def test_partial_extraction_schema_asks_for_page_numbers_and_not_the_company_name():
+def test_partial_extraction_requires_conflicts_and_page_indexes():
     schema = PartialExtractedInformationByIndex.model_json_schema()
-    assert set(schema["required"]) == {
-        "summary", "job_postings", "claims_cited", "summary_page_indexes",
-    }
+    assert set(schema["required"]) == set(partial_fields())
     assert "company_name" not in schema["properties"]
 
 
-def test_build_company_analysis_resolves_urls_and_copies_the_fields():
-    partial = PartialCompanyAnalysisByIndex(
-        claims_cited=[index_claim("strength", "Fast", index=1)]
-    )
-    facts = ExtractedInformationByURL(
-        company_name="Acme",
-        summary="Acme sells widgets",
-        summary_page_urls=["https://example.com/"],
-        job_postings=[],
-        claims_cited=[claim("features", "Reports")],
-    )
-    analysis = build_company_analysis(
-        partial, facts, ["https://example.com/a", "https://example.com/b"]
-    )
-    assert analysis.company_name == "Acme"
-    assert analysis.summary == "Acme sells widgets"
-    assert analysis.summary_page_urls == ["https://example.com/"]
-    assert analysis.strengths == ["Fast"]
-    assert analysis.claims_cited[0].claim_page_url == "https://example.com/b"
-    assert analysis.features == ["Reports"]
+def test_partial_extraction_filters_claims_by_category():
+    partial = PartialExtractedInformationByIndex(**partial_fields())
+    assert partial.claims_in("feature") == ["Evidence"]
+    assert partial.claims_in("pricing") == []
 
 
-@pytest.mark.parametrize(
-    "missing", ["company_name", "summary", "summary_page_urls", "claims_cited", "features"]
-)
-def test_full_analysis_requires_every_field(missing):
-    fields = analysis_fields()
-    del fields[missing]
+def test_claim_schema_uses_current_literal_categories():
+    schema = ClaimCited.model_json_schema()
+    assert set(schema["properties"]["category"]["enum"]) == {
+        "feature", "target_customers", "pricing", "integrations", "differentiator",
+        "strength", "weakness", "workforce_improvement", "workforce_decline",
+    }
+
+
+@pytest.mark.parametrize("category", ["features", "differentiators", "opportunity", "not_real_category"])
+def test_invalid_claim_category_rejected(category):
     with pytest.raises(ValidationError):
-        CompanyAnalysis(**fields)
+        ClaimCitedByIndex(category=category, claim="x", claim_page_index=0)
 
 
-def test_full_analysis_accepts_all_fields():
-    assert CompanyAnalysis(**analysis_fields()).company_name == "Acme"
+def test_conflicting_data_carries_two_independent_citations():
+    indexed = ConflictCitedByIndex(
+        claim_a="SOC 2 supported", claim_b="SOC 2 coming soon",
+        claim_a_page_index=0, claim_b_page_index=1,
+    )
+    assert indexed.claim_a_page_index == 0
+    assert indexed.claim_b_page_index == 1
+    resolved = ConflictCitedByURL(
+        claim_a=indexed.claim_a, claim_b=indexed.claim_b,
+        claim_a_page_URL="https://example.com/a", claim_b_page_URL="https://example.com/b",
+    )
+    assert resolved.claim_a_page_URL != resolved.claim_b_page_URL
 
 
-def test_full_analysis_rejects_null_name_and_summary():
+def test_job_family_rejects_invalid_family():
     with pytest.raises(ValidationError):
-        CompanyAnalysis(**analysis_fields(company_name=None, summary=None))
+        JobFamily(job_family="trainee", count=10)
+
+
+def test_swot_component_rejects_invalid_component():
+    with pytest.raises(ValidationError):
+        SWOTEntry(component="invalid", what="bad")

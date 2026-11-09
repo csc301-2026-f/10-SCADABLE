@@ -1,3 +1,4 @@
+
 /** Host only for display (no https://), matching the mockup. */
 export function displayWebsite(website: string): string {
   return website.replace(/^https?:\/\//, "");
@@ -48,3 +49,18 @@ export function formatRelativeFuture(iso: string | null): string {
   if (days === 1) return "in 1 day";
   return `in ${days} days`;
 }
+
+/** Readable calendar date for a scheduled refresh returned by the API. */
+export function formatRefreshDate(iso: string | null): string {
+  if (!iso) return "Not scheduled";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Not scheduled";
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+
+

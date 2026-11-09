@@ -1,8 +1,9 @@
 """Crawler interface, adapters, and realistic mock fixtures.
 
 Enables the research orchestrator to execute against real Crawl4AI instances
-via the scraper package when available, or fall back to high-fidelity mock
-fixtures during offline development and automated testing.
+via the scraper package. A failed real crawl raises ``CrawlFailedError`` so the
+run fails visibly; mock fixtures are used only in tests, or when
+``ALLOW_MOCK_CRAWLER=true`` is set for offline development.
 """
 
 import asyncio
@@ -15,6 +16,16 @@ from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
+CRAWL_FAILED_MESSAGE = "Could not crawl the competitor's website."
+
+
+class CrawlFailedError(RuntimeError):
+    """The real crawl failed; the run must not continue with made-up pages."""
+
+
+def mock_crawler_allowed() -> bool:
+    return os.environ.get("ALLOW_MOCK_CRAWLER", "").strip().lower() in {"1", "true", "yes"}
+
 
 class CrawlerProtocol(Protocol):
     """Protocol defining the scraper interface expected by the orchestrator."""
@@ -23,6 +34,8 @@ class CrawlerProtocol(Protocol):
         self,
         competitor_name: str,
         website_url: str,
+        *,
+        research_run_id: int | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -41,6 +54,8 @@ class MockCrawl4AICrawler:
         self,
         competitor_name: str,
         website_url: str,
+        *,
+        research_run_id: int | None = None,
     ) -> dict[str, Any]:
         if self.delay_seconds > 0:
             await asyncio.sleep(self.delay_seconds)
@@ -54,6 +69,8 @@ class MockCrawl4AICrawler:
         scraped_at = datetime.now(timezone.utc).isoformat()
 
         return {
+            "mode": "mock",
+            "decision_usage": {"request_count": 0, "effective_mode": "structural"},
             "competitor_name": competitor_name,
             "base_url": base_url,
             "scraped_at": scraped_at,
@@ -93,9 +110,10 @@ class MockCrawl4AICrawler:
 class Crawl4AIAdapter:
     """Adapter wrapping Yash & Jaynik's Crawl4AI implementation.
 
-    Delegates to CompetitorScraper from the scraper package when available;
-    falls back to MockCrawl4AICrawler during offline testing or when browser
-    runtimes are not provisioned.
+    Delegates to CompetitorScraper from the scraper package. If the scraper is
+    missing or the crawl fails, raises CrawlFailedError, unless
+    ALLOW_MOCK_CRAWLER is set, in which case it returns mock pages marked
+    ``"mode": "mock"``.
     """
 
     def __init__(self) -> None:
@@ -105,12 +123,15 @@ class Crawl4AIAdapter:
         self,
         competitor_name: str,
         website_url: str,
+        *,
+        research_run_id: int | None = None,
     ) -> dict[str, Any]:
         try:
             from scraper import CompetitorInput, ScraperConfig, SelectionConfig
             from scraper.environment import load_environment
             from scraper.output import competitor_directory, export_competitor
             from scraper.service import CompetitorScraper
+            from scraper.decision_tracking import DecisionTrackingContext
 
             load_environment()
 
@@ -134,7 +155,12 @@ class Crawl4AIAdapter:
                 max_pages=3,
                 selection=SelectionConfig(mode=selection_mode),
             )
-            scraper = CompetitorScraper()
+            # Each research run receives its own Decisions trace and backend correlation.
+            scraper = CompetitorScraper(
+                decision_tracking_context_factory=lambda _: DecisionTrackingContext(
+                    research_run_id=str(research_run_id) if research_run_id is not None else None,
+                ),
+            )
             result = await scraper.crawl(competitor, config)
 
             pages = [
@@ -177,20 +203,37 @@ class Crawl4AIAdapter:
 
             return {
                 "schema_version": "backend-scrape-v1",
+                "mode": "real",
                 "competitor_name": competitor_name,
                 "base_url": homepage_url,
                 "scraped_at": datetime.now(timezone.utc).isoformat(),
                 "status": result.run_status,
                 "pages": pages,
                 "summary_path": summary_path,
+                # Runtime reference must survive export failure; it is not part of
+                # result.model_dump() or the scrape summary's public schema.
+                "decision_tracking": (
+                    result.decision_tracking.model_dump(mode="json", exclude_none=True)
+                    if result.decision_tracking is not None else None
+                ),
+                "decision_usage": (
+                    result.decision_usage.model_dump(mode="json", exclude_none=True)
+                    if result.decision_usage is not None else None
+                ),
             }
-        except (ImportError, Exception) as exc:
+        except Exception as exc:
+            if not mock_crawler_allowed():
+                logger.error("Real Crawl4AI scrape failed for %s: %s", website_url, exc)
+                raise CrawlFailedError(f"{CRAWL_FAILED_MESSAGE} ({exc})") from exc
             logger.warning(
-                "Real Crawl4AI scraper unavailable or failed (%s); falling back to mock crawler.",
+                "Real Crawl4AI scraper unavailable or failed (%s); "
+                "ALLOW_MOCK_CRAWLER is set, so using mock pages.",
                 exc,
             )
-            mock = MockCrawl4AICrawler()
-            return await mock.crawl(competitor_name, website_url)
+            mock_data = await MockCrawl4AICrawler().crawl(
+                competitor_name, website_url, research_run_id=research_run_id
+            )
+            return {**mock_data, "mode": "mock"}
 
 
 def get_default_crawler() -> CrawlerProtocol:

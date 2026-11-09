@@ -118,14 +118,18 @@ HTML selectors use case-insensitive tag names; named XML namespace selectors are
 supported (use plain HTML selectors such as `svg g` instead).
 Lists replace across override layers, consistent with existing settings.
 
-Set `markdown_remove_navigation_and_footer=false` to disable default removal. Explicit
-selectors still apply; use an empty selector list to disable those too. Empty/whitespace
-input passes through, and HTML that cannot be parsed falls back to the original input.
+Set `markdown_remove_navigation_and_footer=false` to disable navigation/footer removal.
+`markdown_remove_boilerplate=true` independently removes explicit consent UI and confirmed
+carousel clones, preserving protected content and uncertain matches. See
+[optimization controls](optimizations.md). Set both automatic flags to false and use an
+empty selector list to disable all cleanup. Explicit selectors still apply otherwise.
+Empty/whitespace input passes through, and HTML that cannot be parsed falls back to the original input.
 Fatal recovery errors, such as excessive nesting, also retain the source and log a warning
 instead of silently truncating content. Boilerplate may remain on those exceptional pages.
 An exclusion that removes all readable content can produce the existing empty-content
-failure instead of reintroducing excluded content. No main-only extraction, cross-page
-deduplication or new pruning policy is enabled. `filtered_markdown` remains optional and
+failure instead of reintroducing excluded content. No main-only extraction or new
+pruning policy is enabled. Exact-body deduplication reuses assessments without deleting
+fetched Markdown files. `filtered_markdown` remains optional and
 is not substituted for the exported source-based Markdown.
 
 Old output folders are not rewritten. Run again into a fresh directory to see cleanup;

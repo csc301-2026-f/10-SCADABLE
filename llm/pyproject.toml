@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=80,<83"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# "llm" alone is taken on PyPI by an unrelated tool, so the distribution
+# gets a distinct name; the import name stays `llm`.
+name = "scadable-llm"
+version = "0.1.0"
+description = "LLM extraction, company analysis and SWOT comparison over scraper exports"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Not on PyPI: install ./scraper first (python -m pip install ./scraper ./llm).
+    "scraper==0.1.0",
+    "openai>=3.26,<4",
+    "pydantic>=2.12,<3",
+    "pydantic-settings>=2,<3",
+    "langfuse>=5,<6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4,<10", "pytest-asyncio>=1.2,<2"]
+
+# The modules sit directly in this folder, so map the `llm` package onto it.
+[tool.setuptools]
+packages = ["llm", "llm.prompts"]
+
+[tool.setuptools.package-dir]
+llm = "."

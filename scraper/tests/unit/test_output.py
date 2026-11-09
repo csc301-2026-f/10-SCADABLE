@@ -11,6 +11,78 @@ from scraper.models import DiscoveredUrl, DiscoveryEvidence
 NOW = datetime(2026, 10, 16, 14, tzinfo=UTC)
 
 
+def tracked_result():
+    from scraper.decision_tracking import DecisionTrackingReference
+
+    source = result()
+    source._decision_tracking = DecisionTrackingReference(
+        crawl_id="crawl-test",
+        trace_id="a" * 32,
+        observation_id="b" * 16,
+        model="test",
+        started_at=NOW,
+        finished_at=NOW + timedelta(seconds=1),
+        research_run_id="42",
+    )
+    return source
+
+
+def test_tracking_companion_is_published_before_summary_without_changing_contract(
+    tmp_path, monkeypatch
+):
+    from scraper import output
+
+    published = []
+    rename = output.os.rename
+
+    def publish(source, target):
+        published.append(source.name)
+        return rename(source, target)
+
+    monkeypatch.setattr(output.os, "rename", publish)
+    source = tracked_result()
+    expected = source.model_dump(mode="json")
+    summary = output.export_competitor(source, tmp_path)
+    companion = tmp_path / "example.com/decision_tracking.json"
+    assert json.loads(companion.read_text()) == source.decision_tracking.model_dump(mode="json")
+    assert published[0] == "pages"
+    assert set(published[1:-1]) == {"decision_tracking.json", "crawl_diagnostics.json"}
+    assert published[-1] == "crawl_summary.json"
+    assert summary.schema_version == "2.1"
+    assert "decision_tracking" not in summary.model_dump()
+    assert "decision_tracking" not in expected
+    assert source.finished_at == summary.finished_at
+
+
+@pytest.mark.parametrize("during", ["write", "publish"])
+def test_tracking_companion_failure_keeps_normal_export(tmp_path, monkeypatch, during, caplog):
+    from scraper import output
+
+    source = tracked_result()
+    if during == "write":
+        original = Path.write_text
+
+        def fail(path, *args, **kwargs):
+            if path.name == "decision_tracking.json":
+                raise OSError("sensitive-storage-details")
+            return original(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", fail)
+    else:
+        original = output.os.rename
+
+        def fail(path, target):
+            if path.name == "decision_tracking.json":
+                raise OSError("sensitive-storage-details")
+            return original(path, target)
+
+        monkeypatch.setattr(output.os, "rename", fail)
+    output.export_competitor(source, tmp_path)
+    assert (tmp_path / "example.com/crawl_summary.json").is_file()
+    assert not (tmp_path / "example.com/decision_tracking.json").exists()
+    assert "sensitive-storage-details" not in caplog.text
+
+
 def page(url="https://example.com/pricing", **changes):
     return ScrapedPage(
         **{
@@ -50,6 +122,7 @@ def test_export_separates_exact_cleaned_content_from_validated_summary(tmp_path)
     source = result()
     summary = export_competitor(source, tmp_path)
     folder = tmp_path / "example.com"
+    assert not (folder / "decision_tracking.json").exists()
     assert (folder / "pages/pricing.md").read_text(encoding="utf-8") == source.pages[
         0
     ].cleaned_markdown
@@ -153,7 +226,7 @@ def test_trace_is_utf8_jsonl_and_is_published_before_completion_marker(tmp_path,
     assert [
         DecisionTraceRecord.model_validate_json(line) for line in lines
     ] == source.decision_trace
-    assert published == ["pages", "decisions.jsonl", "crawl_summary.json"]
+    assert published == ["pages", "decisions.jsonl", "crawl_diagnostics.json", "crawl_summary.json"]
 
 
 def test_enabled_trace_without_decisions_is_an_empty_file(tmp_path):
@@ -518,3 +591,50 @@ def test_summary_rejects_unsafe_markdown_references(relative):
             status="success",
             crawled_at=NOW,
         )
+
+
+@pytest.mark.parametrize("failure", [None, "write", "publish"])
+def test_best_effort_diagnostics_precede_marker_and_do_not_block_export(
+    tmp_path, monkeypatch, failure
+):
+    from scraper import output
+
+    writes, published = [], []
+    original_write, original_rename = Path.write_text, output.os.rename
+
+    def write(path, *args, **kwargs):
+        writes.append(path.name)
+        if path.name == "crawl_diagnostics.json" and failure == "write":
+            raise OSError("private error body")
+        return original_write(path, *args, **kwargs)
+
+    def rename(source, target):
+        published.append(Path(source).name)
+        if Path(source).name == "crawl_diagnostics.json" and failure == "publish":
+            raise OSError("private error body")
+        return original_rename(source, target)
+
+    monkeypatch.setattr(Path, "write_text", write)
+    monkeypatch.setattr(output.os, "rename", rename)
+    source = result(
+        [
+            page(metadata={"content_fingerprint": "abc"}),
+            page(
+                "https://example.com/copy",
+                metadata={
+                    "duplicate_of": "https://example.com/pricing",
+                    "content_fingerprint": "abc",
+                },
+            ),
+        ]
+    )
+    summary = output.export_competitor(source, tmp_path)
+    assert summary.schema_version == "2.1" and len(summary.pages) == 2
+    assert (tmp_path / "example.com/crawl_summary.json").exists()
+    assert published[-1] == "crawl_summary.json"
+    assert "crawl_diagnostics.json" in writes
+    if failure is None:
+        payload = json.loads((tmp_path / "example.com/crawl_diagnostics.json").read_text())
+        assert payload["schema_version"] == "1.0"
+        assert payload["body_duplicates"][0]["representative_url"] == "https://example.com/pricing"
+        assert published.index("crawl_diagnostics.json") < published.index("crawl_summary.json")

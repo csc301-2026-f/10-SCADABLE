@@ -30,6 +30,50 @@ flowchart LR
 In structural mode, the frontier selects by section exploration without the decision
 operations. The application owns every URL choice, domain/robots check and crawl limit.
 
+## Research objective and usefulness rubrics
+
+Prompt version `company-research-v3` adds bounded category-based coverage guidance to the
+`v2` evidence rubrics. See [optimization controls](optimizations.md). The objective aligns
+collection with the downstream extraction contract. The shared default objective is:
+
+> Find company-specific evidence about products and services, target customers, pricing,
+> integrations, differentiators, commercial activity, and careers or hiring. Favor concrete
+> capabilities, stated limitations, customer evidence, and company developments that support
+> factual competitor analysis. Include articles when they reveal the company's capabilities
+> or strategy.
+
+Hiring is one topic alongside the others, with no separate priority or quota. Developments
+and articles matter when they establish company-specific facts useful to analysis. Missing
+evidence remains uncertainty; it does not establish a missing capability or actual growth.
+
+Both usefulness questions keep four ordered levels and the existing 0-3 scale, but apply
+different evidence standards:
+
+| Level | Candidate before fetching | Fetched page excerpt |
+| --- | --- | --- |
+| No apparent value | Evidence suggests unrelated/generic content without company relevance | No meaningful company evidence relevant to the objective |
+| Uncertain value | URL/link context is insufficient to judge likely value | Inconclusive excerpt or vague claims |
+| Useful information | Context indicates relevant company information | Concrete facts supporting at least one topic |
+| Substantial information | Strong signals of detailed capabilities, terms, limitations, customers or hiring | Specific details supporting cited factual analysis |
+
+Candidates are judged only from their URL and link context, without assuming page contents.
+Observed usefulness is judged from the supplied excerpt. Page length and marketing language
+alone do not establish value. A short plan restriction or named integration can be valuable;
+a promising pricing URL does not prove public prices exist. The separate novelty question
+and source-page categories are unchanged.
+
+Set `selection.objective`, use `--research-objective`, or edit the commented manual-runner
+override for a different research scope. Explicit overrides still replace the default in
+both candidate and content requests. The manual runner inherits the shared default when
+no override is supplied. Policy safeguards remain in force for custom objectives.
+
+Version `v2` changes prompt content, not ranking weights, exploration, budgets, Markdown,
+or export schemas. Existing summaries recording `v1` remain readable and retain their
+original version. Topic coverage is not guaranteed, and these changes do not repair
+downstream loss of extracted facts or workforce claims. See
+[selection verification](decision-validation.md#objective-and-rubric-comparisons) before
+making claims about improved model decisions.
+
 ## Selection behavior
 
 Homepage and sitemap links share one registry, deduplication policy, and page/depth limits.
@@ -39,7 +83,8 @@ location, and a text window around the anchor. No candidate probe requests are m
 Scoring runs after homepage/sitemap discovery, every five distinct attempts, or sooner when
 the scored queue empties. Batches end at those checkpoints, even with higher concurrency.
 At most 50 candidates per cycle are balanced across URL sections. Cached results refresh
-at most once when anchor/context evidence materially changes; identical text from another
+at most once when anchor/context evidence or approximate topic states materially change;
+these changes share one refresh allowance. Identical text from another
 parent does not consume that refresh. Refused/invalid answers leave a candidate unscored.
 
 BestFirst combines 70% model relevance, 20% section diversity, and 10% observed section
@@ -70,7 +115,7 @@ override precedence remains unchanged.
 | --- | --- |
 | `mode` | `llm`; alternative `structural` |
 | `model` | `gpt-6-luna` |
-| `objective` | Company-specific offerings, customers, differentiation, commercial activity, and observable expansion/contraction evidence |
+| `objective` | Products/services, target customers, pricing, integrations, differentiators, commercial activity and careers/hiring; favor concrete cited evidence |
 | `budget_usd` | `0.03` per competitor |
 | `exploration_fraction` | `0.20` |
 | `trace_enabled` | `false` |
@@ -166,6 +211,10 @@ Official references, verified October 18, 2026:
 - [Python request/response reference](https://developers.openai.com/api/reference/python/resources/decisions/methods/create)
 
 ## Review without paid requests
+
+For optional metadata-only Langfuse recording, see
+[Decisions cost tracking](decision-cost-tracking.md). It records dispatched attempts
+independently of the local diagnostic trace and preserves the existing budget estimates.
 
 From the `scraper` directory, use the existing project environment:
 

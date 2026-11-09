@@ -41,13 +41,13 @@ def db():
 
 
 class EmptySwotAnalyzer(MockOpenAIAnalyzer):
-    async def compare(self, baseline_context, competitors):
+    async def compare(self, baseline_context, competitors, trace_prefix=None):
         result = await super().compare(baseline_context, competitors)
         return {**result, "swot_entries": []}
 
 
 class FailedComparisonAnalyzer(MockOpenAIAnalyzer):
-    async def compare(self, baseline_context, competitors):
+    async def compare(self, baseline_context, competitors, trace_prefix=None):
         raise RuntimeError("simulated comparison failure")
 
 

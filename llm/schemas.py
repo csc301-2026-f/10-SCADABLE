@@ -7,11 +7,11 @@ from pydantic import AfterValidator, BaseModel, Field
 from scraper import CrawlExportSummary, ExportedPage
 
 Category = Literal[
-    "features",
+    "feature",
     "target_customers",
     "pricing",
     "integrations",
-    "differentiators",
+    "differentiator",
     "strength",
     "weakness",
     "workforce_improvement",
@@ -79,7 +79,6 @@ class JobCitedByURL(JobCited):
     job_page_url: str
 
 
-
 class ClaimCited(BaseModel):
     """One fact or finding about a company, with the page that supports it.
     
@@ -107,6 +106,36 @@ def _check_score_range(value: int) -> int:
     return value
 
 
+class ConflictCited(BaseModel):
+    """
+    Contains the conflicting data found (claim 1 and claim 2 conflict).
+    """
+    claim_a: str
+    claim_b: str
+
+class ConflictCitedByURL(ConflictCited):
+    """
+    Contains the conflicting data found, along with its citations (only used for final output).
+    """
+    claim_a_page_URL: str
+    claim_b_page_URL: str
+
+class ConflictCitedByIndex(ConflictCited):
+    """
+    Contains the conflicting data found, along with its citations (only used for LLM output).
+    """
+    claim_a_page_index: int
+    claim_b_page_index: int
+
+
+class ConflictEntry(BaseModel):
+    """
+    A model containing all the conflicting pieces of data found for a company.
+    """
+    company_name: str
+    conflicts: list[ConflictCitedByURL]
+
+
 # AfterValidator (not Field limits) keeps the range out of the JSON schema sent to
 # OpenAI, whose strict mode does not accept every numeric keyword.
 Score = Annotated[int, AfterValidator(_check_score_range)]
@@ -122,7 +151,6 @@ class FeatureScoreByIndex(BaseModel):
 
 class FeatureScore(BaseModel):
     """One competitor feature scored 0-10, by company name. Use this after the LLM output has been converted."""
-
     company_name: str
     feature: str
     score: Score
@@ -137,6 +165,7 @@ class PartialExtractedInformationByIndex(PartialExtractedInformation):
     summary_page_indexes: list[int]
     job_postings: list[JobCitedByIndex]
     claims_cited: list[ClaimCitedByIndex]
+    conflicting_data: list[ConflictCitedByIndex]
 
     def claims_in(self, category: Category) -> list[str]:
         return [c.claim for c in self.claims_cited if c.category == category]
@@ -150,37 +179,14 @@ class ExtractedInformationByURL(ExtractedInformation):
     summary_page_urls: list[str]
     job_postings: list[JobCitedByURL]
     claims_cited: list[ClaimCitedByURL]
+    conflicting_data: ConflictEntry
+    crawl_time_string: str
 
 class ExtractedInformationByIndex(ExtractedInformation):
-    """Used for input conversion for LLM prompt"""
+    """Used for input conversion for comparison LLM prompt."""
+    company_index: int
     job_postings: list[JobCitedByIndex]
     claims_cited: list[ClaimCitedByIndex]
-
-
-class PartialCompanyAnalysisByIndex(BaseModel):
-    """Used for LLM output schema."""
-    claims_cited: list[ClaimCitedByIndex]
-
-class CompanyAnalysis(BaseModel):
-    """Shared analysis shape for a competitor or SCADABLE."""
-
-    company_name: str
-    summary: str
-    summary_page_urls: list[str]
-    claims_cited: list[ClaimCitedByURL]
-    # The company's features, as extracted. They are scored later, in compare().
-    features: list[str]
-
-    def claims_in(self, category: Category) -> list[str]:
-        return [c.claim for c in self.claims_cited if c.category == category]
-
-    @property
-    def strengths(self) -> list[str]:
-        return self.claims_in("strength")
-
-    @property
-    def weaknesses(self) -> list[str]:
-        return self.claims_in("weakness")
 
 class CompanyAnalysisByIndex(BaseModel):
     company_index: int
@@ -195,20 +201,18 @@ class CompetitorResearchResult(BaseModel):
 
     crawl_summary: CrawlExportSummary
     extracted_information: ExtractedInformationByURL
-    analysis: CompanyAnalysis
 
 
 class ComparisonInput(BaseModel):
-    scadable: CompanyAnalysis
-    competitors: list[CompanyAnalysis]
+    scadable: ExtractedInformationByURL
+    competitors: list[ExtractedInformationByURL]
 
 class ComparisonInputByIndex(BaseModel):
-    scadable: CompanyAnalysisByIndex
-    competitors: list[CompanyAnalysisByIndex]
+    scadable: ExtractedInformationByIndex
+    competitors: list[ExtractedInformationByIndex]
 
 class CompetitorNote(BaseModel):
     """Short explanation of what one competitor means for SCADABLE."""
-
     company_name: str
     why_it_matters: str
 
@@ -227,14 +231,45 @@ class SWOTEntryByIndex(SWOTEntry):
 class SWOTEntryByURL(SWOTEntry):
     swot_component_page_urls: list[str]
 
-
+# NOTE THIS IS THE BASE CLASS FOR THE LLM OUTPUT
 class SWOTAnalysis(BaseModel):
     competitor_notes: list[CompetitorNote]
+
+# NOTE THIS IS ONLY USED FOR THE LLM OUTPUT
+class CompetitorSWOTByIndex(BaseModel):
+    """Competitor-owned findings, produced in the same comparison request."""
+    company_index: int
+    SWOT_entries: list[SWOTEntryByIndex]
+
+
+class CompetitorSWOTByURL(BaseModel):
+    company_name: str
+    SWOT_entries: list[SWOTEntryByURL]
+
+
+class FeaturePairByIndex(BaseModel):
+    """An explicitly comparable pair of already-scored feature names."""
+    company_index: int
+    competitor_feature: str
+    scadable_feature: str | None
+
+
+class FeaturePair(BaseModel):
+    company_name: str
+    competitor_feature: str
+    scadable_feature: str | None
+
 
 class SWOTAnalysisByIndex(SWOTAnalysis):
     SWOT_entries: list[SWOTEntryByIndex]
     scores: list[FeatureScoreByIndex]
+    competitor_swots: list[CompetitorSWOTByIndex] = Field(default_factory=list)
+    feature_pairs: list[FeaturePairByIndex] = Field(default_factory=list)
 
+# NOTE THIS IS USED FOR THE FINAL OUTPUT
 class SWOTAnalysisByURL(SWOTAnalysis):
     SWOT_entries: list[SWOTEntryByURL]
     scores: list[FeatureScore]
+    conflicting_data: list[ConflictEntry]
+    competitor_swots: list[CompetitorSWOTByURL] = Field(default_factory=list)
+    feature_pairs: list[FeaturePair] = Field(default_factory=list)

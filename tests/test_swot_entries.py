@@ -1,12 +1,14 @@
 """Check the rows handed to the backend for each analyzed company."""
 
-from llm.schemas import ClaimCitedByURL, CompanyAnalysis
+from llm.schemas import ClaimCitedByURL, ConflictEntry, ExtractedInformationByURL
 from llm.swot_entries import to_swot_entries
 
 
 def analysis(*claims):
-    return CompanyAnalysis(
-        company_name="Acme", summary="s", summary_page_urls=[], claims_cited=list(claims), features=[]
+    return ExtractedInformationByURL(
+        company_name="Acme", summary="s", summary_page_urls=[], claims_cited=list(claims), job_postings=[],
+        conflicting_data=ConflictEntry(company_name="Acme", conflicts=[]),
+        crawl_time_string="2026-10-19 12:00:01",
     )
 
 
@@ -32,7 +34,7 @@ def test_strengths_and_weaknesses_become_rows_with_their_own_source():
 def test_other_categories_are_not_swot_findings():
     rows = to_swot_entries(
         analysis(
-            claim("features", "Acme sells widgets and SOC1", "https://acme.com/features"),
+            claim("feature", "Acme sells widgets and SOC1", "https://acme.com/features"),
             claim("pricing", "Pro, $9/mo", "https://acme.com/pricing"),
             claim("strength", "Fast", "https://acme.com/"),
         )

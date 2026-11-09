@@ -17,7 +17,7 @@ COPY scraper ./scraper
 COPY llm ./llm
 COPY backend/app ./backend/app
 
-RUN pip install -r backend/requirements.txt ./scraper . \
+RUN pip install -r backend/requirements.txt ./scraper ./llm . \
     && python -m playwright install --with-deps chromium
 
 RUN useradd --create-home --uid 1000 appuser \

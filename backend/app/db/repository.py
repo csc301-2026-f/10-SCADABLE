@@ -32,6 +32,11 @@ class InvalidStatusTransitionError(Exception):
     pass
 
 
+class ResearchAlreadyActiveError(Exception):
+    """Prevents concurrent manual and scheduled research for one competitor."""
+    pass
+
+
 _ALLOWED_TRANSITIONS = {
     ResearchStatus.PENDING: {ResearchStatus.RUNNING, ResearchStatus.FAILED},
     ResearchStatus.RUNNING: {ResearchStatus.COMPLETED, ResearchStatus.FAILED},
@@ -250,8 +255,21 @@ def create_research_run(
     competitor_id: int,
     commit: bool = True,
 ) -> ResearchRun:
-    if db.get(Competitor, competitor_id) is None:
+    # Lock the parent row, not the latest run: it also serializes a competitor
+    # with no runs yet. The scheduler uses the same row lock.
+    competitor = db.scalar(
+        select(Competitor).where(Competitor.id == competitor_id).with_for_update()
+    )
+    if competitor is None:
         raise NotFoundError(f"Competitor {competitor_id} does not exist.")
+    active = db.scalar(
+        select(ResearchRun.id).where(
+            ResearchRun.competitor_id == competitor_id,
+            ResearchRun.status.in_((ResearchStatus.PENDING, ResearchStatus.RUNNING)),
+        ).limit(1)
+    )
+    if active is not None:
+        raise ResearchAlreadyActiveError(f"Research for {competitor.name} is already queued or running.")
 
     run = ResearchRun(
         competitor_id=competitor_id,
@@ -551,12 +569,14 @@ def save_comparison_scores_if_current(
     expected_revision: int,
     scores_by_run: Mapping[int, list[dict[str, Any]]],
     overall_entries: Iterable[Mapping[str, Any]] | None = None,
+    competitor_swots_by_run: Mapping[int, list[dict[str, Any]]] | None = None,
 ) -> bool:
     """Save only valid score updates on a matching revision.
 
-    If SWOT entries are supplied, publish them and scores atomically; a None
-    overall_entries value means an empty/failed SWOT result, so scores may be
-    saved but previously published SWOT remains stale.
+    When provided, competitor-specific findings, feature scores, and overall
+    SWOT share the same revision guard and commit. A None overall_entries
+    means an empty/failed overall SWOT; it remains stale while valid per-run
+    findings and scores may still be saved.
     """
     ensure_overall_swot_state(db)
     state = db.get(OverallSwotState, 1, with_for_update=True)
@@ -570,6 +590,14 @@ def save_comparison_scores_if_current(
             continue
         existing = run.analysis_result if isinstance(run.analysis_result, dict) else {}
         run.analysis_result = {**existing, "scores": scores}
+
+    for run_id, entries in (competitor_swots_by_run or {}).items():
+        run = db.get(ResearchRun, run_id)
+        if run is None:
+            continue
+        # Empty results deliberately clear prior competitor findings for this
+        # comparison. Replacing is safe only inside the revision guard.
+        save_swot_entries(db, run_id, entries, commit=False)
 
     if overall_entries is not None:
         replace_overall_swot(db, overall_entries, commit=False)

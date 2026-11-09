@@ -7,6 +7,7 @@ from math import floor
 from urllib.parse import urlsplit
 
 from ..config import ScraperConfig
+from ..coverage import CoverageContext
 from ..decision_models import (
     CandidateObservation,
     CandidateScore,
@@ -47,6 +48,8 @@ class UrlFrontier:
         self._mode = settings.selection.mode
         self._section_attempts = Counter()
         self._section_novelty: dict[tuple, list[float]] = {}
+        self._final_urls: dict[str, str] = {}
+        self._coverage_state: tuple = ()
         self.discover(homepage, depth=0, source="homepage", depth_basis="homepage")
 
     @property
@@ -67,6 +70,9 @@ class UrlFrontier:
         disposition, reason = decision.disposition, decision.reason
         if disposition == UrlDisposition.PENDING and record.depth > self.settings.max_depth:
             disposition, reason = UrlDisposition.DEFERRED, "depth_limit"
+        if disposition == UrlDisposition.PENDING and str(record.normalized_url) in self._final_urls:
+            disposition = UrlDisposition.SKIPPED
+            reason = "duplicate_redirect:" + self._final_urls[str(record.normalized_url)]
         self._replace(
             entry,
             disposition=disposition,
@@ -227,15 +233,20 @@ class UrlFrontier:
             raise ValueError("Unknown selection mode")
         self._mode = mode
 
-    @staticmethod
-    def _context(observations):
-        return tuple(
-            sorted(
-                {
-                    (item.anchor_text.casefold(), item.surrounding_text.casefold())
-                    for item in observations
-                }
-            )
+    def set_coverage_context(self, context: CoverageContext) -> None:
+        self._coverage_state = context.states
+
+    def _context(self, observations):
+        return (
+            self._coverage_state,
+            tuple(
+                sorted(
+                    {
+                        (item.anchor_text.casefold(), item.surrounding_text.casefold())
+                        for item in observations
+                    }
+                )
+            ),
         )
 
     def evaluation_candidates(self, limit: int = 50) -> list[DecisionCandidate]:
@@ -342,6 +353,16 @@ class UrlFrontier:
             disposition=UrlDisposition.CRAWLED if success else UrlDisposition.FAILED,
             reason=None if success else (error or "fetch_failed"),
         )
+
+    def register_final_url(self, final_url: str, representative: str) -> None:
+        """Record observed successful targets; never infer aliases from host/canonical tags."""
+        normalized = normalize_url(final_url)
+        if not self.settings.deduplicate_pages or normalized is None:
+            return
+        self._final_urls.setdefault(normalized.normalized, representative)
+        entry = self._entries.get(normalized.normalized)
+        if entry is not None:
+            self._refresh_policy(entry)
 
     def finalize(self, *, reason: str | None = None) -> None:
         reason = reason or (

@@ -14,12 +14,12 @@ Interactive docs: http://localhost:8000/docs
 ## Docker
 
 ```bash
-docker build -t live-swot-api backend
+docker build -t live-swot-api -f Dockerfile .
 docker run --env-file backend/.env -p 8000:8000 live-swot-api
 ```
 
-The container creates any missing tables (`app.db.init_db`) and then starts
-uvicorn on `$PORT` (default 8000). On Railway, set the service root directory
+The container installs the sibling scraper and LLM packages, Playwright Chromium,
+creates missing tables (`app.db.init_db`), and starts uvicorn on `$PORT` (default 8000). On Railway, set the service root directory
 to `backend` and add `DATABASE_URL` and `CORS_ORIGINS` as variables.
 
 ## API
@@ -54,3 +54,35 @@ Notes:
 ```bash
 cd backend && .venv/Scripts/python -m pytest
 ```
+
+## Automatic competitor research refreshes
+
+The backend calculates `nextRefreshAt` from persisted run history. When automatic
+refreshes are **enabled**, the profile shows the next scheduled attempt. A
+successful research run schedules the next check in 7 days by default. A failed
+run retries after 60 minutes; previous successful SWOT/analysis remains stored.
+While a run is pending/running, `nextRefreshAt` is `null`.
+
+The scheduler is **off by default** to avoid unplanned OpenAI/scraping costs.
+To enable it on Railway or locally, set:
+
+```env
+AUTO_REFRESH_ENABLED=true
+COMPETITOR_REFRESH_DAYS=7
+COMPETITOR_REFRESH_RETRY_MINUTES=60
+COMPETITOR_REFRESH_POLL_SECONDS=60
+```
+
+Keep the API running (on an always-on Railway instance); the in-process loop
+checks the PostgreSQL database every 60 seconds. It uses row locks and a
+single active run per competitor to avoid duplicate refreshes across replicas.
+Runs interrupted by a restart are marked failed after a 30-minute stale window
+and retried using the normal retry interval. No DB migration is needed;
+schedule state comes from the existing `research_runs` table. A stopped service
+cannot execute scheduled work while it is offline and will catch up on startup.
+
+The backend supports an optional `scadable_score` value per feature from the
+comparison output. Existing LLM schemas/prompts are unchanged by this work,
+so current comparison results continue returning `scadable: null` until the
+LLM team implements and supplies evidence-backed SCADABLE ratings. No scores
+are estimated or fabricated by the API.

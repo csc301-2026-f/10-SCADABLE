@@ -17,9 +17,8 @@ from llm.pipeline import analyze_export, run_pipeline
 from llm.schemas import (
     ClaimCitedByIndex,
     ClaimCitedByURL,
-    CompanyAnalysis,
+    ConflictEntry,
     ExtractedInformationByURL,
-    PartialCompanyAnalysisByIndex,
     PartialExtractedInformationByIndex,
 )
 from scraper import CompetitorInput, FetchedPage, ScraperConfig
@@ -43,9 +42,10 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
         summary="Evidence collection",
         summary_page_indexes=[0],
         job_postings=[],
+        conflicting_data=[],
         claims_cited=[
             ClaimCitedByIndex(
-                category="features",
+                category="feature",
                 claim="Evidence collection",
                 claim_page_index=0,
             ),
@@ -65,7 +65,7 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
         job_postings=[],
         claims_cited=[
             ClaimCitedByURL(
-                category="features",
+                category="feature",
                 claim="Evidence collection",
                 claim_page_url="https://example.com/",
             ),
@@ -75,34 +75,9 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
                 claim_page_url="https://example.com/pricing",
             ),
         ],
-    )
-
-    # What the model returns for the analysis. The analysis step numbers its own page list
-    # (the distinct URLs in `facts`, in first-seen order), so 0 is the homepage here too.
-    partial_analysis = PartialCompanyAnalysisByIndex(
-        claims_cited=[
-            ClaimCitedByIndex(
-                category="strength",
-                claim="Evidence collection",
-                claim_page_index=0,
-            )
-        ],
-    )
-
-    # The final analysis: name, summary and summary URLs come from `facts`, and the
-    # features are the claims categorized "features".
-    analysis = CompanyAnalysis(
-        company_name="Example",
-        summary="Evidence collection",
-        summary_page_urls=["https://example.com/"],
-        claims_cited=[
-            ClaimCitedByURL(
-                category="strength",
-                claim="Evidence collection",
-                claim_page_url="https://example.com/",
-            )
-        ],
-        features=["Evidence collection"],
+        conflicting_data=ConflictEntry(company_name="Example", conflicts=[]),
+        # The real crawl's finish time is only known after the run; filled in below.
+        crawl_time_string="",
     )
 
     class FixtureFetcher:
@@ -170,16 +145,11 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
         # Analysis must read the completed, exact Markdown export, not a second crawl.
         assert index.is_file()
         assert (index.parent / "pages/index.md").read_text(encoding="utf-8") == MARKDOWN
-        if payload["text"]["format"]["name"] == "PartialExtractedInformationByIndex":
-            # With explicit caching, the request input is [developer message, user message].
-            user_text = payload["input"][-1]["content"]
-            assert MARKDOWN in user_text and pricing in user_text
-            # Pages are cited by number, so the prompt shows page_index values and no URLs.
-            assert "page_index: 0" in user_text and "page_index: 1" in user_text
-            response = partial_facts
-        else:
-            assert payload["text"]["format"]["name"] == "PartialCompanyAnalysisByIndex"
-            response = partial_analysis
+        assert payload["text"]["format"]["name"] == "PartialExtractedInformationByIndex"
+        user_text = payload["input"][-1]["content"]
+        assert MARKDOWN in user_text and pricing in user_text
+        assert "page_index: 0" in user_text and "page_index: 1" in user_text
+        response = partial_facts
         return httpx2.Response(
             200,
             json={
@@ -248,8 +218,10 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
             analyzer=analyzer,
         )
         result = results[0]
-        assert result.analysis == analysis
-        assert result.extracted_information == facts
+        crawl_time = result.crawl_summary.finished_at.strftime("%Y-%m-%d %H:%M:%S")
+        assert result.extracted_information == facts.model_copy(
+            update={"crawl_time_string": crawl_time}
+        )
         assert result.crawl_summary.counts.successful == 2
         assert result.crawl_summary.decision_usage.effective_mode == "llm"
         assert (
@@ -264,8 +236,8 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
         assert (
             sum(path == "/v1/decisions" for path, _ in api_requests) == decision_count
         )
-        dumped = json.loads(result.model_dump_json())["analysis"]
-        assert dumped["features"] == ["Evidence collection"]
+        dumped = json.loads(result.model_dump_json())["extracted_information"]
+        assert dumped["claims_cited"][0]["claim"] == "Evidence collection"
         assert "scores" not in dumped
     finally:
         await client.close()

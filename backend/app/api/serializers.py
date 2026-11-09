@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable
 from datetime import timedelta
+import os
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -18,6 +19,9 @@ from app.api.schemas import (
     ScoreSeries,
 )
 from app.db.models import Competitor, ResearchRun, ResearchStatus, SWOTEntry
+from app.services.crawler import CRAWL_FAILED_MESSAGE
+from app.services.refresh_schedule import next_refresh_at
+from app.services.open_roles import open_roles_from_analysis
 import re
 
 _STATUS_MAP: dict[ResearchStatus, ApiResearchStatus] = {
@@ -33,7 +37,7 @@ ACTIVITY_WEEKS = 6
 SAFE_ERROR_MESSAGE = "Research failed due to an internal error."
 
 def safe_run_error(message: str | None) -> str:
-    if message == SAFE_ERROR_MESSAGE:
+    if message in (SAFE_ERROR_MESSAGE, CRAWL_FAILED_MESSAGE):
         return message
 
     if message and re.fullmatch(
@@ -81,6 +85,12 @@ def _latest_completed(runs: Iterable[ResearchRun]) -> ResearchRun | None:
 
 def _analysis(run: ResearchRun | None) -> dict[str, Any]:
     return run.analysis_result if run and isinstance(run.analysis_result, dict) else {}
+
+
+def _was_analyzed(analysis: dict[str, Any]) -> bool:
+    """True if the LLM step saved a result. The cost lookup alone doesn't count:
+    it also saves on runs that failed before analysis."""
+    return any(key != "cost" for key in analysis)
 
 
 def competitor_summary(
@@ -134,6 +144,12 @@ def competitor_profile(
     return CompetitorProfile(
         **summary.model_dump(),
         summary=text or NOT_RESEARCHED_SUMMARY,
+        open_roles=open_roles_from_analysis(analysis),
+        next_refresh_at=(
+            next_refresh_at(competitor.research_runs)
+            if os.getenv("AUTO_REFRESH_ENABLED", "false").lower() == "true"
+            else None
+        ),
         findings=[finding_from_entry(e, competitor) for e in swot_entries],
         recent_activity=activity,
         chart_series=ChartSeries(
@@ -146,7 +162,8 @@ def competitor_profile(
 def _scores(analysis: dict[str, Any]) -> list[ScoreSeries]:
     """LLM feature scores (0-10 competition with SCADABLE) as chart bars.
 
-    The analyzer doesn't score SCADABLE itself, so ``scadable`` stays empty.
+    SCADABLE ratings are supplied by the comparison LLM, never made up in the API.
+    Older comparisons lack ``scadable_score`` and retain a null chart value.
     """
     series = []
     for item in analysis.get("scores") or []:
@@ -157,8 +174,12 @@ def _scores(analysis: dict[str, Any]) -> list[ScoreSeries]:
             continue
         if isinstance(score, bool) or not isinstance(score, (int, float)):
             continue
+        baseline_score = item.get("scadable_score")
+        if (isinstance(baseline_score, bool) or not isinstance(baseline_score, (int, float))
+                or not 0 <= baseline_score <= 10):
+            baseline_score = None
         series.append(
-            ScoreSeries(label=label.strip(), competitor=min(max(score, 0), 10), scadable=None)
+            ScoreSeries(label=label.strip(), competitor=min(max(score, 0), 10), scadable=baseline_score)
         )
     return series
 
@@ -237,7 +258,7 @@ def _run_steps(run: ResearchRun) -> list[RunStep]:
         return RunStep(name=name, result="Not started", status="pending")
 
     crawled = run.scraped_data is not None
-    analyzed = bool(analysis)
+    analyzed = _was_analyzed(analysis)
     return [
         step("Crawl competitor website", crawled, True),
         step(
@@ -253,7 +274,7 @@ def _run_steps(run: ResearchRun) -> list[RunStep]:
 def agent_run(run: ResearchRun, competitor_name: str) -> AgentRun:
     steps = _run_steps(run)
     skipped = bool(_analysis(run).get("skipped_llm"))
-    analyzed = bool(_analysis(run))
+    analyzed = _was_analyzed(_analysis(run))
     return AgentRun(
         id=str(run.id),
         competitor_id=str(run.competitor_id),
@@ -266,4 +287,14 @@ def agent_run(run: ResearchRun, competitor_name: str) -> AgentRun:
         finished_at=run.completed_at,
         steps=steps,
         error_message=safe_run_error(run.error_message) if run.status == ResearchStatus.FAILED else None,
+        cost_usd=_cost_usd(run),
     )
+
+
+def _cost_usd(run: ResearchRun) -> float | None:
+    """OpenAI cost looked up from Langfuse a few minutes after the run; None until then."""
+    cost = _analysis(run).get("cost")
+    usd = cost.get("usd") if isinstance(cost, dict) and cost.get("complete") is True else None
+    if isinstance(usd, bool) or not isinstance(usd, (int, float)):
+        return None
+    return float(usd)

@@ -23,11 +23,9 @@ async def analyze_export(
     """Analyze an existing bundle without crawling. The caller owns the LLM client."""
     data = await asyncio.to_thread(load_analysis_input, summary_path)
     facts = await analyzer.extract_information(data)
-    analysis = await analyzer.analyze_company(facts)
     return CompetitorResearchResult(
         crawl_summary=data.crawl_summary,
-        extracted_information=facts,
-        analysis=analysis,
+        extracted_information=facts
     )
 
 
@@ -147,7 +145,7 @@ async def run_comparison(
         scraper=scraper,
     )
     by_homepage = {
-        str(result.crawl_summary.homepage_url): result.analysis for result in results
+        str(result.crawl_summary.homepage_url): result.extracted_information for result in results
     }
     return await analyzer.compare(
         ComparisonInput(

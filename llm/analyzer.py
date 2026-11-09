@@ -6,34 +6,38 @@ from llm.prompts.comparison import (
     build_comparison_user_prompt,
 )
 from llm.prompts.competitor import (
-    COMPANY_ANALYSIS_SYSTEM_PROMPT,
     DATA_EXTRACTION_SYSTEM_PROMPT,
-    build_company_user_prompt,
     build_extraction_user_prompt,
 )
 from llm.schemas import (
     AnalysisInput,
     ClaimCitedByURL,
     ClaimCitedByIndex,
-    PartialCompanyAnalysisByIndex,
+    ConflictCitedByURL,
+    ConflictEntry,
     PartialExtractedInformationByIndex,
-    CompanyAnalysis,
-    CompanyAnalysisByIndex,
     ComparisonInput,
     ComparisonInputByIndex,
-    JobCitedByURL,
     JobCitedByIndex,
-    ExtractedInformationByURL,
+    JobCitedByURL,
     ExtractedInformationByIndex,
+    ExtractedInformationByURL,
     FeatureScore,
     FeatureScoreByIndex,
     SWOTAnalysisByIndex,
     SWOTAnalysisByURL,
     SWOTEntryByURL,
-    SWOTEntryByIndex
+    SWOTEntryByIndex,
+    CompetitorSWOTByIndex,
+    CompetitorSWOTByURL,
+    FeaturePairByIndex,
+    FeaturePair,
 )
 
-def _validate_swot_citations(company_urls: list[list[str]], entries: list[SWOTEntryByIndex]) -> None:
+def _validate_swot_citations(
+    company_urls: list[list[str]], entries: list[SWOTEntryByIndex],
+    *, owner_index: int = 0,
+) -> None:
     for entry in entries:
         if not entry.swot_citations:
             raise ValueError("A SWOT entry must cite at least one page.")
@@ -44,25 +48,71 @@ def _validate_swot_citations(company_urls: list[list[str]], entries: list[SWOTEn
             if not 0 <= page < len(company_urls[company]):
                 raise ValueError(f"Page number {page} does not exist for company {company}.")
         if entry.component in ("strength", "weakness") and not any(
-            c.swot_component_company_index == 0 for c in entry.swot_citations
+            c.swot_component_company_index == owner_index for c in entry.swot_citations
         ):
-            raise ValueError("A strength or weakness must cite at least one SCADABLE page.")
-
-def _validate_feature_scores(company_count: int, scores: list[FeatureScoreByIndex]) -> None:
-    """Scores belong to competitors only: company 0 is SCADABLE and is the baseline, never scored."""
-    for score in scores:
-        if not 1 <= score.company_index < company_count:
             raise ValueError(
-                f"Score company index {score.company_index} is not a competitor "
-                f"(valid: 1 to {company_count - 1})."
+                "A strength or weakness must cite at least one page from its subject company."
             )
 
-def _company_by_index(position: int, company: CompanyAnalysis, url_index) -> CompanyAnalysisByIndex:
-    return CompanyAnalysisByIndex(
+def _validate_feature_scores(company_count: int, scores: list[FeatureScoreByIndex]) -> None:
+    """Scores may belong to any company, including SCADABLE (index 0)."""
+    for score in scores:
+        if not 0 <= score.company_index < company_count:
+            raise ValueError(
+                f"Score company index {score.company_index} is out of range "
+                f"(valid: 0 to {company_count - 1})."
+            )
+
+def _validate_competitor_swots(
+    company_urls: list[list[str]], blocks: list[CompetitorSWOTByIndex],
+) -> None:
+    seen: set[int] = set()
+    for block in blocks:
+        index = block.company_index
+        if not 1 <= index < len(company_urls):
+            raise ValueError(f"Competitor SWOT company index {index} is out of range.")
+        if index in seen:
+            raise ValueError(f"Duplicate competitor SWOT for company index {index}.")
+        seen.add(index)
+        _validate_swot_citations(company_urls, block.SWOT_entries, owner_index=index)
+
+
+def _validate_feature_pairs(
+    company_count: int, scores: list[FeatureScoreByIndex],
+    pairs: list[FeaturePairByIndex],
+) -> None:
+    scored = {(s.company_index, s.feature) for s in scores}
+    seen: set[tuple[int, str]] = set()
+    for pair in pairs:
+        if not 1 <= pair.company_index < company_count:
+            raise ValueError(f"Feature pair company index {pair.company_index} is out of range.")
+        key = (pair.company_index, pair.competitor_feature)
+        if key not in scored:
+            raise ValueError(f"Feature pair references unscored competitor feature: {key!r}.")
+        if key in seen:
+            raise ValueError(f"Duplicate feature pair for {key!r}.")
+        seen.add(key)
+        if pair.scadable_feature is not None and (0, pair.scadable_feature) not in scored:
+            raise ValueError("Feature pair references an unscored SCADABLE feature.")
+
+
+def _extraction_by_index(position: int, company: ExtractedInformationByURL, url_index: list[dict[str, int]]) -> ExtractedInformationByIndex:
+    """
+    A helper function to build an Extract
+    """
+    return ExtractedInformationByIndex(
         company_index=position,
         company_name=company.company_name,
         summary=company.summary,
-        features=company.features,
+        job_postings=[
+            JobCitedByIndex(
+                role=j.role, 
+                category=j.category,
+                job_families=j.job_families,
+                job_page_index=url_index[position][j.job_page_url]   
+            )
+            for j in company.job_postings
+        ],
         claims_cited=[
             ClaimCitedByIndex(
                 category=c.category,
@@ -81,73 +131,56 @@ def _validate_citations(*, last_index: int, index_directory: dict[str, list]):
 
 
 class Analyzer:
-    def __init__(self, client: OpenAIClient) -> None:
+    def __init__(self, client: OpenAIClient, trace_prefix: str | None = None) -> None:
+        """trace_prefix names each call "{prefix}:{step}" for cost lookups (e.g. "run-42");
+        without it, calls are named from the company and crawl time."""
         self.client = client
+        self.trace_prefix = trace_prefix
+
+    def _observation_name(self, step: str, default: str) -> str:
+        return f"{self.trace_prefix}:{step}" if self.trace_prefix else default
 
     async def extract_information(self, data: AnalysisInput) -> ExtractedInformationByURL:
         page_urls = [str(p.source.url) for p in data.pages]
-
+        crawl_time_str = data.crawl_summary.finished_at.strftime("%Y-%m-%d %H:%M:%S")
         partial = await self.client.generate_structured(
             instructions=DATA_EXTRACTION_SYSTEM_PROMPT,
             input_text=build_extraction_user_prompt(data),
             output_schema=PartialExtractedInformationByIndex,
+            observation_name=self._observation_name(
+                "extraction", data.company_name + "-extraction-" + crawl_time_str
+            ),
         )
         
         _validate_citations(
             last_index=len(page_urls) - 1,
             index_directory={"Claim": [p.claim_page_index for p in partial.claims_cited], 
                             "Job posting": [p.job_page_index for p in partial.job_postings],
-                            "Summary": partial.summary_page_indexes
+                            "Summary": partial.summary_page_indexes,
+                            "Conflicting data": [c.claim_a_page_index for c in partial.conflicting_data] + [c.claim_b_page_index for c in partial.conflicting_data]
                             }
+
         )
         result = ExtractedInformationByURL(company_name=data.company_name, 
                                       summary=partial.summary,
                                       summary_page_urls=[page_urls[p] for p in partial.summary_page_indexes], 
                                       job_postings=[JobCitedByURL(role=job.role, category=job.category, job_families=job.job_families, job_page_url=page_urls[job.job_page_index]) for job in partial.job_postings],
-                                      claims_cited=[ClaimCitedByURL(category=c.category, claim=c.claim, claim_page_url=page_urls[c.claim_page_index]) for c in partial.claims_cited])
-        return result
-
-    async def analyze_company(self, data: ExtractedInformationByURL) -> CompanyAnalysis:
-        """
-        Analyzes the company based on its website data extracted and stored "data".
-        """
-        # Stores all distinct URLs from the input
-        urls = list(dict.fromkeys(                  # distinct, in first-seen order
-            [c.claim_page_url for c in data.claims_cited]
-            + [j.job_page_url for j in data.job_postings]
-            + data.summary_page_urls
-        ))
-        url_index = {url: i for i, url in enumerate(urls)}
-
-        llm_input = ExtractedInformationByIndex(company_name=data.company_name, 
-                                                       summary=data.summary, 
-                                                       job_postings=[JobCitedByIndex(role=d.role, 
-                                                                                     category=d.category, 
-                                                                                     job_families=d.job_families,
-                                                                                     job_page_index=url_index[d.job_page_url]) for d in data.job_postings],
-                                                        claims_cited=[ClaimCitedByIndex(category=c.category, claim=c.claim, claim_page_index=url_index[c.claim_page_url]) for c in data.claims_cited])
-        partial = await self.client.generate_structured(
-            instructions=COMPANY_ANALYSIS_SYSTEM_PROMPT,
-            input_text=build_company_user_prompt(llm_input),
-            output_schema=PartialCompanyAnalysisByIndex,
-        )
-        _validate_citations(
-            last_index=len(urls) - 1,
-            index_directory={"Claim":[p.claim_page_index for p in partial.claims_cited]}
-        )
-        result = build_company_analysis(partial, data, urls)
+                                      claims_cited=[ClaimCitedByURL(category=c.category, claim=c.claim, claim_page_url=page_urls[c.claim_page_index]) for c in partial.claims_cited],
+                                      conflicting_data=ConflictEntry(company_name=data.company_name, conflicts=[ConflictCitedByURL(claim_a=c.claim_a, claim_a_page_URL=page_urls[c.claim_a_page_index], claim_b=c.claim_b, claim_b_page_URL=page_urls[c.claim_b_page_index]) for c in partial.conflicting_data]),
+                                      crawl_time_string=crawl_time_str
+                                      )
         return result
 
     async def compare(self, data: ComparisonInput) -> SWOTAnalysisByURL:
         companies = [data.scadable, *data.competitors]
-        company_urls = [list(dict.fromkeys(c.claim_page_url for c in company.claims_cited))
+        company_urls = [list(dict.fromkeys([c.claim_page_url for c in company.claims_cited] + [j.job_page_url for j in company.job_postings]))
                         for company in companies]
 
         url_index = [{url: i for i, url in enumerate(urls)} for urls in company_urls]
 
         llm_input = ComparisonInputByIndex(
-            scadable=_company_by_index(0, data.scadable, url_index),
-            competitors=[_company_by_index(p, c, url_index)
+            scadable=_extraction_by_index(0, data.scadable, url_index),
+            competitors=[_extraction_by_index(p, c, url_index)
                          for p, c in enumerate(data.competitors, start=1)],
         )
 
@@ -155,9 +188,34 @@ class Analyzer:
             instructions=COMPARISON_SYSTEM_PROMPT,
             input_text=build_comparison_user_prompt(llm_input),
             output_schema=SWOTAnalysisByIndex,
+            observation_name=self._observation_name(
+                "comparison", "SWOT-" + data.scadable.crawl_time_string
+            ),
         )
         _validate_swot_citations(company_urls, response.SWOT_entries)
         _validate_feature_scores(len(companies), response.scores)
+        _validate_competitor_swots(company_urls, response.competitor_swots)
+        _validate_feature_pairs(len(companies), response.scores, response.feature_pairs)
+        # A crawled job URL may be valid, but SWOT findings must be supported
+        # by a cited CLAIM, not merely a page containing a job posting.
+        claim_indexes = [
+            {url_index[i][claim.claim_page_url] for claim in company.claims_cited}
+            for i, company in enumerate(companies)
+        ]
+        all_entries = [
+            *response.SWOT_entries,
+            *(entry for block in response.competitor_swots for entry in block.SWOT_entries),
+        ]
+        for entry in all_entries:
+            for citation in entry.swot_citations:
+                if citation.swot_component_page_index not in claim_indexes[citation.swot_component_company_index]:
+                    raise ValueError("SWOT citation must reference an extracted claim page.")
+
+        def cited_urls(entry: SWOTEntryByIndex) -> list[str]:
+            return [
+                company_urls[c.swot_component_company_index][c.swot_component_page_index]
+                for c in entry.swot_citations
+            ]
 
         return SWOTAnalysisByURL(
             competitor_notes=response.competitor_notes,
@@ -165,10 +223,7 @@ class Analyzer:
                 SWOTEntryByURL(
                     component=swot.component,
                     what=swot.what,
-                    swot_component_page_urls=[
-                        company_urls[c.swot_component_company_index][c.swot_component_page_index]
-                        for c in swot.swot_citations
-                    ],
+                    swot_component_page_urls=cited_urls(swot),
                 )
                 for swot in response.SWOT_entries
             ],
@@ -180,18 +235,28 @@ class Analyzer:
                 )
                 for score in response.scores
             ],
+            conflicting_data=[data.scadable.conflicting_data] + [c.conflicting_data for c in data.competitors],
+            competitor_swots=[
+                CompetitorSWOTByURL(
+                    company_name=companies[block.company_index].company_name,
+                    SWOT_entries=[
+                        SWOTEntryByURL(
+                            component=entry.component,
+                            what=entry.what,
+                            swot_component_page_urls=cited_urls(entry),
+                        )
+                        for entry in block.SWOT_entries
+                    ],
+                )
+                for block in response.competitor_swots
+            ],
+            feature_pairs=[
+                FeaturePair(
+                    company_name=companies[pair.company_index].company_name,
+                    competitor_feature=pair.competitor_feature,
+                    scadable_feature=pair.scadable_feature,
+                )
+                for pair in response.feature_pairs
+            ],
         )
 
-
-def build_company_analysis(partial: PartialCompanyAnalysisByIndex, data: ExtractedInformationByURL, index_url: list[str]) -> CompanyAnalysis:
-    """
-    A helper function that returns the partial result into a CompanyAnalysis object, 
-    containing the company's name, summary, and source URLs for the summary.
-    """
-    return CompanyAnalysis(claims_cited=[ClaimCitedByURL(category=c.category, 
-                                                         claim=c.claim, claim_page_url=index_url[c.claim_page_index]) for c in partial.claims_cited],  
-                           summary=data.summary, 
-                           summary_page_urls=data.summary_page_urls,
-                           features=[c.claim for c in data.claims_cited if c.category == "features"],
-                           company_name=data.company_name
-                           )

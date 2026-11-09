@@ -74,6 +74,9 @@ export default function OverviewPage() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["swot-overview"],
     queryFn: getSwotOverview,
+    // A successful backend comparison can publish after competitor research
+    // finishes; keep checking while the overall findings are stale.
+    refetchInterval: (query) => query.state.data?.isStale ? 15_000 : false,
   });
 
   if (isLoading) {
