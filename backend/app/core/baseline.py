@@ -1,10 +1,7 @@
-"""SCADABLE static baseline profile for D2 competitor comparisons.
-
-For Deliverable 2, baseline product context is stored as static configuration
-rather than live GitHub repository parsing.
-"""
+"""SCADABLE fallback baseline; validated GitHub snapshots take precedence."""
 
 from typing import Any
+from copy import deepcopy
 
 SCADABLE_BASELINE: dict[str, Any] = {
     "company_name": "SCADABLE",
@@ -37,7 +34,18 @@ SCADABLE_BASELINE: dict[str, Any] = {
 }
 
 
-def get_scadable_baseline() -> dict[str, Any]:
-    """Return a defensive copy of SCADABLE baseline product context."""
-    return dict(SCADABLE_BASELINE)
+def get_scadable_baseline(db: Any = None) -> dict[str, Any]:
+    """Get the last validated GitHub snapshot, or the static bootstrap baseline.
 
+    The active snapshot is stored in PostgreSQL; passing the session allows
+    research runs and the company API to use the same data. A failed/pending
+    GitHub sync intentionally retains the last *successful* snapshot.
+    """
+    if db is not None and hasattr(db, "get"):
+        from app.db.models import GitHubFeatureState, GitHubRepositorySelection
+        selection = db.get(GitHubRepositorySelection, 1)
+        if selection is not None:
+            state = db.get(GitHubFeatureState, 1)
+            if state is not None and isinstance(state.baseline_data, dict):
+                return deepcopy(state.baseline_data)
+    return deepcopy(SCADABLE_BASELINE)

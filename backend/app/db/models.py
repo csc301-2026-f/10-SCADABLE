@@ -3,6 +3,8 @@ from datetime import datetime
 
 from sqlalchemy import (
     CheckConstraint,
+    BigInteger,
+    JSON,
     DateTime,
     Integer,
     Enum,
@@ -201,3 +203,54 @@ class SWOTEntry(Base):
             f"<SWOTEntry id={self.id} scope={self.scope.value} "
             f"category={self.category.value}>"
         )
+
+class GitHubRepositorySelection(Base):
+    """Single authorized SCADABLE repository; multi-tenant auth is out of scope."""
+
+    __tablename__ = "github_repository_selection"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    installation_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    repository_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    default_branch: Mapped[str] = mapped_column(String(255), nullable=False)
+    last_commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    sync_status: Mapped[str] = mapped_column(String(24), nullable=False, default="not_synced")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class GitHubWebhookDelivery(Base):
+    """Persistent replay protection for GitHub webhook deliveries."""
+
+    __tablename__ = "github_webhook_deliveries"
+
+    delivery_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    repository_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    commit_sha: Mapped[str] = mapped_column(String(40), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class GitHubFeatureState(Base):
+    """Chosen GitHub feature file and last successfully validated baseline.
+
+    Separate table allows automatic create_all migration on existing deployments:
+    no ALTER TABLE is needed for the older GitHub repository selection table.
+    """
+
+    __tablename__ = "github_feature_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    file_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    baseline_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    blob_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    synced_commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
