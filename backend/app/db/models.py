@@ -201,3 +201,17 @@ class SWOTEntry(Base):
             f"<SWOTEntry id={self.id} scope={self.scope.value} "
             f"category={self.category.value}>"
         )
+
+class ScrapingSettings(Base):
+    """Single-row, deployment-wide configuration for the crawler page budget."""
+
+    __tablename__ = "scraping_settings"
+    __table_args__ = (
+        CheckConstraint(
+            "depth IN ('low', 'medium', 'high')",
+            name="ck_scraping_settings_depth",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    depth: Mapped[str] = mapped_column(String(10), nullable=False)

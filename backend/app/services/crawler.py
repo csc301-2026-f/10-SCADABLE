@@ -11,6 +11,9 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+
+from app.db.database import SessionLocal
+from app.services.scraping_settings import get_scraping_page_limit
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -150,9 +153,12 @@ class Crawl4AIAdapter:
             selection_mode = (
                 "llm" if os.environ.get("OPENAI_API_KEY", "").strip() else "structural"
             )
-            # Cap crawl to 3 pages for D2 demo efficiency
+            # Read the current shared setting for each new research crawl.
+            # An in-progress crawl retains the limit it started with.
+            with SessionLocal() as db:
+                max_pages = get_scraping_page_limit(db)
             config = ScraperConfig(
-                max_pages=3,
+                max_pages=max_pages,
                 selection=SelectionConfig(mode=selection_mode),
             )
             # Each research run receives its own Decisions trace and backend correlation.
