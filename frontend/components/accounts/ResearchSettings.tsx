@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import {
   clearOpenAiAccountKey,
@@ -20,7 +20,9 @@ const DEPTHS: ScrapingDepth[] = ["low", "medium", "high"];
 export function ResearchSettings() {
   const queryClient = useQueryClient();
   const [openaiInput, setOpenaiInput] = useState("");
-  const [depthDraft, setDepthDraft] = useState<ScrapingDepth>("low");
+  const [depthOverride, setDepthOverride] = useState<ScrapingDepth | null>(
+    null,
+  );
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -35,16 +37,13 @@ export function ResearchSettings() {
     retry: false,
   });
 
-  useEffect(() => {
-    if (scrapingQuery.data?.depth) {
-      setDepthDraft(scrapingQuery.data.depth);
-    }
-  }, [scrapingQuery.data?.depth]);
+  const depthDraft = depthOverride ?? scrapingQuery.data?.depth ?? "low";
 
   const scrapingMutation = useMutation({
     mutationFn: updateScrapingSettings,
     onSuccess: (data) => {
       queryClient.setQueryData(["settings", "scraping"], data);
+      setDepthOverride(null);
       setFormError(null);
       setFormMessage(`Scraping depth saved (${data.maxPages} pages).`);
     },
@@ -202,7 +201,7 @@ export function ResearchSettings() {
                 name="scraping-depth-profile"
                 value={depth}
                 checked={depthDraft === depth}
-                onChange={() => setDepthDraft(depth)}
+                onChange={() => setDepthOverride(depth)}
               />
               <span>
                 <strong>{depth}</strong>
