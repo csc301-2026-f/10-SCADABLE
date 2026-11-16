@@ -254,3 +254,18 @@ class GitHubFeatureState(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+class ScrapingSettings(Base):
+    """Single-row, deployment-wide configuration for the crawler page budget."""
+
+    __tablename__ = "scraping_settings"
+    __table_args__ = (
+        CheckConstraint(
+            "depth IN ('low', 'medium', 'high')",
+            name="ck_scraping_settings_depth",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    depth: Mapped[str] = mapped_column(String(10), nullable=False)

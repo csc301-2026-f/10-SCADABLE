@@ -12,7 +12,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import register_error_handlers
-from app.api.routes import company, competitors, github, runs, swot
+from app.api.routes import company, competitors, github, runs, settings, swot
+
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Accept", "Content-Type", "Authorization"],
     )
     register_error_handlers(app)
@@ -79,6 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(swot.router)
     app.include_router(company.router)
     app.include_router(github.router)
+    app.include_router(settings.router)
     return app
 
 

@@ -85,6 +85,7 @@ def test_decisions_tracking_survives_failed_bundle_export(monkeypatch):
     monkeypatch.setattr(output, "export_competitor", broken_export)
     monkeypatch.delenv("ALLOW_MOCK_CRAWLER", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("app.services.crawler.get_scraping_page_limit", lambda db: 5)
     result1 = asyncio.run(Crawl4AIAdapter().crawl(
         "Example", "https://example.com", research_run_id=123
     ))
