@@ -8,6 +8,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ComponentType, ReactNode } from "react";
+import { ResearchSettings } from "@/components/accounts/ResearchSettings";
 import {
   BrandMarkIcon,
   CompanyIcon,
@@ -16,6 +17,27 @@ import {
   RunsIcon,
 } from "./NavIcons";
 import styles from "./AppShell.module.css";
+
+function ResearchSettingsIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 3v3" />
+      <path d="M12 18v3" />
+      <path d="M3 12h3" />
+      <path d="M18 12h3" />
+      <circle cx="12" cy="12" r="4" />
+    </svg>
+  );
+}
 
 const NAV: {
   href: string;
@@ -74,7 +96,22 @@ export function AppShell({ children, clerkEnabled }: Props) {
                   </SignInButton>
                 </Show>
                 <Show when="signed-in">
-                  <UserButton />
+                  <UserButton>
+                    <UserButton.UserProfilePage
+                      label="Research settings"
+                      labelIcon={<ResearchSettingsIcon />}
+                      url="research-settings"
+                    >
+                      <ResearchSettings />
+                    </UserButton.UserProfilePage>
+                    <UserButton.MenuItems>
+                      <UserButton.Action
+                        label="Research settings"
+                        labelIcon={<ResearchSettingsIcon />}
+                        open="research-settings"
+                      />
+                    </UserButton.MenuItems>
+                  </UserButton>
                 </Show>
               </>
             )}
