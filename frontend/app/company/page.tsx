@@ -1,42 +1,15 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  getGitHubIntegrationStatus,
-  syncGitHubFeatures,
-} from "@/lib/api/github";
+import { useQuery } from "@tanstack/react-query";
+import { GitHubRepoPicker } from "@/components/company/GitHubRepoPicker";
 import { getCompanyProfile } from "@/lib/api/company";
 import { Button } from "@/components/ui/Button";
-import { Pill } from "@/components/ui/Pill";
 import styles from "./company.module.css";
 
-function formatDate(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-CA", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
 export default function CompanyPage() {
-  const queryClient = useQueryClient();
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["company-profile"],
     queryFn: getCompanyProfile,
-  });
-
-  const githubQuery = useQuery({
-    queryKey: ["github", "status"],
-    queryFn: getGitHubIntegrationStatus,
-  });
-
-  const syncMutation = useMutation({
-    mutationFn: syncGitHubFeatures,
-    onSuccess: (status) => {
-      queryClient.setQueryData(["github", "status"], status);
-      void queryClient.invalidateQueries({ queryKey: ["company-profile"] });
-    },
   });
 
   if (isLoading) {
@@ -58,7 +31,6 @@ export default function CompanyPage() {
   }
 
   const { offerings, positioningNotes, github } = data;
-  const githubStatus = githubQuery.data;
 
   return (
     <main className={styles.page}>
@@ -109,77 +81,17 @@ export default function CompanyPage() {
           className={`${styles.card} ${styles.wide}`}
           aria-labelledby="github-heading"
         >
-          <div className={styles.cardHead}>
-            <h2 id="github-heading" className={styles.cardTitle}>
-              GitHub
-            </h2>
-            <Pill>{github.statusLabel}</Pill>
-          </div>
-
-          {github.connected || github.repository ? (
-            <dl className={styles.facts}>
-              <div>
-                <dt>Repository</dt>
-                <dd>{github.repository ?? "—"}</dd>
-              </div>
-              <div>
-                <dt>Tracked file</dt>
-                <dd>{github.trackedFile ?? "—"}</dd>
-              </div>
-              <div>
-                <dt>Last synced</dt>
-                <dd>{formatDate(github.lastSyncedAt)}</dd>
-              </div>
-              <div>
-                <dt>Recent change</dt>
-                <dd>{github.recentChange ?? "None detected"}</dd>
-              </div>
-            </dl>
-          ) : (
-            <div className={styles.disconnected}>
-              <p className={styles.empty}>
-                Connect a GitHub App repository to keep SCADABLE’s product
-                features in sync for competitor comparisons.
-              </p>
-            </div>
-          )}
-
-          {githubStatus?.message ? (
-            <p className={styles.empty}>{githubStatus.message}</p>
-          ) : null}
-
-          {syncMutation.isError ? (
-            <p className={styles.syncError} role="alert">
-              {syncMutation.error instanceof Error
-                ? syncMutation.error.message
-                : "GitHub sync failed."}
-            </p>
-          ) : null}
-          {syncMutation.isSuccess ? (
-            <p className={styles.syncOk} role="status">
-              GitHub sync requested.
-            </p>
-          ) : null}
-
-          <div className={styles.githubActions}>
-            <Button
-              type="button"
-              disabled={syncMutation.isPending}
-              onClick={() => syncMutation.mutate()}
-            >
-              {syncMutation.isPending ? "Syncing…" : "Sync from GitHub"}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                void refetch();
-                void githubQuery.refetch();
-              }}
-            >
-              Refresh status
-            </Button>
-          </div>
+          <GitHubRepoPicker
+            companyStatusLabel={github.statusLabel}
+            companyConnected={github.connected}
+            companyRepository={github.repository}
+            companyTrackedFile={github.trackedFile}
+            companyLastSyncedAt={github.lastSyncedAt}
+            companyRecentChange={github.recentChange}
+            onCompanyRefresh={() => {
+              void refetch();
+            }}
+          />
         </section>
       </div>
     </main>
