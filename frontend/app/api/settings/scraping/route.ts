@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { backendFetch } from "@/lib/server/backend";
+import { requireSettingsAdmin } from "@/lib/server/requireAdmin";
 
 export const dynamic = "force-dynamic";
 
@@ -12,23 +13,35 @@ function mapBody(data: { depth: ScrapingDepth; max_pages?: number; maxPages?: nu
   };
 }
 
+function missingBackendResponse(err: unknown) {
+  const message = err instanceof Error ? err.message : "Backend URL not configured.";
+  return NextResponse.json({ detail: message }, { status: 503 });
+}
+
 export async function GET() {
-  const response = await backendFetch("/settings/scraping");
-  const text = await response.text();
-  if (!response.ok) {
-    return new NextResponse(text || "Failed to load scraping settings", {
-      status: response.status,
-    });
+  try {
+    const response = await backendFetch("/settings/scraping");
+    const text = await response.text();
+    if (!response.ok) {
+      return new NextResponse(text || "Failed to load scraping settings", {
+        status: response.status,
+      });
+    }
+    const data = JSON.parse(text) as {
+      depth: ScrapingDepth;
+      max_pages?: number;
+      maxPages?: number;
+    };
+    return NextResponse.json(mapBody(data));
+  } catch (err) {
+    return missingBackendResponse(err);
   }
-  const data = JSON.parse(text) as {
-    depth: ScrapingDepth;
-    max_pages?: number;
-    maxPages?: number;
-  };
-  return NextResponse.json(mapBody(data));
 }
 
 export async function PUT(request: Request) {
+  const denied = await requireSettingsAdmin();
+  if (denied) return denied;
+
   const token = process.env.SCRAPING_SETTINGS_ADMIN_TOKEN?.trim();
   if (!token) {
     return NextResponse.json(
@@ -54,27 +67,31 @@ export async function PUT(request: Request) {
     );
   }
 
-  const response = await backendFetch("/settings/scraping", {
-    method: "PUT",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ depth: body.depth }),
-  });
-
-  const text = await response.text();
-  if (!response.ok) {
-    return new NextResponse(text || "Failed to update scraping settings", {
-      status: response.status,
+  try {
+    const response = await backendFetch("/settings/scraping", {
+      method: "PUT",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ depth: body.depth }),
     });
-  }
 
-  const data = JSON.parse(text) as {
-    depth: ScrapingDepth;
-    max_pages?: number;
-    maxPages?: number;
-  };
-  return NextResponse.json(mapBody(data));
+    const text = await response.text();
+    if (!response.ok) {
+      return new NextResponse(text || "Failed to update scraping settings", {
+        status: response.status,
+      });
+    }
+
+    const data = JSON.parse(text) as {
+      depth: ScrapingDepth;
+      max_pages?: number;
+      maxPages?: number;
+    };
+    return NextResponse.json(mapBody(data));
+  } catch (err) {
+    return missingBackendResponse(err);
+  }
 }

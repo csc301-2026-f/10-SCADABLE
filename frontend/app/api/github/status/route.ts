@@ -87,12 +87,19 @@ export async function GET() {
     );
   }
 
-  const response = await backendFetch("/github/status", {
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  let response: Response;
+  try {
+    response = await backendFetch("/github/status", {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Backend URL not configured.";
+    return NextResponse.json(emptyStatus(message));
+  }
 
   if (response.status === 404 || response.status === 204) {
     return NextResponse.json(emptyStatus("No GitHub repository selected yet."));

@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { backendFetch } from "@/lib/server/backend";
+import { requireSettingsAdmin } from "@/lib/server/requireAdmin";
 
 export const dynamic = "force-dynamic";
 
 export async function POST() {
+  const denied = await requireSettingsAdmin();
+  if (denied) return denied;
+
   const token = process.env.GITHUB_INTEGRATION_ADMIN_TOKEN?.trim();
   if (!token) {
     return NextResponse.json(
@@ -15,13 +19,20 @@ export async function POST() {
     );
   }
 
-  const response = await backendFetch("/github/sync", {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  let response: Response;
+  try {
+    response = await backendFetch("/github/sync", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Backend URL not configured.";
+    return NextResponse.json({ detail: message }, { status: 503 });
+  }
 
   const text = await response.text();
   if (!response.ok) {
@@ -41,15 +52,23 @@ export async function POST() {
   }
 
   if (!payload) {
-    const statusResponse = await backendFetch("/github/status", {
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    const statusText = await statusResponse.text();
-    if (statusResponse.ok && statusText.trim() && statusText.trim() !== "null") {
-      payload = JSON.parse(statusText) as Record<string, unknown>;
+    try {
+      const statusResponse = await backendFetch("/github/status", {
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const statusText = await statusResponse.text();
+      if (
+        statusResponse.ok &&
+        statusText.trim() &&
+        statusText.trim() !== "null"
+      ) {
+        payload = JSON.parse(statusText) as Record<string, unknown>;
+      }
+    } catch {
+      payload = null;
     }
   }
 

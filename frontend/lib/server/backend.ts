@@ -1,13 +1,17 @@
 /**
  * Absolute backend base URL for Next.js server routes.
- * Prefer BACKEND_API_URL; fall back to the Railway production host.
+ * Requires BACKEND_API_URL (or LIVE_API_PROXY_TARGET) — no hardcoded host.
  */
 export function getBackendBaseUrl(): string {
   const fromEnv =
     process.env.BACKEND_API_URL?.trim() ||
     process.env.LIVE_API_PROXY_TARGET?.trim();
-  if (fromEnv) return fromEnv.replace(/\/$/, "");
-  return "https://backend-d3-production.up.railway.app";
+  if (!fromEnv) {
+    throw new Error(
+      "BACKEND_API_URL is not set. Point it at the current Railway API (never hardcode a past deploy).",
+    );
+  }
+  return fromEnv.replace(/\/$/, "");
 }
 
 export async function backendFetch(
