@@ -119,8 +119,9 @@ class Crawl4AIAdapter:
     ``"mode": "mock"``.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, account_openai_key: str | None = None) -> None:
         self._underlying: Any = None
+        self._account_openai_key = account_openai_key
 
     async def crawl(
         self,
@@ -162,11 +163,39 @@ class Crawl4AIAdapter:
                 selection=SelectionConfig(mode=selection_mode),
             )
             # Each research run receives its own Decisions trace and backend correlation.
-            scraper = CompetitorScraper(
-                decision_tracking_context_factory=lambda _: DecisionTrackingContext(
+            # In LLM selection mode the scraper normally uses OPENAI_API_KEY
+            # from process environment. Override its SDK *factory* for this
+            # request instead; never mutate os.environ while other users run.
+            # Structural mode is still free if no deployment key exists.
+            decision_factory = None
+            if self._account_openai_key is not None and selection_mode == "llm":
+                from openai import AsyncOpenAI
+                from scraper.decisions import OpenAIDecisionProvider
+
+                def account_client_factory(**kwargs: Any):
+                    return AsyncOpenAI(
+                        **{**kwargs, "api_key": self._account_openai_key}
+                    )
+
+                def decision_factory(_competitor, settings, limiter):
+                    return OpenAIDecisionProvider(
+                        settings.selection,
+                        request_limiter=limiter,
+                        client_factory=account_client_factory,
+                        tracking_context=DecisionTrackingContext(
+                            research_run_id=str(research_run_id)
+                            if research_run_id is not None else None,
+                        ),
+                    )
+
+            scraper_kwargs = {
+                "decision_tracking_context_factory": lambda _: DecisionTrackingContext(
                     research_run_id=str(research_run_id) if research_run_id is not None else None,
                 ),
-            )
+            }
+            if decision_factory is not None:
+                scraper_kwargs["decision_provider_factory"] = decision_factory
+            scraper = CompetitorScraper(**scraper_kwargs)
             result = await scraper.crawl(competitor, config)
 
             pages = [

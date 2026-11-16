@@ -16,6 +16,9 @@ from app.db import repository as repo
 from app.db.database import get_db
 from app.db.models import ResearchStatus
 from app.services import orchestrator
+from app.services.account_research import get_account_research_key
+from app.services.crawler import Crawl4AIAdapter
+from app.services.llm import OpenAIAdapter
 
 router = APIRouter(prefix="/competitors", tags=["competitors"])
 
@@ -68,6 +71,7 @@ def create_competitor(
     body: CreateCompetitorInput,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    account_openai_key: str | None = Depends(get_account_research_key),
 ) -> CreateCompetitorResult:
     """Add a competitor and queue its first research run.
 
@@ -75,7 +79,16 @@ def create_competitor(
     sources are validated but not stored yet (no DB column for them).
     """
     competitor = repo.create_competitor(db, name=body.name, website_url=body.data_sources[0])
-    run = orchestrator.trigger_research_task(competitor.id, background_tasks, db)
+    # Account keys are forwarded only by an authenticated Next.js server
+    # gateway. Without them, keep the existing deployment-key behavior.
+    if account_openai_key is None:
+        run = orchestrator.trigger_research_task(competitor.id, background_tasks, db)
+    else:
+        run = orchestrator.trigger_research_task(
+            competitor.id, background_tasks, db,
+            crawler=Crawl4AIAdapter(account_openai_key=account_openai_key),
+            analyzer=OpenAIAdapter(account_openai_key=account_openai_key),
+        )
     return CreateCompetitorResult(
         competitor=serializers.competitor_summary(competitor, run),
         queued_run_id=str(run.id),
@@ -106,6 +119,7 @@ def rerun_research(
     background_tasks: BackgroundTasks,
     competitor_id: int = CompetitorId,
     db: Session = Depends(get_db),
+    account_openai_key: str | None = Depends(get_account_research_key),
 ) -> CompetitorProfile:
     """Queue a new research run; returns the profile with status ``pending``."""
     competitor = _get_competitor_or_404(db, competitor_id)
@@ -113,6 +127,13 @@ def rerun_research(
     if latest is not None and latest.status in (ResearchStatus.PENDING, ResearchStatus.RUNNING):
         raise ConflictError(f"Research for {competitor.name} is already {latest.status.value}.")
 
-    orchestrator.trigger_research_task(competitor.id, background_tasks, db)
+    if account_openai_key is None:
+        orchestrator.trigger_research_task(competitor.id, background_tasks, db)
+    else:
+        orchestrator.trigger_research_task(
+            competitor.id, background_tasks, db,
+            crawler=Crawl4AIAdapter(account_openai_key=account_openai_key),
+            analyzer=OpenAIAdapter(account_openai_key=account_openai_key),
+        )
     db.expire(competitor, ["research_runs"])
     return _build_profile(db, competitor)

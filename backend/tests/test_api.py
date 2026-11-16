@@ -576,3 +576,67 @@ def test_profile_next_refresh_is_only_shown_when_scheduler_enabled(client, store
     monkeypatch.setenv("AUTO_REFRESH_ENABLED", "true")
     scheduled = client.get(f"/competitors/{competitor.id}").json()["nextRefreshAt"]
     assert scheduled == "2026-10-26T12:01:30Z"
+
+
+# ---------------------------------------------------------------------------
+# Account-key bridge: only a trusted server may select per-request credentials.
+# ---------------------------------------------------------------------------
+
+
+def test_account_research_key_rejected_without_bridge_token(client, monkeypatch):
+    account_key = "sk-test-account-000000000000000000"
+    monkeypatch.setenv("ACCOUNT_RESEARCH_BRIDGE_TOKEN", "trusted-bridge")
+    response = client.post(
+        "/competitors",
+        json={"name": "Key Test", "dataSources": ["https://key-test.example"]},
+        headers={"X-Scadable-Account-OpenAI-Key": account_key},
+    )
+    assert response.status_code == 401
+    assert account_key not in response.text
+
+
+def test_account_key_is_scoped_to_triggered_run(client, store, monkeypatch):
+    from app.services.crawler import Crawl4AIAdapter
+    from app.services.llm import OpenAIAdapter
+
+    account_key = "sk-test-account-000000000000000000"
+    monkeypatch.setenv("ACCOUNT_RESEARCH_BRIDGE_TOKEN", "trusted-bridge")
+    captured = []
+
+    def trigger(competitor_id, background_tasks, db, **kwargs):
+        captured.append(kwargs)
+        return store.add_run(store.competitors[competitor_id], ResearchStatus.PENDING)
+
+    monkeypatch.setattr(orchestrator, "trigger_research_task", trigger)
+    create = client.post(
+        "/competitors",
+        json={"name": "Key Test", "dataSources": ["https://key-test.example"]},
+        headers={
+            "X-Scadable-Account-OpenAI-Key": account_key,
+            "X-Scadable-Research-Bridge-Token": "trusted-bridge",
+        },
+    )
+    assert create.status_code == 201, create.text
+    assert account_key not in create.text
+    assert isinstance(captured[-1]["crawler"], Crawl4AIAdapter)
+    assert isinstance(captured[-1]["analyzer"], OpenAIAdapter)
+    assert captured[-1]["crawler"]._account_openai_key == account_key
+    assert captured[-1]["analyzer"]._account_openai_key == account_key
+
+    # The next request has no headers; it must NOT inherit the previous key.
+    cid = create.json()["competitor"]["id"]
+    store.runs[1].status = ResearchStatus.COMPLETED
+    other = client.post(f"/competitors/{cid}/rerun")
+    assert other.status_code == 202, other.text
+    assert captured[-1] == {}
+
+
+def test_rerun_account_key_requires_bridge(client, store, monkeypatch):
+    competitor = store.add_competitor("Other", "https://other.example")
+    monkeypatch.setenv("ACCOUNT_RESEARCH_BRIDGE_TOKEN", "trusted-bridge")
+    response = client.post(
+        f"/competitors/{competitor.id}/rerun",
+        headers={"X-Scadable-Account-OpenAI-Key": "sk-test-account-000000000000000000"},
+    )
+    assert response.status_code == 401
+    assert len(store.runs) == 0

@@ -53,14 +53,19 @@ def _pick_source_url(urls: list[str], scadable_url: str) -> str | None:
     return urls[0] if urls else None
 
 
-def _build_openai_client() -> Any:
-    """Create the shared OpenAI client; raises if the package or key is missing."""
+def _build_openai_client(account_openai_key: str | None = None) -> Any:
+    """Build one request-scoped client; never modify process-wide credentials."""
     from llm.client import OpenAIClient
     from llm.config import Settings
+    from pydantic import SecretStr
     from scraper.environment import load_environment
 
     load_environment()
     settings = Settings()
+    if account_openai_key is not None:
+        settings = settings.model_copy(
+            update={"openai_api_key": SecretStr(account_openai_key)}
+        )
     if not settings.openai_model.strip():
         # Same model the scraper uses for page selection
         settings = settings.model_copy(update={"openai_model": "gpt-6-luna"})
@@ -216,8 +221,15 @@ class OpenAIAdapter:
     Delegates to the LLM analyzer, using mock data only when explicitly enabled.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, account_openai_key: str | None = None) -> None:
         self._underlying: Any = None
+        self._account_openai_key = account_openai_key
+
+    def _new_client(self) -> Any:
+        # Preserve default/no-override code paths and their existing mocks.
+        if self._account_openai_key is None:
+            return _build_openai_client()
+        return _build_openai_client(self._account_openai_key)
 
     async def analyze(
         self,
@@ -305,7 +317,7 @@ class OpenAIAdapter:
                     pages=deduplicate_analysis_pages(analysis_pages),
                 )
 
-            client = _build_openai_client()
+            client = self._new_client()
             try:
                 analyzer = Analyzer(client, trace_prefix=trace_prefix)
                 if trace_prefix:
@@ -443,7 +455,7 @@ class OpenAIAdapter:
             comparison_competitors.append(facts)
 
         try:
-            client = _build_openai_client()
+            client = self._new_client()
         except Exception:
             if os.getenv("ALLOW_MOCK_LLM", "").lower() not in {"1", "true", "yes"}:
                 raise
