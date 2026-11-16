@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "company_name": "SCADABLE",
+  "website_url": "https://scadable.com",
+  "domain": "Security compliance and regulatory governance SaaS",
+  "summary": "SCADABLE automates security compliance, evidence collection, and audit readiness.",
+  "supported_frameworks": [
+    "SOC 2 Type I & II",
+    "ISO 27001:2022",
+    "HIPAA",
+    "GDPR"
+  ],
+  "core_capabilities": [
+    "Continuous automated evidence collection",
+    "Audit readiness and policy mapping",
+    "Automated developer remediation guidance",
+    "Integration with cloud infrastructure and development tools"
+  ],
+  "differentiators": [
+    "Developer-oriented compliance workflows",
+    "Automated regulatory updates and tracking"
+  ]
+}

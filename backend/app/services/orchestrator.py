@@ -266,7 +266,7 @@ async def refresh_overall_swot(
             len(profiles), comparison_timeout,
         )
         comparison = await asyncio.wait_for(
-            analyzer.compare(get_scadable_baseline(), profiles, trace_prefix=trace_prefix),
+            analyzer.compare(get_scadable_baseline(db), profiles, trace_prefix=trace_prefix),
             timeout=comparison_timeout,
         )
         overall_entries = comparison.get("swot_entries", [])
@@ -421,7 +421,7 @@ async def execute_research_run(
             return completed_run
 
         # Step 5: Feed competitor Markdown + SCADABLE baseline profile to LLM
-        baseline_profile = get_scadable_baseline()
+        baseline_profile = get_scadable_baseline(db)
         logger.info("Invoking LLM SWOT synthesis for %s", competitor.name)
         analysis_result = await asyncio.wait_for(
             active_analyzer.analyze(

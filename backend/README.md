@@ -86,3 +86,15 @@ comparison output. Existing LLM schemas/prompts are unchanged by this work,
 so current comparison results continue returning `scadable: null` until the
 LLM team implements and supplies evidence-backed SCADABLE ratings. No scores
 are estimated or fabricated by the API.
+
+
+## GitHub App-backed SCADABLE feature baseline
+
+See [`docs/github-app-setup.md`](docs/github-app-setup.md) for installation,
+permissions, a versioned JSON feature manifest, protected API calls, webhook
+processing, worker settings, and test instructions. This is a **backend-only**
+integration: no frontend repository picker or client-side credentials are included.
+
+For the frontend and LLM teams, see
+[`docs/GITHUB_INTEGRATION_HANDOFF.md`](docs/GITHUB_INTEGRATION_HANDOFF.md).
+The GitHub integration branch changes only files inside `backend/`.
