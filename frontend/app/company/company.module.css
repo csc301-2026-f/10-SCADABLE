@@ -116,6 +116,25 @@
   overflow-wrap: anywhere;
 }
 
+.githubActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.syncError {
+  margin: 8px 0 0;
+  color: #a64f45;
+  font-size: 12px;
+}
+
+.syncOk {
+  margin: 8px 0 0;
+  color: #3e7f61;
+  font-size: 12px;
+}
+
 @media (max-width: 600px) {
   .facts {
     grid-template-columns: 1fr;

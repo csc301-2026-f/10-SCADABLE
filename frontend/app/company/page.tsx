@@ -1,25 +1,42 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  getGitHubIntegrationStatus,
+  syncGitHubFeatures,
+} from "@/lib/api/github";
 import { getCompanyProfile } from "@/lib/api/company";
 import { Button } from "@/components/ui/Button";
-// import { Pill } from "@/components/ui/Pill"; // restore with GitHub block
+import { Pill } from "@/components/ui/Pill";
 import styles from "./company.module.css";
 
-/*
-function formatDate(iso: string) {
+function formatDate(iso: string | null) {
+  if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-CA", {
     year: "numeric",
     month: "short",
     day: "numeric",
   });
 }
-*/
 
 export default function CompanyPage() {
+  const queryClient = useQueryClient();
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["company-profile"],
     queryFn: getCompanyProfile,
+  });
+
+  const githubQuery = useQuery({
+    queryKey: ["github", "status"],
+    queryFn: getGitHubIntegrationStatus,
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: syncGitHubFeatures,
+    onSuccess: (status) => {
+      queryClient.setQueryData(["github", "status"], status);
+      void queryClient.invalidateQueries({ queryKey: ["company-profile"] });
+    },
   });
 
   if (isLoading) {
@@ -40,14 +57,16 @@ export default function CompanyPage() {
     );
   }
 
-  const { offerings, positioningNotes /* , github */ } = data;
+  const { offerings, positioningNotes, github } = data;
+  const githubStatus = githubQuery.data;
 
   return (
     <main className={styles.page}>
       <header>
         <h1 className={styles.title}>Our company</h1>
         <p className={styles.sub}>
-          How SCADABLE is described to the research agents.
+          How SCADABLE is described to the research agents, and the GitHub
+          source used for product features.
         </p>
       </header>
 
@@ -86,7 +105,6 @@ export default function CompanyPage() {
           )}
         </section>
 
-        {/* GitHub sync — uncomment this block (+ Pill import, formatDate, github) when ready
         <section
           className={`${styles.card} ${styles.wide}`}
           aria-labelledby="github-heading"
@@ -95,14 +113,10 @@ export default function CompanyPage() {
             <h2 id="github-heading" className={styles.cardTitle}>
               GitHub
             </h2>
-            <Pill>
-              {github.connected
-                ? github.statusLabel
-                : "GitHub sync coming in D3"}
-            </Pill>
+            <Pill>{github.statusLabel}</Pill>
           </div>
 
-          {github.connected ? (
+          {github.connected || github.repository ? (
             <dl className={styles.facts}>
               <div>
                 <dt>Repository</dt>
@@ -114,11 +128,7 @@ export default function CompanyPage() {
               </div>
               <div>
                 <dt>Last synced</dt>
-                <dd>
-                  {github.lastSyncedAt
-                    ? formatDate(github.lastSyncedAt)
-                    : "—"}
-                </dd>
+                <dd>{formatDate(github.lastSyncedAt)}</dd>
               </div>
               <div>
                 <dt>Recent change</dt>
@@ -128,14 +138,49 @@ export default function CompanyPage() {
           ) : (
             <div className={styles.disconnected}>
               <p className={styles.empty}>
-                Repository sync so SCADABLE’s own changes can be compared
-                against competitor activity is coming in D3.
+                Connect a GitHub App repository to keep SCADABLE’s product
+                features in sync for competitor comparisons.
               </p>
-              <Button disabled>Connect GitHub</Button>
             </div>
           )}
+
+          {githubStatus?.message ? (
+            <p className={styles.empty}>{githubStatus.message}</p>
+          ) : null}
+
+          {syncMutation.isError ? (
+            <p className={styles.syncError} role="alert">
+              {syncMutation.error instanceof Error
+                ? syncMutation.error.message
+                : "GitHub sync failed."}
+            </p>
+          ) : null}
+          {syncMutation.isSuccess ? (
+            <p className={styles.syncOk} role="status">
+              GitHub sync requested.
+            </p>
+          ) : null}
+
+          <div className={styles.githubActions}>
+            <Button
+              type="button"
+              disabled={syncMutation.isPending}
+              onClick={() => syncMutation.mutate()}
+            >
+              {syncMutation.isPending ? "Syncing…" : "Sync from GitHub"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                void refetch();
+                void githubQuery.refetch();
+              }}
+            >
+              Refresh status
+            </Button>
+          </div>
         </section>
-        */}
       </div>
     </main>
   );
