@@ -1,0 +1,171 @@
+.page {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px;
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.title {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.sub {
+  margin: 0 0 20px;
+  color: var(--sub);
+  font-size: 14px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+}
+
+.cardTitle {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.cardHint {
+  margin: 0 0 16px;
+  color: var(--sub);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.field {
+  margin-bottom: 14px;
+}
+
+.fieldLabel {
+  display: block;
+  font-size: 12px;
+  font-weight: 650;
+  margin-bottom: 6px;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  max-width: 420px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: #fff;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.depthOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.depthOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 150px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: #fff;
+  cursor: pointer;
+}
+
+.depthOptionActive {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.depthOption input {
+  margin-top: 3px;
+}
+
+.depthOption strong {
+  display: block;
+  font-size: 13px;
+}
+
+.depthOption span {
+  display: block;
+  color: var(--sub);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.statusLine {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--sub);
+}
+
+.statusLine strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.facts {
+  margin: 0 0 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+}
+
+.facts dt {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.facts dd {
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.error {
+  margin: 0 0 10px;
+  color: #a64f45;
+  font-size: 12px;
+}
+
+.success {
+  margin: 0 0 10px;
+  color: #3e7f61;
+  font-size: 12px;
+}
+
+.mutedNote {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  .facts {
+    grid-template-columns: 1fr;
+  }
+}
