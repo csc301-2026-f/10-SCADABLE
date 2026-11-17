@@ -6,6 +6,26 @@ import {
   isDevDashboardBypassAllowed,
 } from "@/lib/auth/bypass";
 
+/** Real Clerk session only — dashboard bypass does not count. */
+export async function requireClerkSignIn(): Promise<NextResponse | null> {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ detail: "Sign in required." }, { status: 401 });
+  }
+  return null;
+}
+
+/** Signed-in Clerk user, or local dashboard bypass. */
+export async function requireSignedIn(): Promise<NextResponse | null> {
+  if (isDevDashboardBypassAllowed()) {
+    const jar = await cookies();
+    if (jar.get(DEV_DASHBOARD_BYPASS_COOKIE)?.value === "1") {
+      return null;
+    }
+  }
+  return requireClerkSignIn();
+}
+
 /**
  * Gate mutating settings / GitHub admin gateways.
  * Requires a signed-in Clerk user (or local dashboard bypass).
@@ -14,17 +34,8 @@ import {
  * (invite-only app).
  */
 export async function requireSettingsAdmin(): Promise<NextResponse | null> {
-  if (isDevDashboardBypassAllowed()) {
-    const jar = await cookies();
-    if (jar.get(DEV_DASHBOARD_BYPASS_COOKIE)?.value === "1") {
-      return null;
-    }
-  }
-
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ detail: "Sign in required." }, { status: 401 });
-  }
+  const denied = await requireSignedIn();
+  if (denied) return denied;
 
   const allowlist = (process.env.SETTINGS_ADMIN_EMAILS ?? "")
     .split(",")
@@ -33,6 +44,11 @@ export async function requireSettingsAdmin(): Promise<NextResponse | null> {
 
   if (allowlist.length === 0) {
     return null;
+  }
+
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ detail: "Sign in required." }, { status: 401 });
   }
 
   const client = await clerkClient();

@@ -204,10 +204,24 @@ export async function createCompetitor(
       queuedRunId: `run-${id}-queued`,
     };
   }
-  return apiFetch<CreateCompetitorResult>("/competitors", {
+  // Server gateway attaches Clerk privateMetadata OpenAI key + bridge token.
+  const response = await fetch("/api/research/competitors", {
     method: "POST",
-    body: input,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+    cache: "no-store",
   });
+  if (!response.ok) {
+    if (response.status >= 500) {
+      throw new Error("Something went wrong. Please try again.");
+    }
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `Request failed (${response.status})`);
+  }
+  return (await response.json()) as CreateCompetitorResult;
 }
 
 export async function deleteCompetitor(id: string): Promise<void> {
@@ -247,7 +261,21 @@ export async function rerunCompetitorResearch(
     return profile;
   }
 
-  return apiFetch<CompetitorProfile>(`/competitors/${id}/rerun`, {
-    method: "POST",
-  });
+  // Server gateway attaches Clerk privateMetadata OpenAI key + bridge token.
+  const response = await fetch(
+    `/api/research/competitors/${encodeURIComponent(id)}/rerun`,
+    {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    },
+  );
+  if (!response.ok) {
+    if (response.status >= 500) {
+      throw new Error("Something went wrong. Please try again.");
+    }
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `Request failed (${response.status})`);
+  }
+  return (await response.json()) as CompetitorProfile;
 }

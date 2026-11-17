@@ -1,9 +1,10 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { OPENAI_PRIVATE_META_KEY } from "@/lib/server/accountResearch";
 
 export const dynamic = "force-dynamic";
 
-const META_KEY = "openaiApiKey";
+const META_KEY = OPENAI_PRIVATE_META_KEY;
 
 function hintFromKey(key: string | undefined | null): string | null {
   if (!key || typeof key !== "string") return null;

@@ -104,8 +104,10 @@ export function ResearchSettings() {
           OpenAI API key
         </h1>
         <p className={styles.hint}>
-          Stored privately on your Clerk account. Research runs still use the
-          Railway deployment key until the backend supports per-user keys.
+          Stored privately on your Clerk account. When you start or rerun
+          research while signed in, this key is forwarded server-side (with the
+          bridge token). If unset, Railway’s deployment{" "}
+          <code>OPENAI_API_KEY</code> is used.
         </p>
 
         {openaiQuery.isPending ? (
