@@ -1,11 +1,13 @@
 """Research workflow orchestrator and asynchronous task runner.
 
-Coordinates the end-to-end research lifecycle for Deliverable 2:
-Add Competitor -> Trigger Crawler -> Diff Snapshot -> Invoke LLM -> Persist to DB
--> Compare SCADABLE against all competitors -> Persist overall SWOT.
+Coordinates competitor research and the incremental SCADABLE comparison:
+Add competitor -> crawl -> analyze -> store competitor data -> compare only
+changed competitor -> aggregate versioned per-competitor SWOT contributions.
 """
 
 import asyncio
+import hashlib
+import json
 import logging
 import os
 import re
@@ -33,6 +35,7 @@ from app.db.repository import (
     get_latest_swot,
     get_overall_swot,
     get_overall_swot_revision,
+    get_overall_swot_contributions,
     is_overall_swot_current,
     mark_overall_swot_stale,
     publish_overall_swot,
@@ -183,6 +186,41 @@ def _scores_by_company(
     return grouped
 
 
+def _baseline_digest(baseline: dict[str, Any]) -> str:
+    """Fingerprint the actual active GitHub/static baseline, not just its timestamp."""
+    canonical = json.dumps(baseline, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _combine_contributions(
+    contributions: dict[int, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Stable, conservative aggregation; never fabricate or rewrite LLM claims.
+
+    Identical content within a SWOT category is shown once; meaning-based
+    merging stays with the LLM team to avoid incorrectly merging distinct facts.
+    """
+    result = []
+    seen: set[tuple[str, str]] = set()
+    for competitor_id in sorted(contributions):
+        for entry in contributions[competitor_id]:
+            if not isinstance(entry, dict):
+                continue
+            category, content = entry.get("category"), entry.get("content")
+            if category not in {item.value for item in SWOTCategory} or not isinstance(content, str) or not content.strip():
+                continue
+            key = (category, " ".join(content.split()).casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append({
+                "category": category,
+                "content": content.strip(),
+                "source_url": entry.get("source_url"),
+            })
+    return result
+
+
 async def refresh_overall_swot(
     db: Session,
     analyzer: AnalyzerProtocol,
@@ -190,117 +228,138 @@ async def refresh_overall_swot(
     only_if_missing: bool = False,
     trace_prefix: str | None = None,
 ) -> None:
-    """Compare SCADABLE against every researched competitor and save the overall SWOT.
+    """Incrementally maintain SCADABLE-relative SWOT per researched competitor.
 
-    trace_prefix names the comparison's OpenAI call for cost lookups ("run-42").
-
-    Uses each competitor's latest stored strengths and weaknesses, so it makes
-    one LLM call and never re-crawls. The comparison also scores each competitor's
-    features, including competitors whose analysis found no strengths or
-    weaknesses; those scores are saved on the competitor's latest run, where the
-    competitor profile reads them. If no researched competitors remain, the
-    overall SWOT is cleared. Failed/empty comparisons leave historical rows
-    stored but invalid; the API never serves them as current findings.
+    A newly changed competitor triggers an LLM comparison ONLY for itself.
+    Existing snapshots for unrelated competitors are reused byte-for-byte.
+    Initial rollout backfills missing snapshots once (one company at a time).
+    GitHub baseline changes invalidate all snapshots through their digest.
+    After successful comparisons, scores, snapshots and the overview publish
+    atomically under the existing input-revision guard.
     """
     try:
         if only_if_missing and is_overall_swot_current(db) and get_overall_swot(db):
             return
-
-        # Refreshes only observe the input revision. Changing competitor data,
-        # not starting a comparison, is what invalidates published findings.
         revision = get_overall_swot_revision(db)
-        profiles = []
-        latest_runs: dict[str, ResearchRun] = {}
+        baseline = get_scadable_baseline(db)
+        digest = _baseline_digest(baseline)
+        snapshots = get_overall_swot_contributions(db)
+        profiles: list[tuple[Competitor, ResearchRun, dict[str, Any]]] = []
+
         for competitor in list_competitors(db, limit=500):
             latest_run = _get_latest_completed_run(db, competitor.id)
             if latest_run is None:
                 continue
-            # Opportunities and threats are SCADABLE-relative templates, not competitor facts
             claims = [
-                {
-                    "category": entry.category.value,
-                    "content": entry.content,
-                    "source_url": entry.source_url,
-                }
+                {"category": entry.category.value, "content": entry.content, "source_url": entry.source_url}
                 for entry in get_latest_swot(db, competitor.id)
                 if entry.category in (SWOTCategory.STRENGTH, SWOTCategory.WEAKNESS)
             ]
-            analysis = (
-                latest_run.analysis_result
-                if isinstance(latest_run.analysis_result, dict)
-                else {}
-            )
+            analysis = latest_run.analysis_result if isinstance(latest_run.analysis_result, dict) else {}
             features = analysis.get("features", [])
-            # The two-stage extractor may return facts other than SWOT claims
-            # or features; keep those competitors in the comparison as well.
             extracted = analysis.get("extracted_information")
             if not claims and not features and not (
                 isinstance(extracted, dict) and extracted.get("claims_cited")
             ):
                 continue
-            latest_runs[competitor.name] = latest_run
-            profiles.append({
+            profiles.append((competitor, latest_run, {
                 "company_name": competitor.name,
                 "website_url": competitor.website_url,
                 "summary": analysis.get("summary", ""),
                 "features": features,
                 "claims": claims,
                 "extracted_information": extracted,
-            })
+            }))
 
         if not profiles:
-            # Nothing left to compare, so don't keep findings about deleted competitors
             publish_overall_swot(db, [], revision)
             return
 
-        # Overall comparisons grow with every researched competitor and can
-        # take longer than one company's crawl/analysis. Allow the comparison
-        # deadline to be configured separately on Railway.
-        comparison_timeout = float(
-            os.getenv("OVERALL_SWOT_TIMEOUT_SECONDS", str(timeout_seconds))
-        )
+        comparison_timeout = float(os.getenv("OVERALL_SWOT_TIMEOUT_SECONDS", str(timeout_seconds)))
         if comparison_timeout <= 0:
             raise ValueError("OVERALL_SWOT_TIMEOUT_SECONDS must be positive")
-        logger.info(
-            "Comparing SCADABLE against %d competitors (timeout=%ss)",
-            len(profiles), comparison_timeout,
-        )
-        comparison = await asyncio.wait_for(
-            analyzer.compare(get_scadable_baseline(db), profiles, trace_prefix=trace_prefix),
-            timeout=comparison_timeout,
-        )
-        overall_entries = comparison.get("swot_entries", [])
-        scores_by_company = _scores_by_company(
-            comparison.get("scores"), comparison.get("feature_pairs")
-        )
-        # Even when SWOT is empty, valid feature scores still matter. Both score
-        # writes and publishing are guarded against newer competitor changes.
-        scores_by_run = {
-            run.id: scores_by_company[name]
-            for name, run in latest_runs.items()
-            if scores_by_company.get(name)
-        }
-        valid_entries = overall_entries if isinstance(overall_entries, list) and overall_entries else None
-        competitor_swots_by_run = {}
-        blocks = comparison.get("competitor_swots")
-        if isinstance(blocks, list):
-            for block in blocks:
-                if not isinstance(block, dict):
-                    continue
-                name, entries = block.get("company_name"), block.get("swot_entries")
-                if name in latest_runs and isinstance(entries, list):
-                    competitor_swots_by_run[latest_runs[name].id] = entries
-        if not save_comparison_scores_if_current(
-            db, revision, scores_by_run, valid_entries,
-            competitor_swots_by_run=competitor_swots_by_run,
-        ):
-            logger.warning("Overall comparison superseded by newer competitor data.")
-        elif valid_entries is None:
-            logger.warning("Overall SWOT comparison returned no findings; valid scores saved.")
 
+        contributions: dict[int, list[dict[str, Any]]] = {}
+        updates: dict[int, dict[str, Any]] = {}
+        scores_by_run: dict[int, list[dict[str, Any]]] = {}
+        competitor_swots_by_run: dict[int, list[dict[str, Any]]] = {}
+
+        for competitor, latest_run, profile in profiles:
+            snapshot = snapshots.get(competitor.id)
+            if snapshot is not None and snapshot.baseline_digest == digest:
+                if snapshot.research_run_id == latest_run.id:
+                    contributions[competitor.id] = snapshot.entries
+                    continue
+                # An unchanged crawl is explicitly marked as reused. Move its
+                # comparison forward without a new paid LLM request.
+                analysis = latest_run.analysis_result if isinstance(latest_run.analysis_result, dict) else {}
+                if analysis.get("skipped_llm") and isinstance(snapshot.entries, list):
+                    contributions[competitor.id] = snapshot.entries
+                    updates[competitor.id] = {
+                        "research_run_id": latest_run.id, "baseline_digest": digest,
+                        "entries": snapshot.entries,
+                    }
+                    continue
+
+            logger.info("Comparing SCADABLE against %s only (timeout=%ss)", competitor.name, comparison_timeout)
+            comparison = await asyncio.wait_for(
+                analyzer.compare(baseline, [profile], trace_prefix=trace_prefix),
+                timeout=comparison_timeout,
+            )
+            grouped = _scores_by_company(
+                comparison.get("scores") if isinstance(comparison, dict) else None,
+                comparison.get("feature_pairs") if isinstance(comparison, dict) else None,
+            )
+            if grouped.get(competitor.name):
+                scores_by_run[latest_run.id] = grouped[competitor.name]
+            raw_entries = comparison.get("swot_entries") if isinstance(comparison, dict) else None
+            if not isinstance(raw_entries, list) or not raw_entries:
+                # Do not overwrite a valid snapshot with a blank/failed answer.
+                # Leave the overview stale until comparison can succeed.
+                logger.warning("No overall SWOT findings for %s; retaining old snapshot", competitor.name)
+                if scores_by_run:
+                    save_comparison_scores_if_current(db, revision, scores_by_run)
+                return
+
+            entries = []
+            for entry in raw_entries:
+                if not isinstance(entry, dict):
+                    raise ValueError("LLM SWOT entry must be an object")
+                category, content = entry.get("category"), entry.get("content")
+                if category not in {item.value for item in SWOTCategory} or not isinstance(content, str) or not content.strip():
+                    raise ValueError("LLM SWOT entry category or content is invalid")
+                source = entry.get("source_url")
+                if source is not None and not isinstance(source, str):
+                    raise ValueError("LLM SWOT source_url must be text or null")
+                entries.append({"category": category, "content": content.strip(), "source_url": source})
+            contributions[competitor.id] = entries
+            updates[competitor.id] = {
+                "research_run_id": latest_run.id,
+                "baseline_digest": digest,
+                "entries": entries,
+            }
+
+            blocks = comparison.get("competitor_swots")
+            if isinstance(blocks, list):
+                for block in blocks:
+                    if isinstance(block, dict) and block.get("company_name") == competitor.name and isinstance(block.get("swot_entries"), list):
+                        competitor_swots_by_run[latest_run.id] = block["swot_entries"]
+
+        aggregated = _combine_contributions(contributions)
+        if not aggregated:
+            logger.warning("No valid aggregate SWOT findings; prior overview remains stale")
+            return
+        if not updates and is_overall_swot_current(db):
+            return
+        if not save_comparison_scores_if_current(
+            db, revision, scores_by_run, aggregated,
+            competitor_swots_by_run=competitor_swots_by_run,
+            contribution_updates=updates,
+        ):
+            logger.warning("Overall comparison superseded by newer competitor data")
     except Exception:
         db.rollback()
-        logger.exception("Overall SWOT comparison failed; overall results remain stale.")
+        logger.exception("Overall SWOT comparison failed; prior results remain stored and stale")
 
 
 async def execute_research_run(
@@ -321,8 +380,8 @@ async def execute_research_run(
         6. If changed, invoke LLM analysis comparing against SCADABLE baseline.
         7. Persist raw analysis JSON and structured SWOT entries with source URLs.
         8. Transition state to COMPLETED.
-        9. Compare SCADABLE against all competitors and replace the overall SWOT
-           (skipped on unchanged runs unless no overall SWOT exists yet).
+        9. Compare SCADABLE only against updated competitor and aggregate stored
+           per-competitor findings (unless the baseline has changed).
 
     On Failure:
         Catches timeouts and exceptions, transitions run to FAILED with error

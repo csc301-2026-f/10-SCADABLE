@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     Competitor,
     OverallSwotState,
+    OverallSwotContribution,
     ResearchRun,
     ResearchStatus,
     SWOTCategory,
@@ -242,6 +243,11 @@ def delete_competitor(
         ResearchRun.competitor_id == competitor_id,
         ResearchRun.status == ResearchStatus.COMPLETED,
     ).limit(1)) is not None
+    # Delete comparison cache explicitly as well as by FK cascade. SQLite test
+    # environments do not always enable foreign-key enforcement.
+    db.execute(delete(OverallSwotContribution).where(
+        OverallSwotContribution.competitor_id == competitor_id
+    ))
     db.delete(competitor)
     if had_completed_research:
         mark_overall_swot_stale(db, commit=False)
@@ -468,30 +474,70 @@ def replace_overall_swot(
     entries: Iterable[Mapping[str, Any]],
     commit: bool = True,
 ) -> list[SWOTEntry]:
+    """Reconcile overall findings, retaining IDs and timestamps for unchanged rows.
+
+    Previously every publish deleted ALL rows, even when the text was identical.
+    Preserve identity for existing findings and only remove/insert real changes.
+    """
     validated = _validated_entries(entries)
+    existing = list(db.scalars(select(SWOTEntry).where(
+        SWOTEntry.scope == SWOTScope.OVERALL
+    ).order_by(SWOTEntry.id)).all())
+    remaining: dict[tuple[SWOTCategory, str], list[SWOTEntry]] = {}
+    for entry in existing:
+        remaining.setdefault((entry.category, entry.content), []).append(entry)
 
-    db.execute(
-        delete(SWOTEntry).where(
-            SWOTEntry.scope == SWOTScope.OVERALL
-        )
-    )
+    result: list[SWOTEntry] = []
+    for category, content, source_url in validated:
+        matches = remaining.get((category, content), [])
+        if matches:
+            match = matches.pop(0)
+            if match.source_url != source_url:
+                match.source_url = source_url
+            result.append(match)
+        else:
+            row = SWOTEntry(
+                scope=SWOTScope.OVERALL,
+                competitor_id=None,
+                research_run_id=None,
+                category=category,
+                content=content,
+                source_url=source_url,
+            )
+            db.add(row)
+            result.append(row)
+    for leftover in remaining.values():
+        for obsolete in leftover:
+            db.delete(obsolete)
+    _finish(db, commit, *result)
+    return result
 
-    new_entries = [
-        SWOTEntry(
-            scope=SWOTScope.OVERALL,
-            competitor_id=None,
-            research_run_id=None,
-            category=category,
-            content=content,
-            source_url=source_url,
-        )
-        for category, content, source_url in validated
-    ]
 
-    db.add_all(new_entries)
-    _finish(db, commit, *new_entries)
+def get_overall_swot_contributions(db: Session) -> dict[int, OverallSwotContribution]:
+    """Read the last per-competitor comparison snapshots."""
+    return {row.competitor_id: row for row in db.scalars(
+        select(OverallSwotContribution)
+    ).all()}
 
-    return new_entries
+
+def _save_contribution_updates(
+    db: Session, updates: Mapping[int, Mapping[str, Any]]
+) -> None:
+    """Persist only changed competitor snapshots inside the revision lock."""
+    for competitor_id, payload in updates.items():
+        entries = _validated_entries(payload["entries"])
+        serialized = [
+            {"category": category.value, "content": content, "source_url": source_url}
+            for category, content, source_url in entries
+        ]
+        row = db.get(OverallSwotContribution, competitor_id)
+        if row is None:
+            row = OverallSwotContribution(competitor_id=competitor_id)
+            db.add(row)
+        row.research_run_id = int(payload["research_run_id"])
+        row.baseline_digest = payload["baseline_digest"]
+        row.entries = serialized
+
 
 
 def get_overall_swot(db: Session) -> list[SWOTEntry]:
@@ -570,6 +616,7 @@ def save_comparison_scores_if_current(
     scores_by_run: Mapping[int, list[dict[str, Any]]],
     overall_entries: Iterable[Mapping[str, Any]] | None = None,
     competitor_swots_by_run: Mapping[int, list[dict[str, Any]]] | None = None,
+    contribution_updates: Mapping[int, Mapping[str, Any]] | None = None,
 ) -> bool:
     """Save only valid score updates on a matching revision.
 
@@ -598,6 +645,9 @@ def save_comparison_scores_if_current(
         # Empty results deliberately clear prior competitor findings for this
         # comparison. Replacing is safe only inside the revision guard.
         save_swot_entries(db, run_id, entries, commit=False)
+
+    if contribution_updates:
+        _save_contribution_updates(db, contribution_updates)
 
     if overall_entries is not None:
         replace_overall_swot(db, overall_entries, commit=False)

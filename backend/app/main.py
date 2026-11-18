@@ -30,6 +30,7 @@ async def _lifespan(app: FastAPI):
     # Explicit opt-in: refreshing competitor sites incurs crawler/LLM costs.
     scheduler_task = None
     github_task = None
+    cost_task = None
     if os.getenv("AUTO_REFRESH_ENABLED", "false").lower() == "true":
         from app.services.refresh_scheduler import run_scheduler
 
@@ -50,10 +51,18 @@ async def _lifespan(app: FastAPI):
             raise ValueError("GITHUB_SYNC_POLL_SECONDS must be positive")
         github_task = asyncio.create_task(run_github_sync_worker(poll_seconds=poll))
         logger.info("GitHub feature sync worker enabled")
+    # Restart-safe cost recovery is independent of the competitor refresh
+    # scheduler. Only poll when Langfuse is available and the operator opts in.
+    if os.getenv("LANGFUSE_COST_RECOVERY_ENABLED", "true").lower() == "true":
+        from app.services.costs import is_cost_tracking_configured
+        if is_cost_tracking_configured():
+            from app.services.cost_recovery import run_cost_recovery_worker
+            cost_task = asyncio.create_task(run_cost_recovery_worker())
+            logger.info("Langfuse cost recovery worker enabled")
     try:
         yield
     finally:
-        for task in (scheduler_task, github_task):
+        for task in (scheduler_task, github_task, cost_task):
             if task is not None:
                 task.cancel()
                 with suppress(asyncio.CancelledError):
