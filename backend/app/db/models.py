@@ -204,6 +204,30 @@ class SWOTEntry(Base):
             f"category={self.category.value}>"
         )
 
+class OverallSwotContribution(Base):
+    """Latest validated SCADABLE-relative comparison for ONE competitor.
+
+    One row per competitor keeps unrelated comparisons stable across research
+    reruns. A JSON list permits an explicitly empty comparison without losing
+    the fact that this competitor has been processed. Existing deployments gain
+    the table via Base.metadata.create_all without altering existing data.
+    """
+
+    __tablename__ = "overall_swot_contributions"
+
+    competitor_id: Mapped[int] = mapped_column(
+        ForeignKey("competitors.id", ondelete="CASCADE"), primary_key=True
+    )
+    research_run_id: Mapped[int] = mapped_column(
+        ForeignKey("research_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    baseline_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    entries: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 class GitHubRepositorySelection(Base):
     """Single authorized SCADABLE repository; multi-tenant auth is out of scope."""
 
