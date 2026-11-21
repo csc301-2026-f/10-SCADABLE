@@ -1,12 +1,19 @@
 "use client";
 
 import { Button } from "@/components/ui/Button";
-import type { ResearchStatus } from "@/lib/api";
+import type { ResearchStatus, RunStep } from "@/lib/api";
 import styles from "./CompetitorProfile.module.css";
+
+const STAGE_LABELS = new Map([
+  ["Crawl competitor website", "Finding and scraping pages"],
+  ["Analyze with LLM", "Extracting features and job postings"],
+  ["Save SWOT findings", "Saving findings"],
+]);
 
 type Props = {
   status: ResearchStatus;
   competitorName: string;
+  activeStep?: RunStep;
   rerunning?: boolean;
   onRerun?: () => void;
 };
@@ -14,6 +21,7 @@ type Props = {
 export function ResearchStatusBanner({
   status,
   competitorName,
+  activeStep,
   rerunning = false,
   onRerun,
 }: Props) {
@@ -50,10 +58,14 @@ export function ResearchStatusBanner({
       role="status"
     >
       <div className={styles.researchBannerCopy}>
-        <strong>
-          {status === "running"
-            ? "Agent run in progress"
-            : "Agent research queued"}
+        <strong className={styles.researchBannerStage}>
+          <span className={styles.researchBannerPulse} aria-hidden="true" />
+          <span>
+            {status === "running"
+              ? (activeStep && STAGE_LABELS.get(activeStep.name)) ??
+                "Agent run in progress"
+              : "Agent research queued"}
+          </span>
         </strong>
         <p>
           We&apos;re collecting signals across the competitor&apos;s data
@@ -61,7 +73,6 @@ export function ResearchStatusBanner({
           profile is populated.
         </p>
       </div>
-      <span className={styles.researchBannerPulse} aria-hidden="true" />
     </div>
   );
 }

@@ -18,7 +18,10 @@ import { useFocusTrap } from "@/lib/a11y/useFocusTrap";
 import { toUserFacingError } from "@/lib/errors";
 import { displayWebsite, formatRelativePast, formatRefreshDate } from "@/lib/format";
 import { profilePollInterval, runsPollInterval } from "@/lib/polling";
-import { latestSuccessfulRunForCompetitor } from "@/lib/runs/stats";
+import {
+  latestRunForCompetitor,
+  latestSuccessfulRunForCompetitor,
+} from "@/lib/runs/stats";
 import { ConflictingDataTable } from "./ConflictingDataTable";
 import { ProfileVisuals } from "./ProfileVisuals";
 import { ResearchStatusBanner } from "./ResearchStatusBanner";
@@ -83,10 +86,19 @@ export function CompetitorProfileView({ id }: { id: string }) {
     refetchInterval: (query) => profilePollInterval(query.state.data),
   });
 
-  const { data: runs } = useQuery({
+  const {
+    data: runs,
+    isPending: runsPending,
+    isError: runsError,
+    isStale: runsStale,
+  } = useQuery({
     queryKey: ["runs"],
     queryFn: () => runsApi.listRuns(),
-    refetchInterval: (query) => runsPollInterval(query.state.data),
+    refetchInterval: (query) =>
+      runsPollInterval(query.state.data) ||
+      (data && isResearchPending(data.researchStatus)
+        ? profilePollInterval(data)
+        : false),
   });
 
   const sources = useMemo(
@@ -188,6 +200,23 @@ export function CompetitorProfileView({ id }: { id: string }) {
     );
   }
 
+  const latestRun =
+    data.researchStatus === "running" &&
+    runs &&
+    !runsPending &&
+    !runsError &&
+    !runsStale &&
+    !rerunMutation.isPending
+      ? latestRunForCompetitor(runs, id)
+      : undefined;
+  const activeStep =
+    latestRun?.status === "running" &&
+    latestRun.finishedAt === null &&
+    (!data.lastResearchedAt ||
+      Date.parse(latestRun.startedAt) > Date.parse(data.lastResearchedAt))
+      ? latestRun.steps.find((step) => step.status === "running")
+      : undefined;
+
   return (
     <div className={styles.page}>
       <Link href="/competitors" className={styles.back}>
@@ -217,6 +246,7 @@ export function CompetitorProfileView({ id }: { id: string }) {
       <ResearchStatusBanner
         status={data.researchStatus}
         competitorName={data.name}
+        activeStep={activeStep}
         rerunning={rerunMutation.isPending}
         onRerun={
           data.researchStatus === "failed"
