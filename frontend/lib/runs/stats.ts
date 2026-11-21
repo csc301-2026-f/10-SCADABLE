@@ -49,6 +49,15 @@ export function latestRunPerCompetitor(runs: AgentRun[]): AgentRun[] {
   return [...latest.values()];
 }
 
+export function latestRunForCompetitor(
+  runs: AgentRun[],
+  competitorId: string,
+): AgentRun | undefined {
+  return sortRunsNewestFirst(
+    runs.filter((run) => run.competitorId === competitorId),
+  )[0];
+}
+
 /**
  * Latest completed run for a competitor, only if it succeeded.
  * Pending profiles / failed latest runs get no profile → runs link.
@@ -57,10 +66,10 @@ export function latestSuccessfulRunForCompetitor(
   runs: AgentRun[],
   competitorId: string,
 ): AgentRun | null {
-  const latestCompleted =
-    sortRunsNewestFirst(filterCompletedRuns(runs)).find(
-      (run) => run.competitorId === competitorId,
-    ) ?? null;
+  const latestCompleted = latestRunForCompetitor(
+    filterCompletedRuns(runs),
+    competitorId,
+  );
 
   if (!latestCompleted || latestCompleted.status !== "success") {
     return null;
