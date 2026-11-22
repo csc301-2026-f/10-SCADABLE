@@ -41,9 +41,16 @@ def _overview(db: Session) -> SwotOverview:
     ])
 
 
-@router.get("", response_model=SwotOverview, responses={404: {"model": ErrorResponse}})
+@router.get(
+    "",
+    response_model=SwotOverview,
+    responses={404: {"model": ErrorResponse}},
+    summary="Get a SWOT analysis",
+)
 def get_swot(
-    competitor_id: int | None = Query(None, alias="competitorId", ge=1),
+    competitor_id: int | None = Query(
+        None, alias="competitorId", ge=1, description="Omit for SCADABLE's overall SWOT."
+    ),
     db: Session = Depends(get_db),
 ) -> SwotOverview:
     """SWOT grouped by category.
@@ -64,7 +71,9 @@ def get_swot(
     )
 
 
-@router.get("/overview", response_model=SwotOverview)
+@router.get("/overview", response_model=SwotOverview, summary="Get the overall SWOT")
 def get_swot_overview(db: Session = Depends(get_db)) -> SwotOverview:
-    """SCADABLE's overall SWOT (used by the frontend overview page)."""
+    """SCADABLE's overall SWOT against all researched competitors (used by the
+    frontend overview page). ``isStale`` is true while a newer comparison is pending
+    or after one failed; outdated findings are never returned."""
     return _overview(db)

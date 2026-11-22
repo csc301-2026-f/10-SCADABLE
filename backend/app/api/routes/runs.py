@@ -26,24 +26,33 @@ def query_runs(db: Session, competitor_id: int | None, limit: int) -> list[Resea
     return list(db.scalars(stmt).all())
 
 
-@router.get("", response_model=list[AgentRun])
+@router.get("", response_model=list[AgentRun], summary="List research runs")
 def list_runs(
-    competitor_id: int | None = Query(None, alias="competitorId", ge=1),
-    limit: int = Query(100, ge=1, le=500),
+    competitor_id: int | None = Query(
+        None, alias="competitorId", ge=1, description="Only runs for this competitor."
+    ),
+    limit: int = Query(100, ge=1, le=500, description="Maximum number to return."),
     db: Session = Depends(get_db),
 ) -> list[AgentRun]:
+    """Research run history, newest first, with pipeline steps, status, and cost."""
     return [
         serializers.agent_run(run, run.competitor.name)
         for run in query_runs(db, competitor_id, limit)
     ]
 
 
-@router.get("/{run_id}", response_model=AgentRun, responses={404: {"model": ErrorResponse}})
+@router.get(
+    "/{run_id}",
+    response_model=AgentRun,
+    responses={404: {"model": ErrorResponse}},
+    summary="Get a research run",
+)
 def get_run(
-    run_id: int = Path(ge=1),
+    run_id: int = Path(ge=1, description="Research run ID"),
     db: Session = Depends(get_db),
 ) -> AgentRun:
-    run = repo.get_research_run(db, run_id)
+    """One research run: crawl, analyze, and save steps, status, cost, and any error."""
+    run =repo.get_research_run(db, run_id)
     if run is None:
         raise repo.NotFoundError(f"Research run {run_id} not found.")
     return serializers.agent_run(run, run.competitor.name)

@@ -320,6 +320,86 @@ def test_profile_keeps_previous_scores_when_latest_run_has_none(client, store):
         {"label": "Audits", "competitor": 6, "scadable": None}]
 
 
+def _conflict(a, b, a_url="https://drata.com/pricing", b_url="https://drata.com/faq"):
+    return {"claim_a": a, "claim_b": b, "claim_a_page_URL": a_url, "claim_b_page_URL": b_url}
+
+
+def test_profile_conflicting_data_groups_pairs_by_claim(client, store):
+    drata = store.add_competitor("Drata", "https://drata.com")
+    store.add_run(drata, ResearchStatus.COMPLETED, analysis={
+        "summary": "s",
+        "conflicting_data": {"company_name": "Drata", "conflicts": [
+            _conflict("Starts at $49/user/month", "Enterprise plans from $99/user/month"),
+            _conflict("Starts at $49/user/month", "Free tier with no per-seat fee",
+                      b_url="https://www.drata.com/blog/pricing/"),
+            _conflict("Hiring 4 engineers", "Team page lists 2 open roles",
+                      a_url="https://drata.com/careers", b_url="https://drata.com/team"),
+        ]},
+    })
+    conflicts = client.get(f"/competitors/{drata.id}").json()["conflictingData"]
+    assert conflicts == [
+        {
+            "id": "conflict-1",
+            "claim": {"text": "Starts at $49/user/month", "sourceLabel": "drata.com/pricing",
+                      "sourceUrl": "https://drata.com/pricing"},
+            "conflictsWith": [
+                {"text": "Enterprise plans from $99/user/month", "sourceLabel": "drata.com/faq",
+                 "sourceUrl": "https://drata.com/faq"},
+                {"text": "Free tier with no per-seat fee", "sourceLabel": "drata.com/blog/pricing",
+                 "sourceUrl": "https://www.drata.com/blog/pricing/"},
+            ],
+        },
+        {
+            "id": "conflict-2",
+            "claim": {"text": "Hiring 4 engineers", "sourceLabel": "drata.com/careers",
+                      "sourceUrl": "https://drata.com/careers"},
+            "conflictsWith": [{"text": "Team page lists 2 open roles",
+                               "sourceLabel": "drata.com/team",
+                               "sourceUrl": "https://drata.com/team"}],
+        },
+    ]
+
+
+def test_profile_conflicting_data_drops_bad_pairs_and_unsafe_links(client, store):
+    drata = store.add_competitor("Drata", "https://drata.com")
+    store.add_run(drata, ResearchStatus.COMPLETED, analysis={
+        "conflicting_data": {"conflicts": [
+            _conflict("", "Missing claim A"),
+            _conflict("Same text", "Same text"),
+            "not a dict",
+            _conflict("Claim", "Other", a_url="javascript:alert(1)", b_url=None),
+        ]},
+    })
+    conflicts = client.get(f"/competitors/{drata.id}").json()["conflictingData"]
+    assert conflicts == [{
+        "id": "conflict-1",
+        "claim": {"text": "Claim", "sourceLabel": "No source", "sourceUrl": None},
+        "conflictsWith": [{"text": "Other", "sourceLabel": "No source", "sourceUrl": None}],
+    }]
+
+
+@pytest.mark.parametrize("analysis", [
+    {"summary": "s"},
+    {"conflicting_data": None},
+    {"conflicting_data": {"company_name": "Drata", "conflicts": []}},
+    {"conflicting_data": {"conflicts": "not a list"}},
+])
+def test_profile_conflicting_data_empty_when_none_found(client, store, analysis):
+    drata = store.add_competitor("Drata", "https://drata.com")
+    store.add_run(drata, ResearchStatus.COMPLETED, analysis=analysis)
+    assert client.get(f"/competitors/{drata.id}").json()["conflictingData"] == []
+
+
+def test_profile_conflicting_data_from_reused_analysis(client, store):
+    drata = store.add_competitor("Drata", "https://drata.com")
+    first = store.add_run(drata, ResearchStatus.COMPLETED, analysis={
+        "conflicting_data": {"conflicts": [_conflict("A", "B")]}})
+    store.add_run(drata, ResearchStatus.COMPLETED, analysis={
+        "skipped_llm": True, "reused_from_run_id": first.id})
+    conflicts = client.get(f"/competitors/{drata.id}").json()["conflictingData"]
+    assert [c["claim"]["text"] for c in conflicts] == ["A"]
+
+
 @pytest.mark.parametrize("path,status", [("/competitors/999", 404), ("/competitors/abc", 422),
                                          ("/competitors/0", 422)])
 def test_get_competitor_errors(client, path, status):

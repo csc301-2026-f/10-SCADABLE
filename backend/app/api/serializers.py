@@ -14,6 +14,8 @@ from app.api.schemas import (
     ChartSeries,
     CompetitorProfile,
     CompetitorSummary,
+    ConflictClaimSide,
+    DataConflict,
     Finding,
     RunStep,
     ScoreSeries,
@@ -152,11 +154,52 @@ def competitor_profile(
         ),
         findings=[finding_from_entry(e, competitor) for e in swot_entries],
         recent_activity=activity,
+        conflicting_data=_conflicts(analysis),
         chart_series=ChartSeries(
             scores=_scores(analysis) or _previous_scores(competitor.research_runs),
             activity_over_time=_activity_over_time(competitor.research_runs),
         ),
     )
+
+
+def _conflict_side(text: Any, url: Any) -> ConflictClaimSide | None:
+    if not isinstance(text, str) or not text.strip():
+        return None
+    # Only http(s) links reach the frontend's <a href>; anything else is shown unlinked
+    safe_url = (
+        url.strip()
+        if isinstance(url, str) and urlsplit(url.strip()).scheme in ("http", "https")
+        else None
+    )
+    return ConflictClaimSide(
+        text=text.strip(), source_label=source_label(safe_url), source_url=safe_url
+    )
+
+
+def _conflicts(analysis: dict[str, Any]) -> list[DataConflict]:
+    """LLM-flagged contradictions on the competitor's website, for the profile table.
+
+    The analyzer stores pairs (claim A vs claim B); pairs that share claim A are
+    grouped into one row whose ``conflicts_with`` lists every claim B.
+    """
+    stored = analysis.get("conflicting_data")
+    pairs = stored.get("conflicts") if isinstance(stored, dict) else None
+    rows: dict[str, DataConflict] = {}
+    for pair in pairs if isinstance(pairs, list) else []:
+        if not isinstance(pair, dict):
+            continue
+        claim = _conflict_side(pair.get("claim_a"), pair.get("claim_a_page_URL"))
+        other = _conflict_side(pair.get("claim_b"), pair.get("claim_b_page_URL"))
+        if claim is None or other is None or claim.text == other.text:
+            continue
+        row = rows.get(claim.text)
+        if row is None:
+            rows[claim.text] = DataConflict(
+                id=f"conflict-{len(rows) + 1}", claim=claim, conflicts_with=[other]
+            )
+        elif other not in row.conflicts_with:
+            row.conflicts_with.append(other)
+    return list(rows.values())
 
 
 def _scores(analysis: dict[str, Any]) -> list[ScoreSeries]:
