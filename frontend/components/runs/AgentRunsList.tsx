@@ -51,6 +51,39 @@ function runDetailSummary(run: AgentRun): string {
   return `Completed ${okSteps}/${run.steps.length} steps · ${duration}`;
 }
 
+/** Expanded run details, shared by the desktop table row and the mobile card. */
+function RunDetail({ run }: { run: AgentRun }) {
+  const failedStepName = run.steps.find((step) => step.status === "failed")?.name;
+
+  return (
+    <div className={styles.runDetail}>
+      <p className={styles.runSummary}>{runDetailSummary(run)}</p>
+      <div className={styles.runSteps}>
+        {run.steps.map((step, index) => (
+          <div
+            key={`${run.id}-step-${index}`}
+            className={`${styles.runStep} ${
+              step.status === "failed" ? styles.runStepFailed : ""
+            }`}
+          >
+            <span>{step.name}</span>
+            <span className={styles.stepResult}>{step.result}</span>
+          </div>
+        ))}
+      </div>
+      {run.status === "failed" && (run.errorMessage || failedStepName) ? (
+        <div className={styles.failureReason}>
+          <span className={styles.failureReasonLabel}>Reason for failure</span>
+          <p>
+            {failedStepName ? `Stopped on “${failedStepName}”. ` : null}
+            {toUserFacingRunError(run.errorMessage)}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function RunRow({
   run,
   expanded,
@@ -61,7 +94,6 @@ function RunRow({
   onToggle: () => void;
 }) {
   const cache = formatCacheStat(run.cacheHits, run.cacheMisses);
-  const failedStepName = run.steps.find((step) => step.status === "failed")?.name;
 
   return (
     <>
@@ -105,39 +137,89 @@ function RunRow({
       {expanded ? (
         <tr className={styles.detailRow}>
           <td colSpan={7}>
-            <div className={styles.runDetail}>
-              <p className={styles.runSummary}>{runDetailSummary(run)}</p>
-              <div className={styles.runSteps}>
-                {run.steps.map((step, index) => (
-                  <div
-                    key={`${run.id}-step-${index}`}
-                    className={`${styles.runStep} ${
-                      step.status === "failed" ? styles.runStepFailed : ""
-                    }`}
-                  >
-                    <span>{step.name}</span>
-                    <span className={styles.stepResult}>{step.result}</span>
-                  </div>
-                ))}
-              </div>
-              {run.status === "failed" && (run.errorMessage || failedStepName) ? (
-                <div className={styles.failureReason}>
-                  <span className={styles.failureReasonLabel}>
-                    Reason for failure
-                  </span>
-                  <p>
-                    {failedStepName
-                      ? `Stopped on “${failedStepName}”. `
-                      : null}
-                    {toUserFacingRunError(run.errorMessage)}
-                  </p>
-                </div>
-              ) : null}
-            </div>
+            <RunDetail run={run} />
           </td>
         </tr>
       ) : null}
     </>
+  );
+}
+
+/** Mobile layout: one card per run, tap to expand the same details. */
+function RunCard({
+  run,
+  expanded,
+  onToggle,
+}: {
+  run: AgentRun;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const cache = formatCacheStat(run.cacheHits, run.cacheMisses);
+
+  return (
+    <li className={`${styles.card} ${expanded ? styles.cardExpanded : ""}`}>
+      <button
+        type="button"
+        className={styles.cardButton}
+        aria-expanded={expanded}
+        onClick={onToggle}
+      >
+        <span className={styles.cardTop}>
+          <span className={styles.cardName}>{run.competitorName}</span>
+          <span className={styles.cardTopRight}>
+            <span className={`${styles.status} ${statusClass(run.status)}`}>
+              {formatRunStatus(run.status)}
+            </span>
+            <span
+              className={`${styles.cardChevron} ${
+                expanded ? styles.rowArrowOpen : ""
+              }`}
+              aria-hidden="true"
+            >
+              ›
+            </span>
+          </span>
+        </span>
+
+        <span className={styles.cardStats}>
+          <span className={styles.cardStat}>
+            <span className={styles.cardStatLabel}>Cost</span>
+            <span className={styles.cardStatValue}>
+              {formatRunCost(run.costUsd)}
+            </span>
+          </span>
+          <span className={styles.cardStat}>
+            <span className={styles.cardStatLabel}>Steps</span>
+            <span className={styles.cardStatValue}>{run.stepCount}</span>
+          </span>
+          <span className={styles.cardStat}>
+            <span className={styles.cardStatLabel}>Cache</span>
+            <span className={styles.cardStatValue}>
+              {cache ? (
+                <span className={styles.cacheStat}>
+                  <b>{cache.hitsLabel}</b> / {cache.missesLabel}
+                </span>
+              ) : (
+                "—"
+              )}
+            </span>
+          </span>
+          <span className={styles.cardStat}>
+            <span className={styles.cardStatLabel}>Last run</span>
+            <span className={styles.cardStatValue}>
+              {formatRelativePast(run.startedAt)}
+            </span>
+          </span>
+        </span>
+      </button>
+
+      {expanded ? (
+        <div className={styles.cardDetail}>
+          <RunDetail run={run} />
+        </div>
+      ) : null}
+    </li>
   );
 }
 
@@ -169,6 +251,9 @@ export function AgentRunsList() {
     );
   }
 
+  const toggle = (id: string) =>
+    setExpandedId((current) => (current === id ? null : id));
+
   return (
     <div className={styles.page}>
       <header className={styles.pageHead}>
@@ -199,6 +284,7 @@ export function AgentRunsList() {
         </div>
       </div>
 
+      {/* Desktop / tablet: table */}
       <div className={styles.tableWrap}>
         <table className={styles.table}>
           <thead>
@@ -223,17 +309,29 @@ export function AgentRunsList() {
                   key={run.id}
                   run={run}
                   expanded={expandedId === run.id}
-                  onToggle={() =>
-                    setExpandedId((current) =>
-                      current === run.id ? null : run.id,
-                    )
-                  }
+                  onToggle={() => toggle(run.id)}
                 />
               ))
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Mobile: card list (table is hidden under 768px) */}
+      <ul className={styles.cards}>
+        {latestRows.length === 0 ? (
+          <li className={styles.cardsEmpty}>No agent runs yet.</li>
+        ) : (
+          latestRows.map((run) => (
+            <RunCard
+              key={run.id}
+              run={run}
+              expanded={expandedId === run.id}
+              onToggle={() => toggle(run.id)}
+            />
+          ))
+        )}
+      </ul>
     </div>
   );
 }
