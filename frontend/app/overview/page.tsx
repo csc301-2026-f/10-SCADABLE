@@ -55,14 +55,36 @@ function FindingItem({ f }: { f: Finding }) {
       <details className={styles.sources}>
         <summary>Sources</summary>
         <div className={styles.sourceBody}>
-          <a
-            href={f.sourceUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.link}
-          >
-            {f.sourceLabel}
-          </a>
+          {f.sources ? (
+            <>
+              {f.sources.map((source, index) => (
+                <div key={`${source.kind}-${source.url ?? index}`} className={styles.sourceRow}>
+                  <span className={styles.sourceKind}>
+                    {source.kind === "baseline" ? "SCADABLE" : "Competitor context"}
+                  </span>
+                  {source.url ? (
+                    <a href={source.url} target="_blank" rel="noopener noreferrer" className={styles.link}>
+                      {source.label}
+                    </a>
+                  ) : (
+                    <span>{source.label}</span>
+                  )}
+                </div>
+              ))}
+              {f.sources.some((source) => source.kind === "baseline") ? (
+                <span className={styles.sourceNote}>
+                  SCADABLE capabilities come from the configured baseline, not a verified website crawl.
+                </span>
+              ) : null}
+              {f.sources.length === 0 ? <span>No sources recorded.</span> : null}
+            </>
+          ) : f.sourceUrl ? (
+            <a href={f.sourceUrl} target="_blank" rel="noopener noreferrer" className={styles.link}>
+              {f.sourceLabel}
+            </a>
+          ) : (
+            <span>No sources recorded.</span>
+          )}
           <span className={styles.sourceMeta}>{formatDate(f.detectedAt)}</span>
         </div>
       </details>

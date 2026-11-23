@@ -200,9 +200,18 @@ def test_compare_uses_real_llm_schemas(fake_client):
 
     assert client.observation_names == ["run-42:comparison"]
     assert result["swot_entries"] == [
-        # The competitor page is preferred over SCADABLE's homepage
-        {"category": "strength", "content": "Native EU CRA tracking Vanta lacks.", "source_url": "https://vanta.com/features"},
-        {"category": "weakness", "content": "Smaller partner network.", "source_url": "https://scadable.com"},
+        {
+            "category": "strength", "content": "Native EU CRA tracking Vanta lacks.",
+            "source_url": "https://vanta.com/features",
+            "uses_scadable_baseline": True,
+            "source_urls": ["https://vanta.com/features"],
+        },
+        {
+            "category": "weakness", "content": "Smaller partner network.",
+            "source_url": "https://scadable.com",
+            "uses_scadable_baseline": True,
+            "source_urls": [],
+        },
     ]
     assert result["scores"] == [
         {"company_name": "Vanta", "feature": "Evidence collection", "score": 8}

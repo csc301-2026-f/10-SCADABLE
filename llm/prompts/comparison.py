@@ -106,7 +106,9 @@ them from their own perspectives.
   claim in the input. Never cite a pair that does not appear there.
 - Every SWOT entry must have at least one citation in swot_citations.
 - For TOP-LEVEL SWOT_entries: a strength or weakness is about SCADABLE and must cite at least one claim from SCADABLE
-  (company_index 0). It may also cite competitor claims it is compared against.
+  (company_index 0). Cite competitor claims ONLY when the actual finding makes a comparison supported by those claims.
+  A competitor page does not establish what SCADABLE itself offers. Do not attach irrelevant competitor citations
+  to SCADABLE-only claims. The SCADABLE input is a configured baseline, not independently crawled website evidence.
 - An opportunity or a threat must cite the competitor claim(s) it comes from.
 - If you cannot support an entry with a citation, leave the entry out.
 - Score every "feature" claim of SCADABLE and of each competitor exactly once, no matter how relevant it may seem.

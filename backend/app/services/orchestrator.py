@@ -201,7 +201,7 @@ def _combine_contributions(
     merging stays with the LLM team to avoid incorrectly merging distinct facts.
     """
     result = []
-    seen: set[tuple[str, str]] = set()
+    by_key: dict[tuple[str, str], dict[str, Any]] = {}
     for competitor_id in sorted(contributions):
         for entry in contributions[competitor_id]:
             if not isinstance(entry, dict):
@@ -210,14 +210,24 @@ def _combine_contributions(
             if category not in {item.value for item in SWOTCategory} or not isinstance(content, str) or not content.strip():
                 continue
             key = (category, " ".join(content.split()).casefold())
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append({
-                "category": category,
-                "content": content.strip(),
-                "source_url": entry.get("source_url"),
-            })
+            urls = entry.get("source_urls")
+            if not isinstance(urls, list):
+                urls = [entry.get("source_url")]
+            if key not in by_key:
+                item = {
+                    "category": category,
+                    "content": content.strip(),
+                    "source_url": entry.get("source_url"),
+                    "source_urls": [],
+                    "uses_scadable_baseline": category in {"strength", "weakness"},
+                }
+                by_key[key] = item
+                result.append(item)
+            item = by_key[key]
+            item["uses_scadable_baseline"] |= bool(entry.get("uses_scadable_baseline"))
+            for url in urls:
+                if isinstance(url, str) and url and url not in item["source_urls"]:
+                    item["source_urls"].append(url)
     return result
 
 
@@ -331,7 +341,19 @@ async def refresh_overall_swot(
                 source = entry.get("source_url")
                 if source is not None and not isinstance(source, str):
                     raise ValueError("LLM SWOT source_url must be text or null")
-                entries.append({"category": category, "content": content.strip(), "source_url": source})
+                source_urls = entry.get("source_urls")
+                if source_urls is None:
+                    source_urls = [source] if source else []
+                if (not isinstance(source_urls, list)
+                        or any(not isinstance(url, str) or not url.startswith(("https://", "http://"))
+                               for url in source_urls)):
+                    raise ValueError("LLM SWOT source_urls must be HTTP(S) URLs")
+                entries.append({
+                    "category": category, "content": content.strip(), "source_url": source,
+                    "source_urls": list(dict.fromkeys(source_urls)),
+                    "uses_scadable_baseline": bool(entry.get("uses_scadable_baseline"))
+                    or category in {"strength", "weakness"},
+                })
             contributions[competitor.id] = entries
             updates[competitor.id] = {
                 "research_run_id": latest_run.id,

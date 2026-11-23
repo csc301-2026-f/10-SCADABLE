@@ -28,6 +28,7 @@ class FakeStore:
         self.runs: dict[int, SimpleNamespace] = {}
         self.entries: dict[int, list[SimpleNamespace]] = {}  # run_id -> entries
         self.overall: list[SimpleNamespace] = []
+        self.overall_contributions: dict[int, SimpleNamespace] = {}
         self.overall_current = False
         self.triggered: list[int] = []
         self.overall_refreshes = 0
@@ -107,6 +108,9 @@ class FakeStore:
     def get_overall_swot(self, db):
         return self.overall
 
+    def get_overall_swot_contributions(self, db):
+        return self.overall_contributions
+
     def is_overall_swot_current(self, db):
         return self.overall_current
 
@@ -136,6 +140,7 @@ def store(monkeypatch):
     for name in (
         "get_competitor", "list_competitors", "create_competitor", "delete_competitor",
         "get_latest_research_run", "get_latest_swot", "get_overall_swot",
+        "get_overall_swot_contributions",
         "is_overall_swot_current", "has_completed_research", "get_research_run",
     ):
         monkeypatch.setattr(repo, name, getattr(fake, name))
@@ -722,6 +727,63 @@ def test_swot_overview_prefers_overall(client, researched, store):
     assert [f["text"] for f in body["strengths"]] == ["Overall strength"]
     assert body["strengths"][0]["competitorName"] == "SCADABLE"
     assert body["threats"] == []
+
+
+def test_swot_overview_attributes_configured_baseline_and_multiple_competitor_sources(client, store):
+    store.overall_current = True
+    store.overall = [
+        SimpleNamespace(id=10, category=SWOTCategory.STRENGTH,
+                        content="SCADABLE offers developer-first remediation vs Vanta.",
+                        source_url="https://vanta.com/features", created_at=T0),
+        SimpleNamespace(id=11, category=SWOTCategory.WEAKNESS,
+                        content="SCADABLE has fewer supported frameworks.",
+                        source_url="https://scadable.com", created_at=T0),
+    ]
+    store.overall_contributions[1] = SimpleNamespace(entries=[
+        {"category": "strength", "content": store.overall[0].content,
+         "source_url": "https://vanta.com/features", "source_urls": [
+             "https://vanta.com/features", "https://vanta.com/pricing"],
+         "uses_scadable_baseline": True},
+        {"category": "weakness", "content": store.overall[1].content,
+         "source_url": "https://scadable.com", "source_urls": [],
+         "uses_scadable_baseline": True},
+    ])
+    # A second snapshot containing the same finding must add evidence, not duplicate it.
+    store.overall_contributions[2] = SimpleNamespace(entries=[
+        {"category": "strength", "content": store.overall[0].content,
+         "source_url": "https://scrut.io/platform", "source_urls": [
+             "https://vanta.com/features", "https://scrut.io/platform"],
+         "uses_scadable_baseline": True},
+    ])
+    body = client.get("/swot/overview").json()
+    assert body["isStale"] is False
+    assert body["strengths"][0]["sources"] == [
+        {"kind": "baseline", "label": "SCADABLE baseline (configured)", "url": None},
+        {"kind": "competitor", "label": "vanta.com/features", "url": "https://vanta.com/features"},
+        {"kind": "competitor", "label": "vanta.com/pricing", "url": "https://vanta.com/pricing"},
+        {"kind": "competitor", "label": "scrut.io/platform", "url": "https://scrut.io/platform"},
+    ]
+    assert body["weaknesses"][0]["sources"] == [
+        {"kind": "baseline", "label": "SCADABLE baseline (configured)", "url": None},
+    ]
+    # Older clients can still consume the legacy single citation field.
+    assert body["strengths"][0]["sourceUrl"] == "https://vanta.com/features"
+
+
+def test_swot_overview_legacy_snapshot_has_baseline_and_context_not_fabricated_sources(client, store):
+    store.overall_current = True
+    store.overall = [SimpleNamespace(
+        id=10, category=SWOTCategory.STRENGTH, content="SCADABLE works with developers",
+        source_url="https://vanta.com/features", created_at=T0,
+    )]
+    store.overall_contributions[1] = SimpleNamespace(entries=[
+        {"category": "strength", "content": store.overall[0].content,
+         "source_url": "https://vanta.com/features"},
+    ])
+    assert client.get("/swot/overview").json()["strengths"][0]["sources"] == [
+        {"kind": "baseline", "label": "SCADABLE baseline (configured)", "url": None},
+        {"kind": "competitor", "label": "vanta.com/features", "url": "https://vanta.com/features"},
+    ]
 
 
 def test_swot_overview_empty(client):

@@ -195,3 +195,48 @@ def test_existing_legacy_overview_backfills_contributions_on_next_refresh(db):
     assert sorted(_contents(db)) == sorted([f"SCADABLE relative to {name}" for name in names])
     assert repo.is_overall_swot_current(db)
     assert len(analyzer.comparisons) == 2
+
+
+def test_overall_snapshot_preserves_multiple_citations_and_merges_duplicate_sources(db):
+    from app.api.routes.swot import _citation_sources
+    first = repo.create_competitor(db, "Vanta", "https://vanta.com")
+    second = repo.create_competitor(db, "Scrut", "https://scrut.io")
+    first_run = repo.create_research_run(db, first.id)
+    second_run = repo.create_research_run(db, second.id)
+    finding = "SCADABLE has developer-first compliance tooling"
+    first_entries = [{
+        "category": "strength", "content": finding,
+        "source_url": "https://vanta.com/features",
+        "source_urls": ["https://vanta.com/features", "https://vanta.com/platform"],
+        "uses_scadable_baseline": True,
+    }]
+    second_entries = [{
+        "category": "strength", "content": finding,
+        "source_url": "https://scrut.io/platform",
+        "source_urls": ["https://scrut.io/platform"],
+        "uses_scadable_baseline": True,
+    }]
+    rev = repo.get_overall_swot_revision(db)
+    combined = orchestrator._combine_contributions({
+        first.id: first_entries, second.id: second_entries,
+    })
+    assert len(combined) == 1
+    assert combined[0]["source_urls"] == [
+        "https://vanta.com/features", "https://vanta.com/platform",
+        "https://scrut.io/platform",
+    ]
+    assert repo.save_comparison_scores_if_current(
+        db, rev, {}, combined, contribution_updates={
+            first.id: {"research_run_id": first_run.id, "baseline_digest": "test", "entries": first_entries},
+            second.id: {"research_run_id": second_run.id, "baseline_digest": "test", "entries": second_entries},
+        },
+    )
+    first_snapshot = repo.get_overall_swot_contributions(db)[first.id]
+    assert first_snapshot.entries[0]["source_urls"] == [
+        "https://vanta.com/features", "https://vanta.com/platform",
+    ]
+    sources = _citation_sources(db)[("strength", finding.casefold())]
+    assert sources[0]["kind"] == "baseline"
+    assert [s["url"] for s in sources[1:]] == [
+        "https://vanta.com/features", "https://vanta.com/platform", "https://scrut.io/platform",
+    ]

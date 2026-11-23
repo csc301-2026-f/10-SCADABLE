@@ -1,6 +1,7 @@
 """SWOT endpoints."""
 
 from fastapi import APIRouter, Depends, Query
+from urllib.parse import urlsplit
 from sqlalchemy.orm import Session
 
 from app.api import serializers
@@ -29,16 +30,67 @@ def _group(findings: list[Finding], is_stale: bool = False) -> SwotOverview:
     )
 
 
+def _citation_sources(db: Session) -> dict[tuple[str, str], list[dict[str, str | None]]]:
+    """Assemble evidence for published overall findings from versioned JSON snapshots.
+
+    No migration is required: the existing per-competitor contribution JSON
+    already stores the complete citation list after comparisons are refreshed.
+    Earlier snapshots with only source_url remain readable.
+    """
+    grouped: dict[tuple[str, str], list[dict[str, str | None]]] = {}
+    for _, snapshot in sorted(repo.get_overall_swot_contributions(db).items()):
+        for entry in snapshot.entries or []:
+            if not isinstance(entry, dict):
+                continue
+            category, content = entry.get("category"), entry.get("content")
+            if not isinstance(category, str) or not isinstance(content, str):
+                continue
+            key = (category, " ".join(content.split()).casefold())
+            sources = grouped.setdefault(key, [])
+            uses_baseline = category in {"strength", "weakness"} or bool(entry.get("uses_scadable_baseline"))
+            if uses_baseline and not any(source["kind"] == "baseline" for source in sources):
+                sources.insert(0, {"kind": "baseline", "label": "SCADABLE baseline (configured)", "url": None})
+            urls = entry.get("source_urls")
+            if not isinstance(urls, list):
+                urls = [entry.get("source_url")]
+            for url in urls:
+                if not isinstance(url, str) or not url:
+                    continue
+                parsed = urlsplit(url)
+                if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+                    continue
+                if parsed.hostname.removeprefix("www.") == "scadable.com":
+                    # A configured baseline homepage is not a verified crawl.
+                    continue
+                if any(source["url"] == url for source in sources):
+                    continue
+                sources.append({"kind": "competitor", "label": serializers.source_label(url), "url": url})
+    return grouped
+
+
 def _overview(db: Session) -> SwotOverview:
     """Return only published current overall findings, never stale fallback data."""
     if not repo.is_overall_swot_current(db):
         # An empty new installation has no outdated findings to warn about.
         has_prior_data = bool(repo.get_overall_swot(db) or repo.has_completed_research(db))
         return _group([], is_stale=has_prior_data)
-    return _group([
-        serializers.finding_from_entry(entry, None)
-        for entry in repo.get_overall_swot(db)
-    ])
+    evidence = _citation_sources(db)
+    findings = []
+    for entry in repo.get_overall_swot(db):
+        key = (entry.category.value, " ".join(entry.content.split()).casefold())
+        sources = evidence.get(key)
+        if sources is None:
+            # A published row may predate the per-competitor JSON snapshots.
+            sources = []
+            if entry.category.value in {"strength", "weakness"}:
+                sources.append({"kind": "baseline", "label": "SCADABLE baseline (configured)", "url": None})
+            if entry.source_url:
+                parsed = urlsplit(entry.source_url)
+                if (parsed.scheme in {"https", "http"} and parsed.hostname
+                        and parsed.hostname.removeprefix("www.") != "scadable.com"):
+                    sources.append({"kind": "competitor", "label": serializers.source_label(entry.source_url), "url": entry.source_url})
+        findings.append(serializers.finding_from_entry(entry, None, sources=sources))
+    return _group(findings)
 
 
 @router.get(
