@@ -12,10 +12,14 @@ from app.api.schemas import (
     ApiResearchStatus,
     ChartPoint,
     ChartSeries,
+    CompetitorChanges,
     CompetitorProfile,
     CompetitorSummary,
+    ConflictClaimSide,
+    DataConflict,
     Finding,
     RunStep,
+    ScoreChange,
     ScoreSeries,
 )
 from app.db.models import Competitor, ResearchRun, ResearchStatus, SWOTEntry
@@ -152,11 +156,52 @@ def competitor_profile(
         ),
         findings=[finding_from_entry(e, competitor) for e in swot_entries],
         recent_activity=activity,
+        conflicting_data=_conflicts(analysis),
         chart_series=ChartSeries(
             scores=_scores(analysis) or _previous_scores(competitor.research_runs),
             activity_over_time=_activity_over_time(competitor.research_runs),
         ),
     )
+
+
+def _conflict_side(text: Any, url: Any) -> ConflictClaimSide | None:
+    if not isinstance(text, str) or not text.strip():
+        return None
+    # Only http(s) links reach the frontend's <a href>; anything else is shown unlinked
+    safe_url = (
+        url.strip()
+        if isinstance(url, str) and urlsplit(url.strip()).scheme in ("http", "https")
+        else None
+    )
+    return ConflictClaimSide(
+        text=text.strip(), source_label=source_label(safe_url), source_url=safe_url
+    )
+
+
+def _conflicts(analysis: dict[str, Any]) -> list[DataConflict]:
+    """LLM-flagged contradictions on the competitor's website, for the profile table.
+
+    The analyzer stores pairs (claim A vs claim B); pairs that share claim A are
+    grouped into one row whose ``conflicts_with`` lists every claim B.
+    """
+    stored = analysis.get("conflicting_data")
+    pairs = stored.get("conflicts") if isinstance(stored, dict) else None
+    rows: dict[str, DataConflict] = {}
+    for pair in pairs if isinstance(pairs, list) else []:
+        if not isinstance(pair, dict):
+            continue
+        claim = _conflict_side(pair.get("claim_a"), pair.get("claim_a_page_URL"))
+        other = _conflict_side(pair.get("claim_b"), pair.get("claim_b_page_URL"))
+        if claim is None or other is None or claim.text == other.text:
+            continue
+        row = rows.get(claim.text)
+        if row is None:
+            rows[claim.text] = DataConflict(
+                id=f"conflict-{len(rows) + 1}", claim=claim, conflicts_with=[other]
+            )
+        elif other not in row.conflicts_with:
+            row.conflicts_with.append(other)
+    return list(rows.values())
 
 
 def _scores(analysis: dict[str, Any]) -> list[ScoreSeries]:
@@ -189,15 +234,75 @@ def _previous_scores(runs: Iterable[ResearchRun]) -> list[ScoreSeries]:
 
     Covers a latest run whose comparison failed or returned nothing usable.
     """
-    completed = sorted(
+    for run in _completed_newest_first(runs):
+        if series := _scores(_analysis(run)):
+            return series
+    return []
+
+
+def _completed_newest_first(runs: Iterable[ResearchRun]) -> list[ResearchRun]:
+    return sorted(
         (r for r in runs if r.status == ResearchStatus.COMPLETED),
         key=lambda r: (r.completed_at or r.created_at, r.id),
         reverse=True,
     )
-    for run in completed:
-        if series := _scores(_analysis(run)):
-            return series
-    return []
+
+
+def _finding_key(entry: SWOTEntry) -> tuple[str, str]:
+    """Same category and text (ignoring case, spacing, and a trailing period)."""
+    text = " ".join(entry.content.split()).rstrip(".").casefold()
+    return entry.category.value, text
+
+
+def competitor_changes(competitor: Competitor) -> CompetitorChanges:
+    """Diff the two most recent completed runs: findings added or removed, and
+    feature scores that moved. A run whose comparison returned no scores is
+    compared using the newest earlier scores, like the profile chart."""
+    completed = _completed_newest_first(competitor.research_runs)
+    current = completed[0] if completed else None
+    previous = completed[1] if len(completed) > 1 else None
+    if current is None or previous is None:
+        return CompetitorChanges(
+            competitor_id=str(competitor.id),
+            current_run_id=str(current.id) if current else None,
+            previous_run_id=None,
+            current_at=current.completed_at if current else None,
+            previous_at=None,
+            website_changed=False,
+            has_changes=False,
+        )
+
+    current_entries = {_finding_key(e): e for e in current.swot_entries}
+    previous_entries = {_finding_key(e): e for e in previous.swot_entries}
+    added = [
+        finding_from_entry(e, competitor).model_copy(update={"is_new": True})
+        for key, e in current_entries.items() if key not in previous_entries
+    ]
+    removed = [
+        finding_from_entry(e, competitor)
+        for key, e in previous_entries.items() if key not in current_entries
+    ]
+
+    now = {s.label: s.competitor for s in _previous_scores(completed)}
+    before = {s.label: s.competitor for s in _previous_scores(completed[1:])}
+    score_changes = [
+        ScoreChange(label=label, previous=before.get(label), current=now.get(label))
+        for label in [*now, *(label for label in before if label not in now)]
+        if before.get(label) != now.get(label)
+    ]
+
+    return CompetitorChanges(
+        competitor_id=str(competitor.id),
+        current_run_id=str(current.id),
+        previous_run_id=str(previous.id),
+        current_at=current.completed_at,
+        previous_at=previous.completed_at,
+        website_changed=not _analysis(current).get("skipped_llm"),
+        has_changes=bool(added or removed or score_changes),
+        added_findings=added,
+        removed_findings=removed,
+        score_changes=score_changes,
+    )
 
 
 def _activity_over_time(runs: Iterable[ResearchRun]) -> list[ChartPoint]:

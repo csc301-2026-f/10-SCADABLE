@@ -69,8 +69,38 @@ async def _lifespan(app: FastAPI):
                     await task
 
 
+API_DESCRIPTION = """
+Backend for **Live SWOT**, SCADABLE's competitive-intelligence dashboard.
+
+Adding a competitor (or re-running research) queues a background research run:
+the competitor's website is crawled, an LLM extracts source-cited facts, and the
+results are saved as SWOT findings and feature scores. SCADABLE is then compared
+against every researched competitor to produce the overall SWOT.
+
+* Responses use camelCase keys and string IDs.
+* Errors are always `{"detail": "<message>"}` with a 404, 409, 422, or 500 status.
+* Research runs in the background; poll `GET /runs` or a competitor's profile for progress.
+"""
+
+OPENAPI_TAGS = [
+    {"name": "competitors", "description": "Add, view, delete, and re-run research on competitors."},
+    {"name": "runs", "description": "Research run history: pipeline steps, status, errors, and cost."},
+    {"name": "swot", "description": "Per-competitor SWOT findings and SCADABLE's overall SWOT."},
+    {"name": "company", "description": "SCADABLE's own profile, used as the analysis baseline."},
+    {"name": "github", "description": "GitHub App integration that syncs SCADABLE's feature file (admin only)."},
+    {"name": "settings", "description": "Deployment-wide scraping settings (admin only for updates)."},
+    {"name": "health", "description": "Liveness check for deployments."},
+]
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="Live SWOT API", version="0.1.0", lifespan=_lifespan)
+    app = FastAPI(
+        title="Live SWOT API",
+        version="1.0.0",
+        description=API_DESCRIPTION,
+        openapi_tags=OPENAPI_TAGS,
+        lifespan=_lifespan,
+    )
 
     app.add_middleware(
         CORSMiddleware,
@@ -80,8 +110,9 @@ def create_app() -> FastAPI:
     )
     register_error_handlers(app)
 
-    @app.get("/health", tags=["health"])
+    @app.get("/health", tags=["health"], summary="Health check")
     def health() -> dict[str, str]:
+        """Returns ``{"status": "ok"}`` when the API is up (does not query the database)."""
         return {"status": "ok"}
 
     app.include_router(competitors.router)

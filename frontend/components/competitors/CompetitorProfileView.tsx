@@ -25,6 +25,7 @@ import {
 import { ConflictingDataTable } from "./ConflictingDataTable";
 import { ProfileVisuals } from "./ProfileVisuals";
 import { ResearchStatusBanner } from "./ResearchStatusBanner";
+import { SinceLastRunCard } from "./SinceLastRunCard";
 import styles from "./CompetitorProfile.module.css";
 
 const TREND_LABEL: Record<Trend, string> = {
@@ -99,6 +100,13 @@ export function CompetitorProfileView({ id }: { id: string }) {
       (data && isResearchPending(data.researchStatus)
         ? profilePollInterval(data)
         : false),
+  });
+
+  // Keyed on lastResearchedAt so the diff refetches when a new run completes.
+  const { data: changes } = useQuery({
+    queryKey: ["competitor-changes", id, data?.lastResearchedAt ?? null],
+    queryFn: () => competitorsApi.getCompetitorChanges(id),
+    enabled: Boolean(data?.lastResearchedAt),
   });
 
   const sources = useMemo(
@@ -257,6 +265,8 @@ export function CompetitorProfileView({ id }: { id: string }) {
 
       <div className={styles.grid}>
         <div>
+          {changes?.previousRunId ? <SinceLastRunCard changes={changes} /> : null}
+
           <section className={styles.card}>
             <h2>Feature & automation score</h2>
             {data.chartSeries.scores.length === 0 ? (

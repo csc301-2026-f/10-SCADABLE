@@ -55,6 +55,29 @@ export type DataConflict = {
   conflictsWith: ConflictClaimSide[];
 };
 
+/** A 0-10 feature score that moved; null when the feature wasn't scored in that run. */
+export type ScoreChange = {
+  label: string;
+  previous: number | null;
+  current: number | null;
+};
+
+/** `GET /competitors/{id}/changes`: diff of the two most recent completed runs. */
+export type CompetitorChanges = {
+  competitorId: string;
+  currentRunId: string | null;
+  /** Null when there is only one completed run, so nothing to compare yet. */
+  previousRunId: string | null;
+  currentAt: string | null;
+  previousAt: string | null;
+  /** False when the latest run found the website unchanged. */
+  websiteChanged: boolean;
+  hasChanges: boolean;
+  addedFindings: Finding[];
+  removedFindings: Finding[];
+  scoreChanges: ScoreChange[];
+};
+
 export type CompetitorSummary = {
   id: string;
   name: string;
