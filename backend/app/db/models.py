@@ -26,6 +26,8 @@ class ResearchStatus(str, enum.Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    # Stopped by a user before it finished. Never resumed or retried automatically.
+    CANCELLED = "cancelled"
 
 
 class SWOTCategory(str, enum.Enum):

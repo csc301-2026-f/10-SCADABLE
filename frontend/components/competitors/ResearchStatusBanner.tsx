@@ -16,6 +16,10 @@ type Props = {
   activeStep?: RunStep;
   rerunning?: boolean;
   onRerun?: () => void;
+  /** Shown while a run is queued or running. Omit to hide the Cancel button. */
+  onCancel?: () => void;
+  cancelling?: boolean;
+  cancelError?: string | null;
 };
 
 export function ResearchStatusBanner({
@@ -24,8 +28,34 @@ export function ResearchStatusBanner({
   activeStep,
   rerunning = false,
   onRerun,
+  onCancel,
+  cancelling = false,
+  cancelError = null,
 }: Props) {
   if (status === "success") return null;
+
+  if (status === "cancelled") {
+    return (
+      <div
+        className={`${styles.researchBanner} ${styles.researchBannerCancelled}`}
+        role="status"
+      >
+        <div className={styles.researchBannerCopy}>
+          <strong>Agent run cancelled</strong>
+          <p>
+            The last agent run for {competitorName} was stopped before it
+            finished. Results from earlier runs are still shown. You can queue
+            another agent run.
+          </p>
+        </div>
+        {onRerun ? (
+          <Button variant="secondary" onClick={onRerun} disabled={rerunning}>
+            {rerunning ? "Rerunning…" : "Rerun agent"}
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
 
   if (status === "failed") {
     return (
@@ -72,7 +102,17 @@ export function ResearchStatusBanner({
           sources. This status bar will clear once the run succeeds and the
           profile is populated.
         </p>
+        {cancelError ? (
+          <p className={styles.researchBannerError} role="alert">
+            {cancelError}
+          </p>
+        ) : null}
       </div>
+      {onCancel ? (
+        <Button variant="secondary" onClick={onCancel} disabled={cancelling}>
+          {cancelling ? "Cancelling…" : "Cancel run"}
+        </Button>
+      ) : null}
     </div>
   );
 }

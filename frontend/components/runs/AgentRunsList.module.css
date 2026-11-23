@@ -148,6 +148,11 @@
   color: var(--accent);
 }
 
+.statusCancelled {
+  background: #f1f1ef;
+  color: #5f5f5a;
+}
+
 .cacheStat {
   font-size: 11px;
   color: var(--sub);

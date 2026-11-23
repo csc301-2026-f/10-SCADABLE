@@ -19,6 +19,7 @@ import styles from "./AgentRunsList.module.css";
 function statusClass(status: ResearchStatus): string {
   if (status === "success") return styles.statusSuccess;
   if (status === "failed") return styles.statusFailed;
+  if (status === "cancelled") return styles.statusCancelled;
   if (status === "running") return styles.statusRunning;
   return styles.statusPending;
 }
@@ -44,6 +45,9 @@ function runDetailSummary(run: AgentRun): string {
   }
   if (run.status === "failed") {
     return `Run failed · ${okSteps}/${run.steps.length} steps ok · ${duration}`;
+  }
+  if (run.status === "cancelled") {
+    return `Cancelled · ${okSteps}/${run.steps.length} steps done · ${duration}`;
   }
   if (run.status === "running" || run.status === "pending") {
     return `In progress · ${okSteps}/${run.steps.length} steps done`;

@@ -39,10 +39,15 @@ class ResearchAlreadyActiveError(Exception):
 
 
 _ALLOWED_TRANSITIONS = {
-    ResearchStatus.PENDING: {ResearchStatus.RUNNING, ResearchStatus.FAILED},
-    ResearchStatus.RUNNING: {ResearchStatus.COMPLETED, ResearchStatus.FAILED},
+    ResearchStatus.PENDING: {
+        ResearchStatus.RUNNING, ResearchStatus.FAILED, ResearchStatus.CANCELLED,
+    },
+    ResearchStatus.RUNNING: {
+        ResearchStatus.COMPLETED, ResearchStatus.FAILED, ResearchStatus.CANCELLED,
+    },
     ResearchStatus.COMPLETED: set(),
     ResearchStatus.FAILED: {ResearchStatus.PENDING},
+    ResearchStatus.CANCELLED: set(),
 }
 
 _OPAQUE_SCHEME = re.compile(
@@ -316,7 +321,9 @@ def update_research_run_status(
     error_message: str | None = None,
     commit: bool = True,
 ) -> ResearchRun:
-    run = db.get(ResearchRun, run_id, with_for_update=True)
+    # Read the committed status, not this session's cached copy, so a cancel
+    # saved by another request is never overwritten by a finishing run.
+    run = db.get(ResearchRun, run_id, with_for_update=True, populate_existing=True)
 
     if run is None:
         raise NotFoundError(f"Research run {run_id} does not exist.")
@@ -356,6 +363,10 @@ def update_research_run_status(
     elif new_status == ResearchStatus.FAILED:
         run.completed_at = now
         run.error_message = error_message or "Research run failed."
+
+    elif new_status == ResearchStatus.CANCELLED:
+        run.completed_at = now
+        run.error_message = None
 
     _finish(db, commit, run)
     return run

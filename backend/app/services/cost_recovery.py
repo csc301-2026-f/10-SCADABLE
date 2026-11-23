@@ -53,7 +53,10 @@ def claim_missing_cost_runs(
         candidates = db.scalars(
             select(ResearchRun)
             .where(
-                ResearchRun.status.in_([ResearchStatus.COMPLETED, ResearchStatus.FAILED]),
+                # A cancelled run may have made paid calls before it stopped.
+                ResearchRun.status.in_([
+                    ResearchStatus.COMPLETED, ResearchStatus.FAILED, ResearchStatus.CANCELLED,
+                ]),
                 ResearchRun.completed_at <= now - MIN_RUN_AGE,
                 ResearchRun.completed_at >= now - MAX_RUN_AGE,
             )

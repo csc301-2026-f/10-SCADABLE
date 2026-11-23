@@ -13,7 +13,7 @@ from pydantic.alias_generators import to_camel
 from app.db.repository import clean_url
 
 # Frontend status vocabulary ("success" where the DB says "completed").
-ApiResearchStatus = Literal["pending", "running", "success", "failed"]
+ApiResearchStatus = Literal["pending", "running", "success", "failed", "cancelled"]
 Trend = Literal["up", "flat", "down"]
 SwotCategory = Literal["strength", "weakness", "opportunity", "threat"]
 
