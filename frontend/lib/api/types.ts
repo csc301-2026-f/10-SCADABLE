@@ -15,6 +15,8 @@ export type Finding = {
   text: string;
   sourceUrl: string;
   sourceLabel: string;
+  /** Overall SWOT: configured SCADABLE baseline versus independently crawled competitor pages. */
+  sources?: { label: string; url: string | null; kind: "baseline" | "competitor" }[] | null;
   detectedAt: string;
   isNew?: boolean;
   isChanged?: boolean;

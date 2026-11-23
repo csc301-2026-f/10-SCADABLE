@@ -64,6 +64,12 @@ class CreateCompetitorInput(ApiModel):
 # ---------------------------------------------------------------------------
 
 
+class FindingSource(ApiModel):
+    label: str
+    url: str | None = None
+    kind: Literal["baseline", "competitor"]
+
+
 class Finding(ApiModel):
     id: str
     competitor_id: str
@@ -73,6 +79,7 @@ class Finding(ApiModel):
     source_url: str
     source_label: str
     detected_at: datetime
+    sources: list[FindingSource] | None = None
     is_new: bool | None = None
     is_changed: bool | None = None
 

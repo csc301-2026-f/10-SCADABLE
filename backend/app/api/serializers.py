@@ -68,7 +68,10 @@ def source_label(url: str | None) -> str:
     return f"{host}{path}" or url
 
 
-def finding_from_entry(entry: SWOTEntry, competitor: Competitor | None) -> Finding:
+def finding_from_entry(
+    entry: SWOTEntry, competitor: Competitor | None,
+    sources: list[dict[str, str | None]] | None = None,
+) -> Finding:
     return Finding(
         id=str(entry.id),
         competitor_id=str(competitor.id) if competitor else "",
@@ -78,6 +81,7 @@ def finding_from_entry(entry: SWOTEntry, competitor: Competitor | None) -> Findi
         source_url=entry.source_url or "",
         source_label=source_label(entry.source_url),
         detected_at=entry.created_at,
+        sources=sources,
     )
 
 

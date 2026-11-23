@@ -526,10 +526,16 @@ def _save_contribution_updates(
     """Persist only changed competitor snapshots inside the revision lock."""
     for competitor_id, payload in updates.items():
         entries = _validated_entries(payload["entries"])
-        serialized = [
-            {"category": category.value, "content": content, "source_url": source_url}
-            for category, content, source_url in entries
-        ]
+        serialized = []
+        for (category, content, source_url), original in zip(entries, payload["entries"]):
+            urls = original.get("source_urls")
+            if not isinstance(urls, list):
+                urls = [source_url] if source_url else []
+            serialized.append({
+                "category": category.value, "content": content, "source_url": source_url,
+                "source_urls": [url for url in urls if isinstance(url, str)],
+                "uses_scadable_baseline": bool(original.get("uses_scadable_baseline")),
+            })
         row = db.get(OverallSwotContribution, competitor_id)
         if row is None:
             row = OverallSwotContribution(competitor_id=competitor_id)
