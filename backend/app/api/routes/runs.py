@@ -1,6 +1,9 @@
 """Research run endpoints: run history, run detail, and cancelling a run."""
 
-from fastapi import APIRouter, Depends, Path, Query
+import os
+import secrets
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -60,11 +63,35 @@ def get_run(
     return serializers.agent_run(run, run.competitor.name)
 
 
+def require_research_bridge(
+    bridge_token: str | None = Header(default=None, alias="X-Scadable-Research-Bridge-Token"),
+) -> None:
+    """Only the Next.js server, after its Clerk sign in check, may call this.
+
+    The token is shared with that server and never reaches the browser, so a
+    request sent straight to the backend is rejected. Without the token set,
+    the endpoint stays off instead of open.
+    """
+    expected = os.getenv("ACCOUNT_RESEARCH_BRIDGE_TOKEN", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="Cancelling research runs is not configured.")
+    if not bridge_token or not secrets.compare_digest(
+        bridge_token.encode(), expected.encode()
+    ):
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+
+
 @router.post(
     "/{run_id}/cancel",
     response_model=AgentRun,
-    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    responses={
+        401: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
     summary="Cancel a research run",
+    dependencies=[Depends(require_research_bridge)],
 )
 def cancel_run(
     run_id: int = Path(ge=1, description="Research run ID"),

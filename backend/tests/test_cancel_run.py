@@ -262,8 +262,13 @@ def test_cost_is_still_recorded_after_a_cancel(monkeypatch, session_factory, com
 
 # --- The cancel endpoint --------------------------------------------------------
 
+BRIDGE_TOKEN = "test-bridge-token"
+AUTH = {"X-Scadable-Research-Bridge-Token": BRIDGE_TOKEN}
+
+
 @pytest.fixture
-def client(session_factory):
+def client(monkeypatch, session_factory):
+    monkeypatch.setenv("ACCOUNT_RESEARCH_BRIDGE_TOKEN", BRIDGE_TOKEN)
     app = create_app()
 
     def session():
@@ -278,7 +283,7 @@ def test_cancel_endpoint_cancels_a_queued_run(client, session_factory, competito
     with session_factory() as db:
         run_id = create_research_run(db, competitor_id).id
 
-    response = client.post(f"/runs/{run_id}/cancel")
+    response = client.post(f"/runs/{run_id}/cancel", headers=AUTH)
 
     assert response.status_code == 200
     body = response.json()
@@ -297,7 +302,7 @@ def test_cancel_endpoint_clears_a_run_stuck_as_running(client, session_factory, 
         run_id = create_research_run(db, competitor_id).id
         update_research_run_status(db, run_id, ResearchStatus.RUNNING)
 
-    response = client.post(f"/runs/{run_id}/cancel")
+    response = client.post(f"/runs/{run_id}/cancel", headers=AUTH)
 
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
@@ -312,7 +317,7 @@ def test_cancel_endpoint_rejects_a_finished_run(client, session_factory, competi
         update_research_run_status(db, run_id, ResearchStatus.RUNNING)
         update_research_run_status(db, run_id, final)
 
-    response = client.post(f"/runs/{run_id}/cancel")
+    response = client.post(f"/runs/{run_id}/cancel", headers=AUTH)
 
     assert response.status_code == 409
     assert response.json() == {"detail": f"Research run {run_id} already finished."}
@@ -321,9 +326,40 @@ def test_cancel_endpoint_rejects_a_finished_run(client, session_factory, competi
 
 
 def test_cancel_endpoint_unknown_run(client):
-    response = client.post("/runs/999/cancel")
+    response = client.post("/runs/999/cancel", headers=AUTH)
 
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize("headers", [
+    {},  # A request sent straight to the backend, without the app server
+    {"X-Scadable-Research-Bridge-Token": "wrong-token"},
+])
+def test_cancel_endpoint_rejects_requests_without_the_bridge_token(
+    client, session_factory, competitor_id, headers
+):
+    with session_factory() as db:
+        run_id = create_research_run(db, competitor_id).id
+
+    response = client.post(f"/runs/{run_id}/cancel", headers=headers)
+
+    assert response.status_code == 401
+    with session_factory() as db:
+        assert get_research_run(db, run_id).status == ResearchStatus.PENDING
+
+
+def test_cancel_endpoint_is_off_when_the_bridge_token_is_not_set(
+    monkeypatch, client, session_factory, competitor_id
+):
+    monkeypatch.delenv("ACCOUNT_RESEARCH_BRIDGE_TOKEN")
+    with session_factory() as db:
+        run_id = create_research_run(db, competitor_id).id
+
+    response = client.post(f"/runs/{run_id}/cancel", headers=AUTH)
+
+    assert response.status_code == 503
+    with session_factory() as db:
+        assert get_research_run(db, run_id).status == ResearchStatus.PENDING
 
 
 # --- After a cancel ---------------------------------------------------------------
