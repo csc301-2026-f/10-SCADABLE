@@ -55,11 +55,11 @@ export type DataConflict = {
   conflictsWith: ConflictClaimSide[];
 };
 
-/** A 0-10 feature score that moved; null when the feature wasn't scored in that run. */
+/** Score changes only for features confidently matched across two runs. */
 export type ScoreChange = {
   label: string;
-  previous: number | null;
-  current: number | null;
+  previous: number;
+  current: number;
 };
 
 /** `GET /competitors/{id}/changes`: diff of the two most recent completed runs. */

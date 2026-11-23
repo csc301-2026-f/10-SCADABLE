@@ -103,7 +103,7 @@ export function CompetitorProfileView({ id }: { id: string }) {
   });
 
   // Keyed on lastResearchedAt so the diff refetches when a new run completes.
-  const { data: changes } = useQuery({
+  const { data: changes, isPending: changesPending, isError: changesError } = useQuery({
     queryKey: ["competitor-changes", id, data?.lastResearchedAt ?? null],
     queryFn: () => competitorsApi.getCompetitorChanges(id),
     enabled: Boolean(data?.lastResearchedAt),
@@ -265,7 +265,22 @@ export function CompetitorProfileView({ id }: { id: string }) {
 
       <div className={styles.grid}>
         <div>
-          {changes?.previousRunId ? <SinceLastRunCard changes={changes} /> : null}
+          {changes ? (
+            <SinceLastRunCard changes={changes} />
+          ) : (
+            <section className={styles.card}>
+              <h2>Since last run</h2>
+              <p className={styles.empty}>
+                {!data.lastResearchedAt
+                  ? "Complete research to start tracking changes."
+                  : changesError
+                    ? "Run comparisons are temporarily unavailable."
+                    : changesPending
+                      ? "Loading run comparisons…"
+                      : "Run research again to compare findings."}
+              </p>
+            </section>
+          )}
 
           <section className={styles.card}>
             <h2>Feature & automation score</h2>
@@ -366,9 +381,10 @@ export function CompetitorProfileView({ id }: { id: string }) {
         </div>
       </div>
 
-      {(data.conflictingData?.length ?? 0) > 0 ? (
-        <ConflictingDataTable conflicts={data.conflictingData ?? []} />
-      ) : null}
+      <ConflictingDataTable
+        conflicts={data.conflictingData ?? []}
+        hasCompletedResearch={Boolean(data.lastResearchedAt)}
+      />
 
       <div className={styles.deleteBar}>
         <Button

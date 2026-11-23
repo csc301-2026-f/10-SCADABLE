@@ -42,9 +42,6 @@ export function ProfileVisuals({
     selectTab(VISUALS[next].id, true);
   }
 
-  const activeMeta = VISUALS.find((v) => v.id === active) ?? VISUALS[0];
-  const panelId = `baseId-panel-{activeMeta.id}`;
-
   return (
     <section className={styles.card}>
       <h2>Visuals</h2>
@@ -52,7 +49,7 @@ export function ProfileVisuals({
       <div className={styles.visualTabs} role="tablist" aria-label="Profile charts">
         {VISUALS.map((tab, index) => {
           const selected = active === tab.id;
-          const tabId = `baseId-tab-{tab.id}`;
+          const tabId = `${baseId}-tab-${tab.id}`;
           return (
             <button
               key={tab.id}
@@ -63,7 +60,7 @@ export function ProfileVisuals({
               type="button"
               role="tab"
               aria-selected={selected}
-              aria-controls={`baseId-panel-{tab.id}`}
+              aria-controls={`${baseId}-panel-${tab.id}`}
               tabIndex={selected ? 0 : -1}
               className={selected ? styles.visualTabActive : undefined}
               onClick={() => selectTab(tab.id)}
@@ -75,17 +72,23 @@ export function ProfileVisuals({
         })}
       </div>
 
-      <div
-        id={panelId}
-        role="tabpanel"
-        aria-labelledby={`baseId-tab-{activeMeta.id}`}
-      >
-        {active === "scores" ? (
-          <ScoresChart data={chartSeries.scores} />
-        ) : (
-          <ActivityChart data={chartSeries.activityOverTime} />
-        )}
-      </div>
+      {VISUALS.map((tab) => (
+        <div
+          key={tab.id}
+          id={`${baseId}-panel-${tab.id}`}
+          role="tabpanel"
+          aria-labelledby={`${baseId}-tab-${tab.id}`}
+          hidden={active !== tab.id}
+        >
+          {active === tab.id ? (
+            tab.id === "scores" ? (
+              <ScoresChart data={chartSeries.scores} />
+            ) : (
+              <ActivityChart data={chartSeries.activityOverTime} />
+            )
+          ) : null}
+        </div>
+      ))}
     </section>
   );
 }

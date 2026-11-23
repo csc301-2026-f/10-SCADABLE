@@ -342,11 +342,55 @@ def test_changes_diffs_findings_and_scores(client, store):
     assert [(f["category"], f["text"], f["isNew"]) for f in body["addedFindings"]] == [
         ("threat", "Launched AI assistant", True)]
     assert [f["text"] for f in body["removedFindings"]] == ["High pricing"]
+    # Features scored in only one run aren't proof that they were added/removed.
     assert body["scoreChanges"] == [
         {"label": "Audits", "previous": 6, "current": 8},
-        {"label": "AI assistant", "previous": None, "current": 7},
-        {"label": "Dropped", "previous": 3, "current": None},
     ]
+
+
+def test_changes_matches_case_punctuation_and_company_prefix(client, store):
+    vanta = store.add_competitor("Vanta", "https://vanta.com")
+    store.add_run(vanta, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Questionnaire Automation.", "score": 7},
+        {"feature": "Trust Center", "score": 8},
+    ]})
+    store.add_run(vanta, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Vanta offers questionnaire automation", "score": 9},
+        {"feature": "trust center", "score": 8},
+    ]})
+    body = client.get(f"/competitors/{vanta.id}/changes").json()
+    assert body["scoreChanges"] == [
+        {"label": "Vanta offers questionnaire automation", "previous": 7, "current": 9},
+    ]
+    assert body["hasChanges"] is True
+
+
+def test_changes_does_not_report_unmatched_research_wording_as_new_features(client, store):
+    vanta = store.add_competitor("Vanta", "https://vanta.com")
+    store.add_run(vanta, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Risk management", "score": 8},
+        {"feature": "SOC 2 compliance", "score": 9},
+    ]})
+    store.add_run(vanta, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Vanta offers risk management and third-party risk management", "score": 8},
+        {"feature": "SOC 2 compliance", "score": 9},
+    ]})
+    body = client.get(f"/competitors/{vanta.id}/changes").json()
+    assert body["scoreChanges"] == []
+    assert body["hasChanges"] is False
+
+
+def test_changes_skips_ambiguous_duplicate_feature_labels(client, store):
+    vanta = store.add_competitor("Vanta", "https://vanta.com")
+    store.add_run(vanta, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Audit management", "score": 7},
+    ]})
+    store.add_run(vanta, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Audit management", "score": 8},
+        {"feature": "AUDIT MANAGEMENT.", "score": 9},
+    ]})
+    body = client.get(f"/competitors/{vanta.id}/changes").json()
+    assert body["scoreChanges"] == []
 
 
 def test_changes_reused_run_reports_no_changes(client, store):

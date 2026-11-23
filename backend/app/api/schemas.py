@@ -140,11 +140,10 @@ class CompetitorProfile(CompetitorSummary):
 
 
 class ScoreChange(ApiModel):
-    """A feature score that moved between two research runs (0-10)."""
+    """A score change for a confidently matched feature across two runs."""
     label: str
-    # Null when the feature wasn't scored in that run.
-    previous: float | None
-    current: float | None
+    previous: float
+    current: float
 
 
 class CompetitorChanges(ApiModel):
