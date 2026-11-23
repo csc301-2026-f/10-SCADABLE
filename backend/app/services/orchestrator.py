@@ -72,6 +72,9 @@ COST_LOOKUP_ATTEMPTS = 2
 # Increment whenever LLM prompts, extraction rules or analysis-input processing change.
 # This belongs on the saved analysis, not the page-content hash.
 ANALYSIS_POLICY_VERSION = os.getenv("ANALYSIS_POLICY_VERSION", "2026-11-06-scraper-v2")
+# Bump when the overall comparison prompt or its interpretation changes. This
+# invalidates saved SWOT contributions without recrawling competitor websites.
+COMPARISON_POLICY_VERSION = "2026-11-23-weakness-evidence-v1"
 
 
 
@@ -188,8 +191,15 @@ def _scores_by_company(
 
 
 def _baseline_digest(baseline: dict[str, Any]) -> str:
-    """Fingerprint the actual active GitHub/static baseline, not just its timestamp."""
-    canonical = json.dumps(baseline, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    """Fingerprint the active baseline AND the comparison prompt policy.
+
+    Kept in the existing digest column: old saved snapshots automatically
+    become ineligible for reuse when the policy changes, without a migration.
+    """
+    canonical = json.dumps(
+        {"baseline": baseline, "comparison_policy_version": COMPARISON_POLICY_VERSION},
+        sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -244,13 +254,19 @@ async def refresh_overall_swot(
     A newly changed competitor triggers an LLM comparison ONLY for itself.
     Existing snapshots for unrelated competitors are reused byte-for-byte.
     Initial rollout backfills missing snapshots once (one company at a time).
-    GitHub baseline changes invalidate all snapshots through their digest.
+    GitHub baseline and comparison-prompt changes invalidate snapshots through
+    their digest, without recrawling existing competitor research.
     After successful comparisons, scores, snapshots and the overview publish
     atomically under the existing input-revision guard.
     """
     try:
         if only_if_missing and is_overall_swot_current(db) and get_overall_swot(db):
-            return
+            # A published overview may still use an older LLM prompt policy.
+            # Do not let this short circuit prevent policy re-comparisons.
+            active_digest = _baseline_digest(get_scadable_baseline(db))
+            saved = get_overall_swot_contributions(db)
+            if saved and all(row.baseline_digest == active_digest for row in saved.values()):
+                return
         revision = get_overall_swot_revision(db)
         baseline = get_scadable_baseline(db)
         digest = _baseline_digest(baseline)

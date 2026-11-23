@@ -98,6 +98,21 @@ inferences about the lack of data provided. Always analyze the data that is prov
 if you are comparing company X (which is focused on banking services) with company Y (focused on the tech products), analyze 
 them from their own perspectives.
 - Report a weakness, opportunity or threat only when the input affirmatively supports it. Gaps the input explicitly states (for example something marked "coming soon" or described as limited) can be reported, and must never be described as already released. Never treat something that is merely absent from the input as a weakness or an opportunity.
+- For TOP-LEVEL weaknesses, deliberately examine each distinct, evidence-backed competitive disadvantage:
+  explicitly documented product limitations, comparative framework coverage, integration coverage,
+  relative feature/automation depth, and pricing or enterprise readiness when both sides have
+  comparable, affirmative claims. Treat these as checks, NOT categories that must be filled.
+- A list of named frameworks or integrations is not necessarily an exhaustive count. Do not infer
+  that SCADABLE lacks an unlisted feature, has fewer total integrations, or cannot serve a market
+  solely because the baseline does not mention it. If comparing advertised lists, call them
+  advertised/listed coverage, not proof of unsupported capabilities.
+- Identify all DISTINCT supported weaknesses, not an arbitrary quota. When the same disadvantage
+  appears across multiple competitors, avoid restating it with different company names.
+  An empty Weaknesses list is correct if the evidence supports none. Do not relabel an
+  opportunity, competitor strength, or market threat as an internal SCADABLE weakness.
+- For each comparative weakness, cite the SCADABLE claim establishing its documented scope or
+  limitation and the competitor claim establishing the comparison. SCADABLE-only limitations
+  must cite their SCADABLE claim. Do not use a competitor citation as proof of a SCADABLE gap.
 - Limits that belong to a pricing tier (what a free plan includes) are not weaknesses.
 - Keep the strength, opportunity, weakness, or threat a short string, no more than 10-15 words.
 - Each why_it_matters is two or three short sentences, written for the founder, grounded only in the input and following the same rules above about missing information and "coming soon" items. If a competitor is in an unrelated industry, say so plainly instead of inventing overlap.
