@@ -181,12 +181,14 @@ def _conflict_side(text: Any, url: Any) -> ConflictClaimSide | None:
 def _conflicts(analysis: dict[str, Any]) -> list[DataConflict]:
     """LLM-flagged contradictions on the competitor's website, for the profile table.
 
-    The analyzer stores pairs (claim A vs claim B); pairs that share claim A are
-    grouped into one row whose ``conflicts_with`` lists every claim B.
+    The analyzer stores pairs (claim A vs claim B); pairs that share claim A (same
+    text and same page) are grouped into one row whose ``conflicts_with`` lists
+    every claim B. The same text on different pages stays separate so each row
+    keeps its own citation.
     """
     stored = analysis.get("conflicting_data")
     pairs = stored.get("conflicts") if isinstance(stored, dict) else None
-    rows: dict[str, DataConflict] = {}
+    rows: dict[tuple[str, str | None], DataConflict] = {}
     for pair in pairs if isinstance(pairs, list) else []:
         if not isinstance(pair, dict):
             continue
@@ -194,9 +196,10 @@ def _conflicts(analysis: dict[str, Any]) -> list[DataConflict]:
         other = _conflict_side(pair.get("claim_b"), pair.get("claim_b_page_URL"))
         if claim is None or other is None or claim.text == other.text:
             continue
-        row = rows.get(claim.text)
+        key = (claim.text, claim.source_url)
+        row = rows.get(key)
         if row is None:
-            rows[claim.text] = DataConflict(
+            rows[key] = DataConflict(
                 id=f"conflict-{len(rows) + 1}", claim=claim, conflicts_with=[other]
             )
         elif other not in row.conflicts_with:

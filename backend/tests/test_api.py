@@ -425,6 +425,21 @@ def test_profile_conflicting_data_groups_pairs_by_claim(client, store):
     ]
 
 
+def test_profile_conflicting_data_keeps_same_claim_from_different_pages_apart(client, store):
+    drata = store.add_competitor("Drata", "https://drata.com")
+    store.add_run(drata, ResearchStatus.COMPLETED, analysis={"conflicting_data": {"conflicts": [
+        _conflict("Starts at $7,500/year", "Pricing is custom",
+                  a_url="https://drata.com/pricing", b_url="https://drata.com/faq"),
+        _conflict("Starts at $7,500/year", "Contact sales for pricing",
+                  a_url="https://drata.com/blog/pricing", b_url="https://drata.com/demo"),
+    ]}})
+    rows = client.get(f"/competitors/{drata.id}").json()["conflictingData"]
+    assert [(r["claim"]["sourceUrl"], [c["text"] for c in r["conflictsWith"]]) for r in rows] == [
+        ("https://drata.com/pricing", ["Pricing is custom"]),
+        ("https://drata.com/blog/pricing", ["Contact sales for pricing"]),
+    ]
+
+
 def test_profile_conflicting_data_drops_bad_pairs_and_unsafe_links(client, store):
     drata = store.add_competitor("Drata", "https://drata.com")
     store.add_run(drata, ResearchStatus.COMPLETED, analysis={
