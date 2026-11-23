@@ -1,4 +1,9 @@
-export type ResearchStatus = "pending" | "running" | "success" | "failed";
+export type ResearchStatus =
+  | "pending"
+  | "running"
+  | "success"
+  | "failed"
+  | "cancelled";
 
 export type Trend = "up" | "flat" | "down";
 

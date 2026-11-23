@@ -186,10 +186,34 @@ export function CompetitorProfileView({ id }: { id: string }) {
     },
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: (runId: string) => runsApi.cancelRun(runId),
+    onSuccess: () => {
+      queryClient.setQueryData(["competitor", id], (current: typeof data) =>
+        current ? { ...current, researchStatus: "cancelled" as const } : current,
+      );
+      queryClient.setQueryData<CompetitorSummary[]>(["competitors"], (prev) =>
+        (prev ?? []).map((c) =>
+          c.id === id ? { ...c, researchStatus: "cancelled" } : c,
+        ),
+      );
+    },
+    onSettled: () => {
+      // A failed cancel usually means the run just finished, so refresh either way.
+      void queryClient.invalidateQueries({ queryKey: ["competitor", id] });
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["competitors"] });
+    },
+  });
+
   // Keep list/runs caches in sync when polling finishes research on this profile.
   useEffect(() => {
     if (!data) return;
-    if (data.researchStatus !== "success" && data.researchStatus !== "failed") {
+    if (
+      data.researchStatus !== "success" &&
+      data.researchStatus !== "failed" &&
+      data.researchStatus !== "cancelled"
+    ) {
       return;
     }
     void queryClient.invalidateQueries({ queryKey: ["competitors"] });
@@ -224,6 +248,19 @@ export function CompetitorProfileView({ id }: { id: string }) {
       Date.parse(latestRun.startedAt) > Date.parse(data.lastResearchedAt))
       ? latestRun.steps.find((step) => step.status === "running")
       : undefined;
+  // The queued or running run that the banner's Cancel button stops
+  const runToCancel =
+    isResearchPending(data.researchStatus) &&
+    runs &&
+    !runsPending &&
+    !runsError &&
+    !rerunMutation.isPending
+      ? latestRunForCompetitor(runs, id)
+      : undefined;
+  const cancellableRunId =
+    runToCancel && isResearchPending(runToCancel.status)
+      ? runToCancel.id
+      : undefined;
 
   return (
     <div className={styles.page}>
@@ -257,9 +294,26 @@ export function CompetitorProfileView({ id }: { id: string }) {
         activeStep={activeStep}
         rerunning={rerunMutation.isPending}
         onRerun={
-          data.researchStatus === "failed"
-            ? () => rerunMutation.mutate()
+          data.researchStatus === "failed" || data.researchStatus === "cancelled"
+            ? () => {
+                cancelMutation.reset();
+                rerunMutation.mutate();
+              }
             : undefined
+        }
+        onCancel={
+          cancellableRunId
+            ? () => cancelMutation.mutate(cancellableRunId)
+            : undefined
+        }
+        cancelling={cancelMutation.isPending}
+        cancelError={
+          cancelMutation.isError
+            ? toUserFacingError(
+                cancelMutation.error,
+                "Could not cancel the run. Please try again.",
+              )
+            : null
         }
       />
 
