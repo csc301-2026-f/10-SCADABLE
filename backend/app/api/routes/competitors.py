@@ -81,8 +81,8 @@ def get_competitor_changes(
     competitor_id: int = CompetitorId,
     db: Session = Depends(get_db),
 ) -> CompetitorChanges:
-    """Compare the competitor's two most recent completed research runs: SWOT
-    findings that were added or removed, and feature scores that went up or down.
+    """Compare extracted SWOT findings between completed research runs, plus
+    score changes for confidently matched features. Unmatched labels are omitted.
 
     ``hasChanges`` is false when nothing changed or there is only one completed run
     (``previousRunId`` is then null). ``websiteChanged`` is false when the latest

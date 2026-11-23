@@ -27,6 +27,7 @@ from app.services.crawler import CRAWL_FAILED_MESSAGE
 from app.services.refresh_schedule import next_refresh_at
 from app.services.open_roles import open_roles_from_analysis
 import re
+import unicodedata
 
 _STATUS_MAP: dict[ResearchStatus, ApiResearchStatus] = {
     ResearchStatus.PENDING: "pending",
@@ -257,10 +258,41 @@ def _finding_key(entry: SWOTEntry) -> tuple[str, str]:
     return entry.category.value, text
 
 
+def _score_key(label: str, competitor_name: str) -> str:
+    """Normalize wording without guessing that two different features are equal.
+
+    Ignore casing, punctuation and the optional 'Company offers/provides ...'
+    introduction. Broader paraphrases are deliberately left unmatched rather
+    than being reported as features added or removed.
+    """
+    normalized = " ".join(re.findall(r"\w+", unicodedata.normalize("NFKC", label).casefold()))
+    company = " ".join(re.findall(r"\w+", competitor_name.casefold()))
+    if company and normalized.startswith(company + " "):
+        remainder = normalized[len(company) + 1:]
+        for verb in ("offers ", "provides ", "supports ", "includes "):
+            if remainder.startswith(verb):
+                return remainder[len(verb):]
+    return normalized
+
+
+def _comparable_scores(
+    scores: list[ScoreSeries], competitor_name: str
+) -> dict[str, ScoreSeries]:
+    """Only use unique feature keys; ambiguous duplicate keys can't be paired."""
+    by_key: dict[str, ScoreSeries | None] = {}
+    for score in scores:
+        key = _score_key(score.label, competitor_name)
+        if key in by_key:
+            by_key[key] = None
+        else:
+            by_key[key] = score
+    return {key: value for key, value in by_key.items() if value is not None}
+
+
 def competitor_changes(competitor: Competitor) -> CompetitorChanges:
-    """Diff the two most recent completed runs: findings added or removed, and
-    feature scores that moved. A run whose comparison returned no scores is
-    compared using the newest earlier scores, like the profile chart."""
+    """Compare the two most recent completed runs' extracted findings and
+    confidently matched feature scores. Unmatched LLM labels are not proof
+    that a feature was added or removed. Earlier valid scores remain reusable."""
     completed = _completed_newest_first(competitor.research_runs)
     current = completed[0] if completed else None
     previous = completed[1] if len(completed) > 1 else None
@@ -286,12 +318,16 @@ def competitor_changes(competitor: Competitor) -> CompetitorChanges:
         for key, e in previous_entries.items() if key not in current_entries
     ]
 
-    now = {s.label: s.competitor for s in _previous_scores(completed)}
-    before = {s.label: s.competitor for s in _previous_scores(completed[1:])}
+    now = _comparable_scores(_previous_scores(completed), competitor.name)
+    before = _comparable_scores(_previous_scores(completed[1:]), competitor.name)
     score_changes = [
-        ScoreChange(label=label, previous=before.get(label), current=now.get(label))
-        for label in [*now, *(label for label in before if label not in now)]
-        if before.get(label) != now.get(label)
+        ScoreChange(
+            label=series.label,
+            previous=before[key].competitor,
+            current=series.competitor,
+        )
+        for key, series in now.items()
+        if key in before and before[key].competitor != series.competitor
     ]
 
     return CompetitorChanges(
