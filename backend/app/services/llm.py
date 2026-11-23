@@ -393,6 +393,15 @@ class OpenAIAdapter:
             for claim in baseline_context.get("differentiators", [])
             if isinstance(claim, str) and claim.strip()
         ]
+        baseline_claims.extend(
+            ClaimCitedByURL(
+                category="weakness",
+                claim=f"Documented SCADABLE limitation: {limitation}",
+                claim_page_url=scadable_url,
+            )
+            for limitation in baseline_context.get("verified_limitations", [])
+            if isinstance(limitation, str) and limitation.strip()
+        )
         frameworks = baseline_context.get("supported_frameworks", [])
         if frameworks:
             baseline_claims.append(ClaimCitedByURL(

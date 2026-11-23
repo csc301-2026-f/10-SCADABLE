@@ -38,11 +38,13 @@ class FakeClient:
         self.responses = responses
         self.closed = False
         self.observation_names = []
+        self.prompt_calls = []
 
     async def generate_structured(
         self, *, instructions, input_text, output_schema, observation_name="openai-api-call"
     ):
         self.observation_names.append(observation_name)
+        self.prompt_calls.append(input_text)
         return self.responses[output_schema.__name__]
 
     async def close(self):
@@ -453,3 +455,41 @@ def test_compare_returns_cited_competitor_swot_and_explicit_pairs(fake_client):
         }],
     }]
     assert client.observation_names == ["run-77:comparison"]
+
+def test_verified_baseline_limitations_reach_comparison_prompt_without_inferred_gaps(fake_client):
+    """Only owner-specified limitations become SCADABLE weakness claims."""
+    client = fake_client({
+        "SWOTAnalysisByIndex": SWOTAnalysisByIndex(
+            competitor_notes=[],
+            SWOT_entries=[
+                SWOTEntryByIndex(
+                    component="weakness", what="Fixture limitation one",
+                    swot_citations=[SWOTIndex(swot_component_company_index=0, swot_component_page_index=0)],
+                ),
+                SWOTEntryByIndex(
+                    component="weakness", what="Fixture limitation two",
+                    swot_citations=[SWOTIndex(swot_component_company_index=0, swot_component_page_index=0)],
+                ),
+            ],
+            scores=[],
+        ),
+    })
+    from llm.prompts.comparison import COMPARISON_SYSTEM_PROMPT
+    assert "Do not infer" in COMPARISON_SYSTEM_PROMPT
+    assert "An empty Weaknesses list is correct" in COMPARISON_SYSTEM_PROMPT
+
+    baseline = {**get_scadable_baseline(), "verified_limitations": [
+        "Fixture feature is planned, not released",
+        "Fixture product supports only a confirmed pilot tier",
+    ]}
+    result = asyncio.run(OpenAIAdapter().compare(baseline, [
+        {"company_name": "Competitor", "website_url": "https://competitor.example",
+         "summary": "Test competitor", "features": ["Feature"], "claims": []},
+    ]))
+    assert [entry["category"] for entry in result["swot_entries"]] == ["weakness", "weakness"]
+    assert len(client.prompt_calls) == 1
+    prompt = client.prompt_calls[0]
+    assert "Documented SCADABLE limitation: Fixture feature is planned, not released" in prompt
+    assert "Documented SCADABLE limitation: Fixture product supports only a confirmed pilot tier" in prompt
+    assert "Unmentioned feature is absent" not in prompt
+    assert client.closed

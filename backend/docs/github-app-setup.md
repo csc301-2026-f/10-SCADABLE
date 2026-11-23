@@ -69,9 +69,16 @@ Version 1 uses an ordinary JSON object:
 
 `core_capabilities` is required (1–100 distinct nonempty text entries).
 `schema_version` must be `1`. Other fields have defaults but should be supplied
-for accurate comparisons. Extra keys, unexpected company names, hidden/traversal
-paths, malformed JSON, and files over 128 KiB are rejected. Invalid changes do
-**not** replace the last validated profile.
+for accurate comparisons. An optional `verified_limitations` array may contain
+**product-owner-confirmed constraints only** (e.g. a documented scope limit or a
+feature explicitly marked as planned). It defaults to `[]` and should not be
+filled by guessing absent features from this list. For example:
+`"verified_limitations": ["Example: audit export is currently manual"]`
+(the example is illustrative, **not a claim about SCADABLE**). These statements
+become SCADABLE-side comparison evidence. The source is a configured product
+baseline, not a verified website crawl. Extra keys, unexpected company names,
+hidden/traversal paths, malformed JSON, and files over 128 KiB are rejected.
+Invalid changes do **not** replace the last validated profile.
 
 ## 4. Use the API (backend only)
 
