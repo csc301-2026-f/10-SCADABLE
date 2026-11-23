@@ -62,11 +62,13 @@
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  overflow: hidden;
+  overflow-x: auto; /* was: overflow: hidden — lets the table scroll instead of clipping */
+  -webkit-overflow-scrolling: touch;
 }
 
 .table {
   width: 100%;
+  min-width: 640px; /* keeps columns from collapsing on narrow tablets */
   border-collapse: collapse;
   font-family: var(--font-sans);
   font-size: 12px;
@@ -264,8 +266,151 @@
   padding: 24px 0;
 }
 
+/* ---------- Mobile card list (hidden on desktop) ---------- */
+
+.cards {
+  display: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  color: var(--ink);
+  overflow: hidden;
+}
+
+.cardExpanded {
+  background: #f7f5f3;
+}
+
+.cardButton {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  background: transparent;
+  border: 0;
+  font-family: var(--font-sans);
+  color: inherit;
+  cursor: pointer;
+}
+
+.cardButton:active {
+  background: #f3f1ef;
+}
+
+.cardButton:focus-visible {
+  outline: 2px solid #5a4b86;
+  outline-offset: -2px;
+}
+
+.cardTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.cardName {
+  min-width: 0; /* lets the name shrink instead of overflowing */
+  font-size: 13px;
+  font-weight: 580;
+  color: #282333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardTopRight {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cardChevron {
+  color: var(--muted);
+  transition: transform 0.12s ease-out;
+}
+
+.cardStats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.cardStat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cardStatLabel {
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--sub);
+}
+
+.cardStatValue {
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardDetail {
+  padding: 12px 14px 14px;
+  background: #fff;
+  border-top: 1px solid var(--line);
+}
+
+.cardsEmpty {
+  text-align: center;
+  color: var(--sub);
+  padding: 32px 12px;
+  font-size: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+/* ---------- Responsive ---------- */
+
 @media (max-width: 900px) {
   .summaryGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  /* swap table for cards */
+  .tableWrap {
+    display: none;
+  }
+
+  .cards {
+    display: grid;
+    gap: 10px;
+  }
+
+  /* let long step results wrap instead of overflowing */
+  .runStep > span {
+    min-width: 0;
+  }
+
+  .stepResult {
+    white-space: normal;
+    text-align: right;
   }
 }
