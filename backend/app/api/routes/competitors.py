@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.api import serializers
 from app.api.errors import ConflictError
 from app.api.schemas import (
+    CompetitorChanges,
     CompetitorProfile,
     CompetitorSummary,
     CreateCompetitorInput,
@@ -68,6 +69,26 @@ def get_competitor(
     conflicting data flagged on the competitor's website, and chart series
     (feature scores vs SCADABLE and weekly activity)."""
     return _build_profile(db, _get_competitor_or_404(db, competitor_id))
+
+
+@router.get(
+    "/{competitor_id}/changes",
+    response_model=CompetitorChanges,
+    responses=_NOT_FOUND,
+    summary="What changed since the last run",
+)
+def get_competitor_changes(
+    competitor_id: int = CompetitorId,
+    db: Session = Depends(get_db),
+) -> CompetitorChanges:
+    """Compare the competitor's two most recent completed research runs: SWOT
+    findings that were added or removed, and feature scores that went up or down.
+
+    ``hasChanges`` is false when nothing changed or there is only one completed run
+    (``previousRunId`` is then null). ``websiteChanged`` is false when the latest
+    run found the website unchanged and reused the previous analysis.
+    """
+    return serializers.competitor_changes(_get_competitor_or_404(db, competitor_id))
 
 
 @router.post(
