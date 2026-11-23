@@ -1,8 +1,8 @@
 """Look up what a research run's OpenAI calls cost, as recorded in Langfuse.
 
 The analyzer names each call "{prefix}:{step}" and the backend picks the prefix,
-so run 42 for Vanta records "run-42:vanta:extraction", "run-42:vanta:analysis"
-and "run-42:comparison". The Observations V2 API reads them back in real time,
+so run 42 for Vanta records "run-42:vanta:extraction" and "run-42:comparison".
+The Observations V2 API reads them back in real time,
 but Langfuse can take a few minutes to ingest a call's cost, so callers wait
 before looking it up.
 """
@@ -45,7 +45,6 @@ def run_call_names(run_id: int, company_name: str) -> list[str]:
     competitor_prefix = run_trace_prefix(run_id, company_name)
     return [
         f"{competitor_prefix}:extraction",
-        f"{competitor_prefix}:analysis",
         f"{run_trace_prefix(run_id)}:comparison",
     ]
 

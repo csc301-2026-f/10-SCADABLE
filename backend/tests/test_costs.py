@@ -48,7 +48,7 @@ def run_id(session_factory):
         save_analysis_result(db, run.id, {
             "summary": "s",
             "scores": [{"feature": "Evidence", "score": 7}],
-            "llm_calls": [f"run-{run.id}:vanta:extraction", f"run-{run.id}:vanta:analysis"],
+            "llm_calls": [f"run-{run.id}:vanta:extraction"],
         })
         return run.id
 
@@ -86,7 +86,6 @@ def test_company_slug(name, slug):
 def test_run_call_names():
     assert run_call_names(42, "Vanta") == [
         "run-42:vanta:extraction",
-        "run-42:vanta:analysis",
         "run-42:comparison",
     ]
 
@@ -139,23 +138,23 @@ def _page(observations, cursor=None):
 
 def test_cost_for_name_sums_every_page_and_ignores_other_names():
     observations = FakeObservations([
-        _page([("run-1:analysis", 0.002), ("run-10:analysis", 5.0)], cursor="next"),
-        _page([("run-1:analysis", 0.001)]),
+        _page([("run-1:comparison", 0.002), ("run-10:comparison", 5.0)], cursor="next"),
+        _page([("run-1:comparison", 0.001)]),
     ])
     api = SimpleNamespace(observations=observations)
 
-    cost = asyncio.run(_cost_for_name(api, "run-1:analysis"))
+    cost = asyncio.run(_cost_for_name(api, "run-1:comparison"))
 
     assert cost == CallCost(found=2, usd=pytest.approx(0.003))
-    assert observations.calls[0]["name"] == "run-1:analysis"
+    assert observations.calls[0]["name"] == "run-1:comparison"
     assert observations.calls[1]["cursor"] == "next"
 
 
 def test_cost_for_name_is_unknown_when_a_call_has_no_price():
-    observations = FakeObservations([_page([("run-1:analysis", 0.002), ("run-1:analysis", None)])])
+    observations = FakeObservations([_page([("run-1:comparison", 0.002), ("run-1:comparison", None)])])
     api = SimpleNamespace(observations=observations)
 
-    assert asyncio.run(_cost_for_name(api, "run-1:analysis")) == CallCost(found=2, usd=None)
+    assert asyncio.run(_cost_for_name(api, "run-1:comparison")) == CallCost(found=2, usd=None)
 
 
 def test_fetch_call_costs_is_none_without_langfuse_keys(monkeypatch):
@@ -175,7 +174,7 @@ def test_fetch_call_costs_keeps_the_shared_langfuse_recorder_running(monkeypatch
         langfuse_base_url="http://127.0.0.1:9",
     )
     monkeypatch.setattr(costs, "_langfuse_settings", lambda: settings)
-    pages = FakeObservations([_page([("run-1:vanta:extraction", 0.01)])] + [_page([])] * 2)
+    pages = FakeObservations([_page([("run-1:vanta:extraction", 0.01)]), _page([])])
     monkeypatch.setattr(
         langfuse_api, "AsyncLangfuseAPI", lambda **kwargs: SimpleNamespace(observations=pages)
     )
@@ -199,7 +198,6 @@ def test_fetch_call_costs_keeps_the_shared_langfuse_recorder_running(monkeypatch
 def test_record_run_cost_saves_total_and_keeps_other_fields(monkeypatch, session_factory, run_id):
     _fake_costs(monkeypatch, {
         f"run-{run_id}:vanta:extraction": CallCost(found=1, usd=0.01),
-        f"run-{run_id}:vanta:analysis": CallCost(found=1, usd=0.02),
         f"run-{run_id}:comparison": CallCost(found=1, usd=0.005),
     })
 
@@ -207,7 +205,7 @@ def test_record_run_cost_saves_total_and_keeps_other_fields(monkeypatch, session
         assert asyncio.run(orchestrator.record_run_cost(db, run_id))
 
     cost = _cost(session_factory, run_id)
-    assert cost["usd"] == pytest.approx(0.035)
+    assert cost["usd"] == pytest.approx(0.015)
     assert cost["complete"] is True
     with session_factory() as db:
         assert get_research_run(db, run_id).analysis_result["scores"]  # not overwritten
@@ -216,8 +214,8 @@ def test_record_run_cost_saves_total_and_keeps_other_fields(monkeypatch, session
 def test_record_run_cost_waits_for_missing_calls_before_the_final_attempt(
     monkeypatch, session_factory, run_id
 ):
-    # Analysis isn't ingested yet
-    _fake_costs(monkeypatch, {f"run-{run_id}:vanta:extraction": CallCost(found=1, usd=0.01)})
+    # Extraction isn't ingested yet
+    _fake_costs(monkeypatch, {f"run-{run_id}:comparison": CallCost(found=1, usd=0.01)})
 
     with session_factory() as db:
         assert not asyncio.run(orchestrator.record_run_cost(db, run_id, final=False))
@@ -234,7 +232,7 @@ def test_record_run_cost_waits_for_missing_calls_before_the_final_attempt(
 def test_record_run_cost_marks_unpriced_calls_incomplete(monkeypatch, session_factory, run_id):
     _fake_costs(monkeypatch, {
         f"run-{run_id}:vanta:extraction": CallCost(found=1, usd=0.01),
-        f"run-{run_id}:vanta:analysis": CallCost(found=1, usd=None),
+        f"run-{run_id}:comparison": CallCost(found=1, usd=None),
     })
 
     with session_factory() as db:
@@ -370,7 +368,7 @@ def test_record_run_cost_adds_decisions_to_analysis_cost(monkeypatch, session_fa
         })
     _fake_costs(monkeypatch, {
         f"run-{run_id}:vanta:extraction": CallCost(found=1, usd=0.01),
-        f"run-{run_id}:vanta:analysis": CallCost(found=1, usd=0.02),
+        f"run-{run_id}:comparison": CallCost(found=1, usd=0.02),
     })
 
     async def decisions(target_run, reference, *, expected_requests, started_at):
@@ -394,7 +392,7 @@ def test_record_run_cost_incomplete_decisions_is_not_measured_zero(
 ):
     _fake_costs(monkeypatch, {
         f"run-{run_id}:vanta:extraction": CallCost(found=1, usd=0.01),
-        f"run-{run_id}:vanta:analysis": CallCost(found=1, usd=0.02),
+        f"run-{run_id}:comparison": CallCost(found=1, usd=0.02),
     })
     async def incomplete(*args, **kwargs):
         return costs.DecisionsCost(found=0, usd=0.0, complete=False, expected=2)
