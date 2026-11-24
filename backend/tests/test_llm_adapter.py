@@ -62,6 +62,7 @@ class FakeClient:
         if name not in self.responses and name in ("ExtractionFeedbacks", "SWOTFeedbacks"):
             # Validators default to "no problems found" so revision loops end after one pass.
             return output_schema(feedbacks=[])
+        self.prompt_calls.append(input_text)
         return self.responses[name]
 
     async def close(self):
@@ -484,7 +485,6 @@ def test_compare_returns_cited_competitor_swot_and_explicit_pairs(fake_client):
     assert client.observation_names == [
         "run-77:comparison-1", "run-77:comparison-validation-1",
     ]
-    assert client.observation_names == ["run-77:comparison"]
 
 def test_verified_baseline_limitations_reach_comparison_prompt_without_inferred_gaps(fake_client):
     """Only owner-specified limitations become SCADABLE weakness claims."""
