@@ -17,14 +17,9 @@ def swot_citation_violations(
             violations.append("A SWOT entry object must cite at least one page.")
         for c in entry.swot_citations:
             company, page = c.swot_component_company_index, c.swot_component_page_index
-            if not company:
-                violations.append("No company index provided")
-                continue
-            if not page:
-                violations.append("No page index provided")
-                continue
             if not 0 <= company < len(company_urls):
                 violations.append(f"Company number {company} does not exist.")
+                continue
             if not 0 <= page < len(company_urls[company]):
                 violations.append(f"Page number {page} does not exist for company {company}.")
         if entry.component in ("strength", "weakness") and not any(

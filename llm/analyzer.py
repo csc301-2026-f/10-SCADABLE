@@ -45,9 +45,10 @@ from llm.schemas import (
 from llm.validators import *
 
 load_dotenv()
-OPENAI_CALL_LIMIT = os.getenv("OPENAI_CALL_LIMIT")
-
-if not OPENAI_CALL_LIMIT:
+try:
+    # Max total model calls per conversation (first attempt included); falls back to 3.
+    OPENAI_CALL_LIMIT = int(os.getenv("OPENAI_CALL_LIMIT", "3"))
+except ValueError:
     OPENAI_CALL_LIMIT = 3
 
 def _extraction_by_index(position: int, company: ExtractedInformationByURL, url_index: list[dict[str, int]]) -> ExtractedInformationByIndex:
@@ -126,12 +127,13 @@ class Analyzer:
         ))
 
         while (full_feedback.feedback.feedbacks or full_feedback.citation_violations) and attempt_number < OPENAI_CALL_LIMIT:
+            attempt_number += 1
             partial = await self.client.generate_in_thread(
                         input_text=(
                             "A reviewer found bad values in your previous output (some rules were violated)."
                             "Fix them and return the corrected full output:\n"
                             f"{full_feedback.feedback.model_dump_json()} \n"
-                            "The reviewer also found some issues with your citation indexes. The indexes should range from 0 to {len(page_urls) - 1} inclusive: \n"
+                            f"The reviewer also found some issues with your citation indexes. The indexes should range from 0 to {len(page_urls) - 1} inclusive: \n"
                             f"{full_feedback.citation_violations}\n"
                             "Please fix the citations so you are citing the data from the correct page sources with no out-of-range indexes."
                         ),
@@ -162,10 +164,12 @@ class Analyzer:
         
             ))
 
-            attempt_number += 1
+        # The retry budget may run out with citations still invalid; fail loudly then.
+        if full_feedback.citation_violations:
+            what, index = full_feedback.citation_violations[0]
+            raise ValueError(f"{what} page index {index} is out of range (0 to {len(page_urls) - 1}).")
 
-
-        result = ExtractedInformationByURL(company_name=data.company_name, 
+        result =ExtractedInformationByURL(company_name=data.company_name, 
                                       summary=partial.summary,
                                       summary_page_urls=[page_urls[p] for p in partial.summary_page_indexes], 
                                       job_postings=[JobCitedByURL(role=job.role, category=job.category, job_families=job.job_families, job_page_url=page_urls[job.job_page_index]) for job in partial.job_postings],
@@ -178,8 +182,8 @@ class Analyzer:
     async def compare(self, data: ComparisonInput) -> SWOTAnalysisByURL:
         attempt_number = 1
         conversation_id = await self.client.start_thread(instructions=COMPARISON_SYSTEM_PROMPT, 
-                                                    metadata={"step": "extraction", "company": data.company_name})
-        companies = [data.scadable, *data.competitors]
+                                                    metadata={"step": "comparison"})
+        companies =[data.scadable, *data.competitors]
         company_urls = [list(dict.fromkeys([c.claim_page_url for c in company.claims_cited] + [j.job_page_url for j in company.job_postings]))
                         for company in companies]
 
@@ -221,6 +225,7 @@ class Analyzer:
                                          feature_pair_violations=fpv)
 
         while (full_feedback.feedback.feedbacks or any([scv, fsv, csv, fpv])) and attempt_number < OPENAI_CALL_LIMIT:
+            attempt_number += 1
             response = await self.client.generate_in_thread(
                                     input_text=(
                                         "A reviewer went through your previous response to find any violations from your output. "
@@ -259,8 +264,6 @@ class Analyzer:
                                                 feature_score_violations=fsv, 
                                                 competitor_swot_violations=csv, 
                                                 feature_pair_violations=fpv)
-
-            attempt_number += 1
 
         # A crawled job URL may be valid, but SWOT findings must be supported
         # by a cited CLAIM, not merely a page containing a job posting.
