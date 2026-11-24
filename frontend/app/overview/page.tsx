@@ -119,24 +119,31 @@ export default function OverviewPage() {
     );
   }
 
+  const hasPublishedFindings = QUADRANTS.some(({ key }) => data[key].length > 0);
+
   return (
     <main className={styles.page}>
       <header>
         <h1 className={styles.title}>SWOT overview</h1>
         <p className={styles.sub}>
-          {data.isStale
+          {data.isStale && !hasPublishedFindings
             ? "Overall SWOT needs refreshing"
-            : `Findings across all tracked competitors · last updated ${
+            : `${data.isStale ? "Previously published findings" : "Findings across all tracked competitors"} · last updated ${
                 data.updatedAt ? formatDate(data.updatedAt) : "Not yet"
               }`}
         </p>
       </header>
 
       {data.isStale ? (
-        <p className={styles.state} role="status">
-          Overall SWOT is out of date. A successful comparison is needed to refresh these findings.
-        </p>
-      ) : (
+        <div className={styles.staleNotice} role="status">
+          <strong>SWOT findings may be outdated.</strong>{" "}
+          {hasPublishedFindings
+            ? "These are the last successfully published findings. SCADABLE's baseline or competitor research has changed since then; a successful comparison will update them."
+            : "No overall findings have been published yet. A successful comparison is needed to populate the overview."}
+        </div>
+      ) : null}
+
+      {hasPublishedFindings || !data.isStale ? (
         <div className={styles.grid}>
           {QUADRANTS.map(({ key, title }) => {
             const items = data[key];
@@ -163,7 +170,7 @@ export default function OverviewPage() {
             );
           })}
         </div>
-      )}
+      ) : null}
     </main>
   );
 }

@@ -24,6 +24,21 @@
   font-family: var(--font-sans);
 }
 
+.staleNotice {
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--orange);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--sub);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.staleNotice strong {
+  color: var(--ink);
+}
+
 .retry {
   margin-top: 8px;
   padding: 6px 14px;

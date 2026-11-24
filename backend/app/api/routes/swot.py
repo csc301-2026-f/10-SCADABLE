@@ -69,14 +69,20 @@ def _citation_sources(db: Session) -> dict[tuple[str, str], list[dict[str, str |
 
 
 def _overview(db: Session) -> SwotOverview:
-    """Return only published current overall findings, never stale fallback data."""
-    if not repo.is_overall_swot_current(db):
-        # An empty new installation has no outdated findings to warn about.
-        has_prior_data = bool(repo.get_overall_swot(db) or repo.has_completed_research(db))
-        return _group([], is_stale=has_prior_data)
+    """Return the last published overall findings with an explicit freshness flag.
+
+    A GitHub baseline sync or new research run can invalidate the comparison,
+    but must not hide findings that were successfully published earlier.
+    Never substitute individual competitor SWOT entries for the overall SWOT.
+    """
+    published = repo.get_overall_swot(db)
+    is_stale = not repo.is_overall_swot_current(db)
+    if not published:
+        # A new installation with no research should not display a stale warning.
+        return _group([], is_stale=is_stale and repo.has_completed_research(db))
     evidence = _citation_sources(db)
     findings = []
-    for entry in repo.get_overall_swot(db):
+    for entry in published:
         key = (entry.category.value, " ".join(entry.content.split()).casefold())
         sources = evidence.get(key)
         if sources is None:
@@ -90,7 +96,7 @@ def _overview(db: Session) -> SwotOverview:
                         and parsed.hostname.removeprefix("www.") != "scadable.com"):
                     sources.append({"kind": "competitor", "label": serializers.source_label(entry.source_url), "url": entry.source_url})
         findings.append(serializers.finding_from_entry(entry, None, sources=sources))
-    return _group(findings)
+    return _group(findings, is_stale=is_stale)
 
 
 @router.get(
@@ -126,6 +132,6 @@ def get_swot(
 @router.get("/overview", response_model=SwotOverview, summary="Get the overall SWOT")
 def get_swot_overview(db: Session = Depends(get_db)) -> SwotOverview:
     """SCADABLE's overall SWOT against all researched competitors (used by the
-    frontend overview page). ``isStale`` is true while a newer comparison is pending
-    or after one failed; outdated findings are never returned."""
+    frontend overview page). ``isStale`` indicates that a newer comparison is
+    pending or failed; last published findings remain available as historical data."""
     return _overview(db)
