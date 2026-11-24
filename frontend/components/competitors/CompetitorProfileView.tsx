@@ -18,10 +18,14 @@ import { useFocusTrap } from "@/lib/a11y/useFocusTrap";
 import { toUserFacingError } from "@/lib/errors";
 import { displayWebsite, formatRelativePast, formatRefreshDate } from "@/lib/format";
 import { profilePollInterval, runsPollInterval } from "@/lib/polling";
-import { latestSuccessfulRunForCompetitor } from "@/lib/runs/stats";
+import {
+  latestRunForCompetitor,
+  latestSuccessfulRunForCompetitor,
+} from "@/lib/runs/stats";
 import { ConflictingDataTable } from "./ConflictingDataTable";
 import { ProfileVisuals } from "./ProfileVisuals";
 import { ResearchStatusBanner } from "./ResearchStatusBanner";
+import { SinceLastRunCard } from "./SinceLastRunCard";
 import styles from "./CompetitorProfile.module.css";
 
 const TREND_LABEL: Record<Trend, string> = {
@@ -83,10 +87,26 @@ export function CompetitorProfileView({ id }: { id: string }) {
     refetchInterval: (query) => profilePollInterval(query.state.data),
   });
 
-  const { data: runs } = useQuery({
+  const {
+    data: runs,
+    isPending: runsPending,
+    isError: runsError,
+    isStale: runsStale,
+  } = useQuery({
     queryKey: ["runs"],
     queryFn: () => runsApi.listRuns(),
-    refetchInterval: (query) => runsPollInterval(query.state.data),
+    refetchInterval: (query) =>
+      runsPollInterval(query.state.data) ||
+      (data && isResearchPending(data.researchStatus)
+        ? profilePollInterval(data)
+        : false),
+  });
+
+  // Keyed on lastResearchedAt so the diff refetches when a new run completes.
+  const { data: changes, isPending: changesPending, isError: changesError } = useQuery({
+    queryKey: ["competitor-changes", id, data?.lastResearchedAt ?? null],
+    queryFn: () => competitorsApi.getCompetitorChanges(id),
+    enabled: Boolean(data?.lastResearchedAt),
   });
 
   const sources = useMemo(
@@ -166,10 +186,34 @@ export function CompetitorProfileView({ id }: { id: string }) {
     },
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: (runId: string) => runsApi.cancelRun(runId),
+    onSuccess: () => {
+      queryClient.setQueryData(["competitor", id], (current: typeof data) =>
+        current ? { ...current, researchStatus: "cancelled" as const } : current,
+      );
+      queryClient.setQueryData<CompetitorSummary[]>(["competitors"], (prev) =>
+        (prev ?? []).map((c) =>
+          c.id === id ? { ...c, researchStatus: "cancelled" } : c,
+        ),
+      );
+    },
+    onSettled: () => {
+      // A failed cancel usually means the run just finished, so refresh either way.
+      void queryClient.invalidateQueries({ queryKey: ["competitor", id] });
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["competitors"] });
+    },
+  });
+
   // Keep list/runs caches in sync when polling finishes research on this profile.
   useEffect(() => {
     if (!data) return;
-    if (data.researchStatus !== "success" && data.researchStatus !== "failed") {
+    if (
+      data.researchStatus !== "success" &&
+      data.researchStatus !== "failed" &&
+      data.researchStatus !== "cancelled"
+    ) {
       return;
     }
     void queryClient.invalidateQueries({ queryKey: ["competitors"] });
@@ -187,6 +231,36 @@ export function CompetitorProfileView({ id }: { id: string }) {
       </p>
     );
   }
+
+  const latestRun =
+    data.researchStatus === "running" &&
+    runs &&
+    !runsPending &&
+    !runsError &&
+    !runsStale &&
+    !rerunMutation.isPending
+      ? latestRunForCompetitor(runs, id)
+      : undefined;
+  const activeStep =
+    latestRun?.status === "running" &&
+    latestRun.finishedAt === null &&
+    (!data.lastResearchedAt ||
+      Date.parse(latestRun.startedAt) > Date.parse(data.lastResearchedAt))
+      ? latestRun.steps.find((step) => step.status === "running")
+      : undefined;
+  // The queued or running run that the banner's Cancel button stops
+  const runToCancel =
+    isResearchPending(data.researchStatus) &&
+    runs &&
+    !runsPending &&
+    !runsError &&
+    !rerunMutation.isPending
+      ? latestRunForCompetitor(runs, id)
+      : undefined;
+  const cancellableRunId =
+    runToCancel && isResearchPending(runToCancel.status)
+      ? runToCancel.id
+      : undefined;
 
   return (
     <div className={styles.page}>
@@ -217,16 +291,51 @@ export function CompetitorProfileView({ id }: { id: string }) {
       <ResearchStatusBanner
         status={data.researchStatus}
         competitorName={data.name}
+        activeStep={activeStep}
         rerunning={rerunMutation.isPending}
         onRerun={
-          data.researchStatus === "failed"
-            ? () => rerunMutation.mutate()
+          data.researchStatus === "failed" || data.researchStatus === "cancelled"
+            ? () => {
+                cancelMutation.reset();
+                rerunMutation.mutate();
+              }
             : undefined
+        }
+        onCancel={
+          cancellableRunId
+            ? () => cancelMutation.mutate(cancellableRunId)
+            : undefined
+        }
+        cancelling={cancelMutation.isPending}
+        cancelError={
+          cancelMutation.isError
+            ? toUserFacingError(
+                cancelMutation.error,
+                "Could not cancel the run. Please try again.",
+              )
+            : null
         }
       />
 
       <div className={styles.grid}>
         <div>
+          {changes ? (
+            <SinceLastRunCard changes={changes} />
+          ) : (
+            <section className={styles.card}>
+              <h2>Since last run</h2>
+              <p className={styles.empty}>
+                {!data.lastResearchedAt
+                  ? "Complete research to start tracking changes."
+                  : changesError
+                    ? "Run comparisons are temporarily unavailable."
+                    : changesPending
+                      ? "Loading run comparisons…"
+                      : "Run research again to compare findings."}
+              </p>
+            </section>
+          )}
+
           <section className={styles.card}>
             <h2>Feature & automation score</h2>
             {data.chartSeries.scores.length === 0 ? (
@@ -326,9 +435,10 @@ export function CompetitorProfileView({ id }: { id: string }) {
         </div>
       </div>
 
-      {(data.conflictingData?.length ?? 0) > 0 ? (
-        <ConflictingDataTable conflicts={data.conflictingData ?? []} />
-      ) : null}
+      <ConflictingDataTable
+        conflicts={data.conflictingData ?? []}
+        hasCompletedResearch={Boolean(data.lastResearchedAt)}
+      />
 
       <div className={styles.deleteBar}>
         <Button

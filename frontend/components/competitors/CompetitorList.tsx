@@ -156,6 +156,7 @@ export function CompetitorList() {
         </div>
       </div>
 
+      {/* Desktop / tablet: table */}
       <div className={styles.tableWrap}>
         <table className={styles.table}>
           <thead>
@@ -221,6 +222,36 @@ export function CompetitorList() {
           </tbody>
         </table>
       </div>
+
+      {/* Mobile: card list (table is hidden under 768px) */}
+      <ul className={styles.cards}>
+        {visible.length === 0 ? (
+          <li className={styles.cardsEmpty}>No competitors match this view.</li>
+        ) : (
+          visible.map((c) => (
+            <li key={c.id}>
+              <button
+                type="button"
+                className={styles.card}
+                onClick={() => router.push(`/competitors/${c.id}`)}
+              >
+                <span className={styles.cardTop}>
+                  <span className={styles.cardName}>{c.name}</span>
+                  <span className={`${styles.trend} ${activityClass(c)}`}>
+                    {activityLabel(c)}
+                  </span>
+                </span>
+                <span className={styles.cardSite}>
+                  {displayWebsite(c.website)}
+                </span>
+                <span className={styles.cardMeta}>
+                  Checked {formatRelativePast(c.lastResearchedAt)}
+                </span>
+              </button>
+            </li>
+          ))
+        )}
+      </ul>
     </div>
   );
 }

@@ -29,6 +29,7 @@ from app.db.models import (
     SWOTEntry,
 )
 from app.db.repository import (
+    InvalidStatusTransitionError,
     NotFoundError,
     create_research_run,
     get_competitor,
@@ -71,6 +72,9 @@ COST_LOOKUP_ATTEMPTS = 2
 # Increment whenever LLM prompts, extraction rules or analysis-input processing change.
 # This belongs on the saved analysis, not the page-content hash.
 ANALYSIS_POLICY_VERSION = os.getenv("ANALYSIS_POLICY_VERSION", "2026-11-06-scraper-v2")
+# Bump when the overall comparison prompt or its interpretation changes. This
+# invalidates saved SWOT contributions without recrawling competitor websites.
+COMPARISON_POLICY_VERSION = "2026-11-23-weakness-evidence-v1"
 
 
 
@@ -187,8 +191,15 @@ def _scores_by_company(
 
 
 def _baseline_digest(baseline: dict[str, Any]) -> str:
-    """Fingerprint the actual active GitHub/static baseline, not just its timestamp."""
-    canonical = json.dumps(baseline, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    """Fingerprint the active baseline AND the comparison prompt policy.
+
+    Kept in the existing digest column: old saved snapshots automatically
+    become ineligible for reuse when the policy changes, without a migration.
+    """
+    canonical = json.dumps(
+        {"baseline": baseline, "comparison_policy_version": COMPARISON_POLICY_VERSION},
+        sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -201,7 +212,7 @@ def _combine_contributions(
     merging stays with the LLM team to avoid incorrectly merging distinct facts.
     """
     result = []
-    seen: set[tuple[str, str]] = set()
+    by_key: dict[tuple[str, str], dict[str, Any]] = {}
     for competitor_id in sorted(contributions):
         for entry in contributions[competitor_id]:
             if not isinstance(entry, dict):
@@ -210,14 +221,24 @@ def _combine_contributions(
             if category not in {item.value for item in SWOTCategory} or not isinstance(content, str) or not content.strip():
                 continue
             key = (category, " ".join(content.split()).casefold())
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append({
-                "category": category,
-                "content": content.strip(),
-                "source_url": entry.get("source_url"),
-            })
+            urls = entry.get("source_urls")
+            if not isinstance(urls, list):
+                urls = [entry.get("source_url")]
+            if key not in by_key:
+                item = {
+                    "category": category,
+                    "content": content.strip(),
+                    "source_url": entry.get("source_url"),
+                    "source_urls": [],
+                    "uses_scadable_baseline": category in {"strength", "weakness"},
+                }
+                by_key[key] = item
+                result.append(item)
+            item = by_key[key]
+            item["uses_scadable_baseline"] |= bool(entry.get("uses_scadable_baseline"))
+            for url in urls:
+                if isinstance(url, str) and url and url not in item["source_urls"]:
+                    item["source_urls"].append(url)
     return result
 
 
@@ -233,13 +254,19 @@ async def refresh_overall_swot(
     A newly changed competitor triggers an LLM comparison ONLY for itself.
     Existing snapshots for unrelated competitors are reused byte-for-byte.
     Initial rollout backfills missing snapshots once (one company at a time).
-    GitHub baseline changes invalidate all snapshots through their digest.
+    GitHub baseline and comparison-prompt changes invalidate snapshots through
+    their digest, without recrawling existing competitor research.
     After successful comparisons, scores, snapshots and the overview publish
     atomically under the existing input-revision guard.
     """
     try:
         if only_if_missing and is_overall_swot_current(db) and get_overall_swot(db):
-            return
+            # A published overview may still use an older LLM prompt policy.
+            # Do not let this short circuit prevent policy re-comparisons.
+            active_digest = _baseline_digest(get_scadable_baseline(db))
+            saved = get_overall_swot_contributions(db)
+            if saved and all(row.baseline_digest == active_digest for row in saved.values()):
+                return
         revision = get_overall_swot_revision(db)
         baseline = get_scadable_baseline(db)
         digest = _baseline_digest(baseline)
@@ -331,7 +358,19 @@ async def refresh_overall_swot(
                 source = entry.get("source_url")
                 if source is not None and not isinstance(source, str):
                     raise ValueError("LLM SWOT source_url must be text or null")
-                entries.append({"category": category, "content": content.strip(), "source_url": source})
+                source_urls = entry.get("source_urls")
+                if source_urls is None:
+                    source_urls = [source] if source else []
+                if (not isinstance(source_urls, list)
+                        or any(not isinstance(url, str) or not url.startswith(("https://", "http://"))
+                               for url in source_urls)):
+                    raise ValueError("LLM SWOT source_urls must be HTTP(S) URLs")
+                entries.append({
+                    "category": category, "content": content.strip(), "source_url": source,
+                    "source_urls": list(dict.fromkeys(source_urls)),
+                    "uses_scadable_baseline": bool(entry.get("uses_scadable_baseline"))
+                    or category in {"strength", "weakness"},
+                })
             contributions[competitor.id] = entries
             updates[competitor.id] = {
                 "research_run_id": latest_run.id,
@@ -362,7 +401,81 @@ async def refresh_overall_swot(
         logger.exception("Overall SWOT comparison failed; prior results remain stored and stale")
 
 
+# Research jobs running in this process, by run ID, so a user can stop one.
+# The backend runs as a single process, so every job is registered here.
+_active_runs: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Task]] = {}
+
+
+def request_run_cancel(run_id: int) -> bool:
+    """Stop the run's job if this process is running it. Safe to call from any thread.
+
+    Mark the run CANCELLED first: the job reads that status to tell a user's
+    cancel apart from a server shutdown. Returns whether a job was found.
+    """
+    entry = _active_runs.get(run_id)
+    if entry is None:
+        return False
+    loop, _ = entry
+    loop.call_soon_threadsafe(_cancel_active_run, run_id)
+    return True
+
+
+def _cancel_active_run(run_id: int) -> None:
+    # Look the job up again on its own loop. If the run finished in the
+    # meantime, cancelling the task would stop its cost lookup instead.
+    entry = _active_runs.get(run_id)
+    if entry is not None:
+        entry[1].cancel()
+
+
+def _reload_run(db: Session, run_id: int) -> ResearchRun | None:
+    """The run as committed by any session, e.g. after the cancel endpoint changed it."""
+    db.rollback()
+    db.expire_all()
+    return get_research_run(db, run_id)
+
+
 async def execute_research_run(
+    db: Session,
+    run_id: int,
+    crawler: CrawlerProtocol | None = None,
+    analyzer: AnalyzerProtocol | None = None,
+    timeout_seconds: float = 90.0,
+) -> ResearchRun:
+    """Run the research pipeline for one run, letting a user stop it midway.
+
+    While the pipeline runs, its job is registered so ``request_run_cancel`` can
+    stop it. A stopped run keeps its CANCELLED status and earlier results stay
+    untouched. Callers still record the cost of the calls made before the stop.
+    """
+    task = asyncio.current_task()
+    if task is not None:
+        _active_runs[run_id] = (asyncio.get_running_loop(), task)
+    try:
+        return await _run_research_steps(db, run_id, crawler, analyzer, timeout_seconds)
+    except asyncio.CancelledError:
+        run = _reload_run(db, run_id)
+        if run is None or run.status != ResearchStatus.CANCELLED:
+            raise  # A server shutdown, not a user's cancel
+        if task is not None:
+            task.uncancel()
+        logger.info("Research run %s cancelled by user", run_id)
+        return run
+    except InvalidStatusTransitionError:
+        # The user cancelled before the run started or while a step was
+        # finishing, so it can no longer become RUNNING, COMPLETED or FAILED.
+        run = _reload_run(db, run_id)
+        if run is None or run.status != ResearchStatus.CANCELLED:
+            raise
+        logger.info("Research run %s cancelled by user", run_id)
+        return run
+    finally:
+        entry = _active_runs.get(run_id)
+        if entry is not None and entry[1] is task:
+            del _active_runs[run_id]
+
+
+async def _run_research_steps(
     db: Session,
     run_id: int,
     crawler: CrawlerProtocol | None = None,
@@ -538,6 +651,10 @@ async def execute_research_run(
             ResearchStatus.FAILED,
             error_message=CRAWL_FAILED_MESSAGE,
         )
+
+    except InvalidStatusTransitionError:
+        # The run was cancelled while a step finished. execute_research_run handles it.
+        raise
 
     except Exception:
         logger.exception("Research run %s failed unexpectedly", run_id)

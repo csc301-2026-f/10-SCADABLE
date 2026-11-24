@@ -31,6 +31,10 @@ SCADABLE_BASELINE: dict[str, Any] = {
         "Direct code-level remediation rather than passive configuration checks",
         "Lower total cost of ownership compared to legacy compliance platforms",
     ],
+    # Product owners can add confirmed limitations here or in the validated
+    # GitHub feature manifest. Never guess unavailable features from an omitted
+    # capability or mistake an advertised list for exhaustive coverage.
+    "verified_limitations": [],
 }
 
 

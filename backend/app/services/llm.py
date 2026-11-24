@@ -42,11 +42,7 @@ def _comparison_time() -> str:
 
 
 def _pick_source_url(urls: list[str], scadable_url: str) -> str | None:
-    """Pick the one source URL saved for an overall finding.
-
-    The database keeps one URL per finding. A scraped competitor page is
-    preferred because SCADABLE's own claims only cite its homepage.
-    """
+    """Legacy representative URL; full citations are separately preserved."""
     for url in urls:
         if url != scadable_url:
             return url
@@ -397,6 +393,15 @@ class OpenAIAdapter:
             for claim in baseline_context.get("differentiators", [])
             if isinstance(claim, str) and claim.strip()
         ]
+        baseline_claims.extend(
+            ClaimCitedByURL(
+                category="weakness",
+                claim=f"Documented SCADABLE limitation: {limitation}",
+                claim_page_url=scadable_url,
+            )
+            for limitation in baseline_context.get("verified_limitations", [])
+            if isinstance(limitation, str) and limitation.strip()
+        )
         frameworks = baseline_context.get("supported_frameworks", [])
         if frameworks:
             baseline_claims.append(ClaimCitedByURL(
@@ -509,6 +514,16 @@ class OpenAIAdapter:
                     "category": entry.component,
                     "content": entry.what,
                     "source_url": _pick_source_url(entry.swot_component_page_urls, scadable_url),
+                    # SCADABLE was supplied as a configured baseline, not crawled.
+                    # Its homepage must not be passed off as verified claim evidence.
+                    "uses_scadable_baseline": (
+                        entry.component in {"strength", "weakness"}
+                        or scadable_url in entry.swot_component_page_urls
+                    ),
+                    "source_urls": list(dict.fromkeys(
+                        url for url in entry.swot_component_page_urls
+                        if url != scadable_url
+                    )),
                 }
                 for entry in swot.SWOT_entries
                 if entry.what.strip()

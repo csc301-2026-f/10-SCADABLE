@@ -12,10 +12,14 @@ from app.api.schemas import (
     ApiResearchStatus,
     ChartPoint,
     ChartSeries,
+    CompetitorChanges,
     CompetitorProfile,
     CompetitorSummary,
+    ConflictClaimSide,
+    DataConflict,
     Finding,
     RunStep,
+    ScoreChange,
     ScoreSeries,
 )
 from app.db.models import Competitor, ResearchRun, ResearchStatus, SWOTEntry
@@ -23,12 +27,14 @@ from app.services.crawler import CRAWL_FAILED_MESSAGE
 from app.services.refresh_schedule import next_refresh_at
 from app.services.open_roles import open_roles_from_analysis
 import re
+import unicodedata
 
 _STATUS_MAP: dict[ResearchStatus, ApiResearchStatus] = {
     ResearchStatus.PENDING: "pending",
     ResearchStatus.RUNNING: "running",
     ResearchStatus.COMPLETED: "success",
     ResearchStatus.FAILED: "failed",
+    ResearchStatus.CANCELLED: "cancelled",
 }
 
 NOT_RESEARCHED_SUMMARY = "Profile not researched yet."
@@ -63,7 +69,10 @@ def source_label(url: str | None) -> str:
     return f"{host}{path}" or url
 
 
-def finding_from_entry(entry: SWOTEntry, competitor: Competitor | None) -> Finding:
+def finding_from_entry(
+    entry: SWOTEntry, competitor: Competitor | None,
+    sources: list[dict[str, str | None]] | None = None,
+) -> Finding:
     return Finding(
         id=str(entry.id),
         competitor_id=str(competitor.id) if competitor else "",
@@ -73,6 +82,7 @@ def finding_from_entry(entry: SWOTEntry, competitor: Competitor | None) -> Findi
         source_url=entry.source_url or "",
         source_label=source_label(entry.source_url),
         detected_at=entry.created_at,
+        sources=sources,
     )
 
 
@@ -152,11 +162,55 @@ def competitor_profile(
         ),
         findings=[finding_from_entry(e, competitor) for e in swot_entries],
         recent_activity=activity,
+        conflicting_data=_conflicts(analysis),
         chart_series=ChartSeries(
             scores=_scores(analysis) or _previous_scores(competitor.research_runs),
             activity_over_time=_activity_over_time(competitor.research_runs),
         ),
     )
+
+
+def _conflict_side(text: Any, url: Any) -> ConflictClaimSide | None:
+    if not isinstance(text, str) or not text.strip():
+        return None
+    # Only http(s) links reach the frontend's <a href>; anything else is shown unlinked
+    safe_url = (
+        url.strip()
+        if isinstance(url, str) and urlsplit(url.strip()).scheme in ("http", "https")
+        else None
+    )
+    return ConflictClaimSide(
+        text=text.strip(), source_label=source_label(safe_url), source_url=safe_url
+    )
+
+
+def _conflicts(analysis: dict[str, Any]) -> list[DataConflict]:
+    """LLM-flagged contradictions on the competitor's website, for the profile table.
+
+    The analyzer stores pairs (claim A vs claim B); pairs that share claim A (same
+    text and same page) are grouped into one row whose ``conflicts_with`` lists
+    every claim B. The same text on different pages stays separate so each row
+    keeps its own citation.
+    """
+    stored = analysis.get("conflicting_data")
+    pairs = stored.get("conflicts") if isinstance(stored, dict) else None
+    rows: dict[tuple[str, str | None], DataConflict] = {}
+    for pair in pairs if isinstance(pairs, list) else []:
+        if not isinstance(pair, dict):
+            continue
+        claim = _conflict_side(pair.get("claim_a"), pair.get("claim_a_page_URL"))
+        other = _conflict_side(pair.get("claim_b"), pair.get("claim_b_page_URL"))
+        if claim is None or other is None or claim.text == other.text:
+            continue
+        key = (claim.text, claim.source_url)
+        row = rows.get(key)
+        if row is None:
+            rows[key] = DataConflict(
+                id=f"conflict-{len(rows) + 1}", claim=claim, conflicts_with=[other]
+            )
+        elif other not in row.conflicts_with:
+            row.conflicts_with.append(other)
+    return list(rows.values())
 
 
 def _scores(analysis: dict[str, Any]) -> list[ScoreSeries]:
@@ -189,15 +243,110 @@ def _previous_scores(runs: Iterable[ResearchRun]) -> list[ScoreSeries]:
 
     Covers a latest run whose comparison failed or returned nothing usable.
     """
-    completed = sorted(
+    for run in _completed_newest_first(runs):
+        if series := _scores(_analysis(run)):
+            return series
+    return []
+
+
+def _completed_newest_first(runs: Iterable[ResearchRun]) -> list[ResearchRun]:
+    return sorted(
         (r for r in runs if r.status == ResearchStatus.COMPLETED),
         key=lambda r: (r.completed_at or r.created_at, r.id),
         reverse=True,
     )
-    for run in completed:
-        if series := _scores(_analysis(run)):
-            return series
-    return []
+
+
+def _finding_key(entry: SWOTEntry) -> tuple[str, str]:
+    """Same category and text (ignoring case, spacing, and a trailing period)."""
+    text = " ".join(entry.content.split()).rstrip(".").casefold()
+    return entry.category.value, text
+
+
+def _score_key(label: str, competitor_name: str) -> str:
+    """Normalize wording without guessing that two different features are equal.
+
+    Ignore casing, punctuation and the optional 'Company offers/provides ...'
+    introduction. Broader paraphrases are deliberately left unmatched rather
+    than being reported as features added or removed.
+    """
+    normalized = " ".join(re.findall(r"\w+", unicodedata.normalize("NFKC", label).casefold()))
+    company = " ".join(re.findall(r"\w+", competitor_name.casefold()))
+    if company and normalized.startswith(company + " "):
+        remainder = normalized[len(company) + 1:]
+        for verb in ("offers ", "provides ", "supports ", "includes "):
+            if remainder.startswith(verb):
+                return remainder[len(verb):]
+    return normalized
+
+
+def _comparable_scores(
+    scores: list[ScoreSeries], competitor_name: str
+) -> dict[str, ScoreSeries]:
+    """Only use unique feature keys; ambiguous duplicate keys can't be paired."""
+    by_key: dict[str, ScoreSeries | None] = {}
+    for score in scores:
+        key = _score_key(score.label, competitor_name)
+        if key in by_key:
+            by_key[key] = None
+        else:
+            by_key[key] = score
+    return {key: value for key, value in by_key.items() if value is not None}
+
+
+def competitor_changes(competitor: Competitor) -> CompetitorChanges:
+    """Compare the two most recent completed runs' extracted findings and
+    confidently matched feature scores. Unmatched LLM labels are not proof
+    that a feature was added or removed. Earlier valid scores remain reusable."""
+    completed = _completed_newest_first(competitor.research_runs)
+    current = completed[0] if completed else None
+    previous = completed[1] if len(completed) > 1 else None
+    if current is None or previous is None:
+        return CompetitorChanges(
+            competitor_id=str(competitor.id),
+            current_run_id=str(current.id) if current else None,
+            previous_run_id=None,
+            current_at=current.completed_at if current else None,
+            previous_at=None,
+            website_changed=False,
+            has_changes=False,
+        )
+
+    current_entries = {_finding_key(e): e for e in current.swot_entries}
+    previous_entries = {_finding_key(e): e for e in previous.swot_entries}
+    added = [
+        finding_from_entry(e, competitor).model_copy(update={"is_new": True})
+        for key, e in current_entries.items() if key not in previous_entries
+    ]
+    removed = [
+        finding_from_entry(e, competitor)
+        for key, e in previous_entries.items() if key not in current_entries
+    ]
+
+    now = _comparable_scores(_previous_scores(completed), competitor.name)
+    before = _comparable_scores(_previous_scores(completed[1:]), competitor.name)
+    score_changes = [
+        ScoreChange(
+            label=series.label,
+            previous=before[key].competitor,
+            current=series.competitor,
+        )
+        for key, series in now.items()
+        if key in before and before[key].competitor != series.competitor
+    ]
+
+    return CompetitorChanges(
+        competitor_id=str(competitor.id),
+        current_run_id=str(current.id),
+        previous_run_id=str(previous.id),
+        current_at=current.completed_at,
+        previous_at=previous.completed_at,
+        website_changed=not _analysis(current).get("skipped_llm"),
+        has_changes=bool(added or removed or score_changes),
+        added_findings=added,
+        removed_findings=removed,
+        score_changes=score_changes,
+    )
 
 
 def _activity_over_time(runs: Iterable[ResearchRun]) -> list[ChartPoint]:
@@ -236,6 +385,8 @@ def _activity_text(run: ResearchRun) -> str:
         return "Research run completed and findings updated"
     if run.status == ResearchStatus.FAILED:
         return f"Research run failed: {safe_run_error(run.error_message)}"
+    if run.status == ResearchStatus.CANCELLED:
+        return "Research run cancelled"
     if run.status == ResearchStatus.RUNNING:
         return "Research run in progress"
     return "Research run queued"
@@ -253,6 +404,8 @@ def _run_steps(run: ResearchRun) -> list[RunStep]:
             return RunStep(name=name, result=ok_text, status="success")
         if failed and reached:
             return RunStep(name=name, result="Failed", status="failed")
+        if run.status == ResearchStatus.CANCELLED and reached:
+            return RunStep(name=name, result="Cancelled", status="cancelled")
         if run.status == ResearchStatus.RUNNING and reached:
             return RunStep(name=name, result="In progress", status="running")
         return RunStep(name=name, result="Not started", status="pending")

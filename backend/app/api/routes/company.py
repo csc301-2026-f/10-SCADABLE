@@ -10,8 +10,10 @@ from app.db.database import get_db
 router = APIRouter(prefix="/company", tags=["company"])
 
 
-@router.get("", response_model=CompanyProfile)
+@router.get("", response_model=CompanyProfile, summary="Get SCADABLE's company profile")
 def get_company_profile(db: Session = Depends(get_db)) -> CompanyProfile:
+    """SCADABLE's offerings and positioning used as the analysis baseline, plus the
+    status of the GitHub feature-file sync."""
     baseline = get_scadable_baseline(db)
     frameworks = baseline.get("supported_frameworks", [])
     offerings = list(baseline.get("core_capabilities", []))

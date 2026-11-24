@@ -3,6 +3,7 @@ import styles from "./CompetitorProfile.module.css";
 
 type Props = {
   conflicts: DataConflict[];
+  hasCompletedResearch: boolean;
 };
 
 function ClaimText({ side }: { side: ConflictClaimSide }) {
@@ -39,35 +40,41 @@ function ConflictsWithCell({ sides }: { sides: ConflictClaimSide[] }) {
   );
 }
 
-/** Renders only when the parent passes a non-empty conflicts list. */
-export function ConflictingDataTable({ conflicts }: Props) {
-  if (conflicts.length === 0) return null;
-
+/** Show an explicit empty state when research found no conflicting claims. */
+export function ConflictingDataTable({ conflicts, hasCompletedResearch }: Props) {
   return (
     <section className={styles.card} aria-labelledby="conflicting-data-heading">
       <h2 id="conflicting-data-heading">Conflicting data</h2>
-      <div className={styles.conflictTableWrap}>
-        <table className={styles.conflictTable}>
-          <thead>
-            <tr>
-              <th scope="col">Claim</th>
-              <th scope="col">Conflicts with</th>
-            </tr>
-          </thead>
-          <tbody>
-            {conflicts.map((row) => (
-              <tr key={row.id}>
-                <td>
-                  <ClaimText side={row.claim} />
-                </td>
-                <td>
-                  <ConflictsWithCell sides={row.conflictsWith} />
-                </td>
+      {conflicts.length === 0 ? (
+        <p className={styles.empty}>
+          {hasCompletedResearch
+            ? "No conflicting claims identified in the latest research."
+            : "Conflicting claims will appear after research completes."}
+        </p>
+      ) : (
+        <div className={styles.conflictTableWrap}>
+          <table className={styles.conflictTable}>
+            <thead>
+              <tr>
+                <th scope="col">Claim</th>
+                <th scope="col">Conflicts with</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {conflicts.map((row) => (
+                <tr key={row.id}>
+                  <td>
+                    <ClaimText side={row.claim} />
+                  </td>
+                  <td>
+                    <ConflictsWithCell sides={row.conflictsWith} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }

@@ -195,3 +195,113 @@ def test_existing_legacy_overview_backfills_contributions_on_next_refresh(db):
     assert sorted(_contents(db)) == sorted([f"SCADABLE relative to {name}" for name in names])
     assert repo.is_overall_swot_current(db)
     assert len(analyzer.comparisons) == 2
+
+
+def test_overall_snapshot_preserves_multiple_citations_and_merges_duplicate_sources(db):
+    from app.api.routes.swot import _citation_sources
+    first = repo.create_competitor(db, "Vanta", "https://vanta.com")
+    second = repo.create_competitor(db, "Scrut", "https://scrut.io")
+    first_run = repo.create_research_run(db, first.id)
+    second_run = repo.create_research_run(db, second.id)
+    finding = "SCADABLE has developer-first compliance tooling"
+    first_entries = [{
+        "category": "strength", "content": finding,
+        "source_url": "https://vanta.com/features",
+        "source_urls": ["https://vanta.com/features", "https://vanta.com/platform"],
+        "uses_scadable_baseline": True,
+    }]
+    second_entries = [{
+        "category": "strength", "content": finding,
+        "source_url": "https://scrut.io/platform",
+        "source_urls": ["https://scrut.io/platform"],
+        "uses_scadable_baseline": True,
+    }]
+    rev = repo.get_overall_swot_revision(db)
+    combined = orchestrator._combine_contributions({
+        first.id: first_entries, second.id: second_entries,
+    })
+    assert len(combined) == 1
+    assert combined[0]["source_urls"] == [
+        "https://vanta.com/features", "https://vanta.com/platform",
+        "https://scrut.io/platform",
+    ]
+    assert repo.save_comparison_scores_if_current(
+        db, rev, {}, combined, contribution_updates={
+            first.id: {"research_run_id": first_run.id, "baseline_digest": "test", "entries": first_entries},
+            second.id: {"research_run_id": second_run.id, "baseline_digest": "test", "entries": second_entries},
+        },
+    )
+    first_snapshot = repo.get_overall_swot_contributions(db)[first.id]
+    assert first_snapshot.entries[0]["source_urls"] == [
+        "https://vanta.com/features", "https://vanta.com/platform",
+    ]
+    sources = _citation_sources(db)[("strength", finding.casefold())]
+    assert sources[0]["kind"] == "baseline"
+    assert [s["url"] for s in sources[1:]] == [
+        "https://vanta.com/features", "https://vanta.com/platform", "https://scrut.io/platform",
+    ]
+
+def test_policy_change_recompares_cached_competitors_without_recrawling(db, monkeypatch):
+    """Changing comparison logic makes old snapshots ineligible for reuse."""
+    analyzer = PerCompetitorAnalyzer()
+    vanta = repo.create_competitor(db, "Vanta", "https://vanta.com")
+    scrut = repo.create_competitor(db, "Scrut", "https://scrut.io")
+    _run(db, vanta, analyzer)
+    _run(db, scrut, analyzer)
+    initial = repo.get_overall_swot_contributions(db)
+    digests = {key: item.baseline_digest for key, item in initial.items()}
+    runs = {key: item.research_run_id for key, item in initial.items()}
+    assert len(analyzer.comparisons) == 2
+
+    monkeypatch.setattr(orchestrator, "COMPARISON_POLICY_VERSION", "new-comparison-rules")
+    asyncio.run(orchestrator.refresh_overall_swot(db, analyzer))
+    assert len(analyzer.comparisons) == 4
+    updated = repo.get_overall_swot_contributions(db)
+    assert all(item.baseline_digest != digests[key] for key, item in updated.items())
+    assert {key: item.research_run_id for key, item in updated.items()} == runs
+    assert repo.is_overall_swot_current(db)
+    assert _contents(db) == ["SCADABLE relative to Vanta", "SCADABLE relative to Scrut"]
+
+    asyncio.run(orchestrator.refresh_overall_swot(db, analyzer))
+    assert len(analyzer.comparisons) == 4  # New snapshots are reused.
+
+
+def test_only_if_missing_does_not_skip_comparison_policy_upgrade(db, monkeypatch):
+    analyzer = PerCompetitorAnalyzer()
+    vanta = repo.create_competitor(db, "Vanta", "https://vanta.com")
+    _run(db, vanta, analyzer)
+    assert repo.is_overall_swot_current(db)
+    monkeypatch.setattr(orchestrator, "COMPARISON_POLICY_VERSION", "new-policy-v2")
+    asyncio.run(orchestrator.refresh_overall_swot(db, analyzer, only_if_missing=True))
+    assert len(analyzer.comparisons) == 2
+    assert repo.is_overall_swot_current(db)
+    asyncio.run(orchestrator.refresh_overall_swot(db, analyzer, only_if_missing=True))
+    assert len(analyzer.comparisons) == 2
+
+
+def test_distinct_supported_weaknesses_are_preserved_without_a_quota(db):
+    """Fixture supplies two different supported gaps; neither is dropped."""
+    class TwoWeaknessAnalyzer(PerCompetitorAnalyzer):
+        async def compare(self, baseline_context, competitors, trace_prefix=None):
+            name = competitors[0]["company_name"]
+            self.comparisons.append(([name], baseline_context["summary"]))
+            return {
+                "swot_entries": [
+                    {"category": "strength", "content": "Documented remediation guidance", "source_url": None},
+                    {"category": "weakness", "content": "Verified framework coverage disadvantage", "source_url": None},
+                    {"category": "weakness", "content": "Verified integration coverage disadvantage", "source_url": None},
+                ],
+                "scores": [],
+            }
+
+    analyzer = TwoWeaknessAnalyzer()
+    company = repo.create_competitor(db, "Vanta", "https://vanta.com")
+    _run(db, company, analyzer)
+    entries = repo.get_overall_swot(db)
+    weaknesses = [entry.content for entry in entries if entry.category == models.SWOTCategory.WEAKNESS]
+    assert weaknesses == [
+        "Verified framework coverage disadvantage",
+        "Verified integration coverage disadvantage",
+    ]
+    saved = repo.get_overall_swot_contributions(db)[company.id].entries
+    assert len([item for item in saved if item["category"] == "weakness"]) == 2

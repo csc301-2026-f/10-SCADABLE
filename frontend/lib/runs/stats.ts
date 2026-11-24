@@ -30,9 +30,11 @@ function sortRunsNewestFirst(runs: AgentRun[]): AgentRun[] {
   );
 }
 
-/** Completed runs only (success / failed) — pending/running are still in progress. */
+/** Finished runs only (success / failed / cancelled) — pending/running are still in progress. */
 export function filterCompletedRuns(runs: AgentRun[]): AgentRun[] {
-  return runs.filter((r) => r.status === "success" || r.status === "failed");
+  return runs.filter(
+    (r) => r.status === "success" || r.status === "failed" || r.status === "cancelled",
+  );
 }
 
 export function latestRunPerCompetitor(runs: AgentRun[]): AgentRun[] {
@@ -49,18 +51,28 @@ export function latestRunPerCompetitor(runs: AgentRun[]): AgentRun[] {
   return [...latest.values()];
 }
 
+export function latestRunForCompetitor(
+  runs: AgentRun[],
+  competitorId: string,
+): AgentRun | undefined {
+  return sortRunsNewestFirst(
+    runs.filter((run) => run.competitorId === competitorId),
+  )[0];
+}
+
 /**
  * Latest completed run for a competitor, only if it succeeded.
  * Pending profiles / failed latest runs get no profile → runs link.
+ * Cancelled runs are skipped, since the profile still shows the earlier results.
  */
 export function latestSuccessfulRunForCompetitor(
   runs: AgentRun[],
   competitorId: string,
 ): AgentRun | null {
-  const latestCompleted =
-    sortRunsNewestFirst(filterCompletedRuns(runs)).find(
-      (run) => run.competitorId === competitorId,
-    ) ?? null;
+  const latestCompleted = latestRunForCompetitor(
+    filterCompletedRuns(runs).filter((run) => run.status !== "cancelled"),
+    competitorId,
+  );
 
   if (!latestCompleted || latestCompleted.status !== "success") {
     return null;
@@ -91,6 +103,7 @@ export function computeWeeklyRunStats(runs: AgentRun[]): WeeklyRunStats {
 export function formatRunStatus(status: AgentRun["status"]): string {
   if (status === "success") return "Success";
   if (status === "failed") return "Failed";
+  if (status === "cancelled") return "Cancelled";
   if (status === "running") return "Running";
   return "Pending";
 }

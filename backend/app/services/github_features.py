@@ -32,6 +32,9 @@ class FeatureManifest(BaseModel):
     supported_frameworks: list[str] = Field(default_factory=list, max_length=80)
     core_capabilities: list[str] = Field(min_length=1, max_length=100)
     differentiators: list[str] = Field(default_factory=list, max_length=80)
+    # Optional, owner-reviewed product constraints. Older manifests stay valid.
+    # Only explicit facts, e.g. a documented cap or a confirmed planned feature.
+    verified_limitations: list[str] = Field(default_factory=list, max_length=80)
 
     @field_validator("schema_version")
     @classmethod
@@ -55,7 +58,7 @@ class FeatureManifest(BaseModel):
             raise ValueError("website_url must be an HTTPS URL without credentials")
         return v
 
-    @field_validator("supported_frameworks", "core_capabilities", "differentiators")
+    @field_validator("supported_frameworks", "core_capabilities", "differentiators", "verified_limitations")
     @classmethod
     def nonempty_unique_strings(cls, items: list[str]) -> list[str]:
         result: list[str] = []

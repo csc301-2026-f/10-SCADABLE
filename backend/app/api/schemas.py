@@ -13,7 +13,7 @@ from pydantic.alias_generators import to_camel
 from app.db.repository import clean_url
 
 # Frontend status vocabulary ("success" where the DB says "completed").
-ApiResearchStatus = Literal["pending", "running", "success", "failed"]
+ApiResearchStatus = Literal["pending", "running", "success", "failed", "cancelled"]
 Trend = Literal["up", "flat", "down"]
 SwotCategory = Literal["strength", "weakness", "opportunity", "threat"]
 
@@ -64,6 +64,12 @@ class CreateCompetitorInput(ApiModel):
 # ---------------------------------------------------------------------------
 
 
+class FindingSource(ApiModel):
+    label: str
+    url: str | None = None
+    kind: Literal["baseline", "competitor"]
+
+
 class Finding(ApiModel):
     id: str
     competitor_id: str
@@ -73,6 +79,7 @@ class Finding(ApiModel):
     source_url: str
     source_label: str
     detected_at: datetime
+    sources: list[FindingSource] | None = None
     is_new: bool | None = None
     is_changed: bool | None = None
 
@@ -112,13 +119,53 @@ class CompetitorSummary(ApiModel):
     recent_change_summary: str | None
 
 
+class ConflictClaimSide(ApiModel):
+    """One statement in a conflict, with the competitor page it came from."""
+
+    text: str
+    source_label: str
+    source_url: str | None = None
+
+
+class DataConflict(ApiModel):
+    """A claim on the competitor's website and the statements that contradict it."""
+
+    id: str
+    claim: ConflictClaimSide
+    conflicts_with: list[ConflictClaimSide]
+
+
 class CompetitorProfile(CompetitorSummary):
     summary: str
     findings: list[Finding]
     recent_activity: list[ActivityItem]
     open_roles: int | None = None
     next_refresh_at: datetime | None = None
+    # Empty when the latest analysis found no contradictions.
+    conflicting_data: list[DataConflict] = []
     chart_series: ChartSeries = ChartSeries()
+
+
+class ScoreChange(ApiModel):
+    """A score change for a confidently matched feature across two runs."""
+    label: str
+    previous: float
+    current: float
+
+
+class CompetitorChanges(ApiModel):
+    """What changed between a competitor's two most recent completed research runs."""
+    competitor_id: str
+    current_run_id: str | None
+    previous_run_id: str | None
+    current_at: datetime | None
+    previous_at: datetime | None
+    # False when the latest run found the website unchanged and reused the last analysis.
+    website_changed: bool
+    has_changes: bool
+    added_findings: list[Finding] = []
+    removed_findings: list[Finding] = []
+    score_changes: list[ScoreChange] = []
 
 
 class CreateCompetitorResult(ApiModel):

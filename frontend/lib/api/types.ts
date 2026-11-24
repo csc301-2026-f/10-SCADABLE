@@ -1,4 +1,9 @@
-export type ResearchStatus = "pending" | "running" | "success" | "failed";
+export type ResearchStatus =
+  | "pending"
+  | "running"
+  | "success"
+  | "failed"
+  | "cancelled";
 
 export type Trend = "up" | "flat" | "down";
 
@@ -15,6 +20,8 @@ export type Finding = {
   text: string;
   sourceUrl: string;
   sourceLabel: string;
+  /** Overall SWOT: configured SCADABLE baseline versus independently crawled competitor pages. */
+  sources?: { label: string; url: string | null; kind: "baseline" | "competitor" }[] | null;
   detectedAt: string;
   isNew?: boolean;
   isChanged?: boolean;
@@ -53,6 +60,29 @@ export type DataConflict = {
   claim: ConflictClaimSide;
   /** One or more conflicting statements; UI bullets when length > 1. */
   conflictsWith: ConflictClaimSide[];
+};
+
+/** Score changes only for features confidently matched across two runs. */
+export type ScoreChange = {
+  label: string;
+  previous: number;
+  current: number;
+};
+
+/** `GET /competitors/{id}/changes`: diff of the two most recent completed runs. */
+export type CompetitorChanges = {
+  competitorId: string;
+  currentRunId: string | null;
+  /** Null when there is only one completed run, so nothing to compare yet. */
+  previousRunId: string | null;
+  currentAt: string | null;
+  previousAt: string | null;
+  /** False when the latest run found the website unchanged. */
+  websiteChanged: boolean;
+  hasChanges: boolean;
+  addedFindings: Finding[];
+  removedFindings: Finding[];
+  scoreChanges: ScoreChange[];
 };
 
 export type CompetitorSummary = {

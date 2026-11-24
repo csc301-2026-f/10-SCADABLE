@@ -28,6 +28,7 @@ class FakeStore:
         self.runs: dict[int, SimpleNamespace] = {}
         self.entries: dict[int, list[SimpleNamespace]] = {}  # run_id -> entries
         self.overall: list[SimpleNamespace] = []
+        self.overall_contributions: dict[int, SimpleNamespace] = {}
         self.overall_current = False
         self.triggered: list[int] = []
         self.overall_refreshes = 0
@@ -57,6 +58,7 @@ class FakeStore:
             error_message=error,
             scraped_data=scraped,
             analysis_result=analysis,
+            swot_entries=[],
         )
         self.runs[rid] = run
         competitor.research_runs.append(run)
@@ -71,6 +73,7 @@ class FakeStore:
             created_at=run.completed_at,
         )
         self.entries.setdefault(run.id, []).append(entry)
+        run.swot_entries.append(entry)
         return entry
 
     # --- repository fakes -------------------------------------------------
@@ -105,6 +108,9 @@ class FakeStore:
     def get_overall_swot(self, db):
         return self.overall
 
+    def get_overall_swot_contributions(self, db):
+        return self.overall_contributions
+
     def is_overall_swot_current(self, db):
         return self.overall_current
 
@@ -134,6 +140,7 @@ def store(monkeypatch):
     for name in (
         "get_competitor", "list_competitors", "create_competitor", "delete_competitor",
         "get_latest_research_run", "get_latest_swot", "get_overall_swot",
+        "get_overall_swot_contributions",
         "is_overall_swot_current", "has_completed_research", "get_research_run",
     ):
         monkeypatch.setattr(repo, name, getattr(fake, name))
@@ -318,6 +325,208 @@ def test_profile_keeps_previous_scores_when_latest_run_has_none(client, store):
     assert body["summary"] == "new"
     assert body["chartSeries"]["scores"] == [
         {"label": "Audits", "competitor": 6, "scadable": None}]
+
+
+def test_changes_diffs_findings_and_scores(client, store):
+    drata = store.add_competitor("Drata", "https://drata.com")
+    old = store.add_run(drata, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Audits", "score": 6}, {"feature": "Pricing", "score": 4},
+        {"feature": "Dropped", "score": 3}]})
+    store.add_entry(old, "strength", "Broad integrations", None)
+    store.add_entry(old, "weakness", "High pricing", "https://drata.com/pricing")
+    new = store.add_run(drata, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Audits", "score": 8}, {"feature": "Pricing", "score": 4},
+        {"feature": "AI assistant", "score": 7}]})
+    store.add_entry(new, "strength", "broad  integrations.", None)  # same finding
+    store.add_entry(new, "threat", "Launched AI assistant", "https://drata.com/ai")
+    store.add_run(drata, ResearchStatus.FAILED)  # ignored
+
+    body = client.get(f"/competitors/{drata.id}/changes").json()
+    assert body["currentRunId"] == str(new.id) and body["previousRunId"] == str(old.id)
+    assert body["websiteChanged"] is True and body["hasChanges"] is True
+    assert [(f["category"], f["text"], f["isNew"]) for f in body["addedFindings"]] == [
+        ("threat", "Launched AI assistant", True)]
+    assert [f["text"] for f in body["removedFindings"]] == ["High pricing"]
+    # Features scored in only one run aren't proof that they were added/removed.
+    assert body["scoreChanges"] == [
+        {"label": "Audits", "previous": 6, "current": 8},
+    ]
+
+
+def test_changes_matches_case_punctuation_and_company_prefix(client, store):
+    vanta = store.add_competitor("Vanta", "https://vanta.com")
+    store.add_run(vanta, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Questionnaire Automation.", "score": 7},
+        {"feature": "Trust Center", "score": 8},
+    ]})
+    store.add_run(vanta, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Vanta offers questionnaire automation", "score": 9},
+        {"feature": "trust center", "score": 8},
+    ]})
+    body = client.get(f"/competitors/{vanta.id}/changes").json()
+    assert body["scoreChanges"] == [
+        {"label": "Vanta offers questionnaire automation", "previous": 7, "current": 9},
+    ]
+    assert body["hasChanges"] is True
+
+
+def test_changes_does_not_report_unmatched_research_wording_as_new_features(client, store):
+    vanta = store.add_competitor("Vanta", "https://vanta.com")
+    store.add_run(vanta, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Risk management", "score": 8},
+        {"feature": "SOC 2 compliance", "score": 9},
+    ]})
+    store.add_run(vanta, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Vanta offers risk management and third-party risk management", "score": 8},
+        {"feature": "SOC 2 compliance", "score": 9},
+    ]})
+    body = client.get(f"/competitors/{vanta.id}/changes").json()
+    assert body["scoreChanges"] == []
+    assert body["hasChanges"] is False
+
+
+def test_changes_skips_ambiguous_duplicate_feature_labels(client, store):
+    vanta = store.add_competitor("Vanta", "https://vanta.com")
+    store.add_run(vanta, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Audit management", "score": 7},
+    ]})
+    store.add_run(vanta, ResearchStatus.COMPLETED, analysis={"scores": [
+        {"feature": "Audit management", "score": 8},
+        {"feature": "AUDIT MANAGEMENT.", "score": 9},
+    ]})
+    body = client.get(f"/competitors/{vanta.id}/changes").json()
+    assert body["scoreChanges"] == []
+
+
+def test_changes_reused_run_reports_no_changes(client, store):
+    drata = store.add_competitor("Drata", "https://drata.com")
+    first = store.add_run(drata, ResearchStatus.COMPLETED, analysis={
+        "scores": [{"feature": "Audits", "score": 6}]})
+    store.add_entry(first, "strength", "Broad integrations", None)
+    reused = store.add_run(drata, ResearchStatus.COMPLETED, analysis={
+        "skipped_llm": True, "reused_from_run_id": first.id,
+        "scores": [{"feature": "Audits", "score": 6}]})
+    store.add_entry(reused, "strength", "Broad integrations", None)
+    body = client.get(f"/competitors/{drata.id}/changes").json()
+    assert body["websiteChanged"] is False and body["hasChanges"] is False
+    assert body["addedFindings"] == body["removedFindings"] == body["scoreChanges"] == []
+
+
+def test_changes_keeps_earlier_scores_when_latest_comparison_failed(client, store):
+    drata = store.add_competitor("Drata", "https://drata.com")
+    store.add_run(drata, ResearchStatus.COMPLETED, analysis={
+        "scores": [{"feature": "Audits", "score": 6}]})
+    store.add_run(drata, ResearchStatus.COMPLETED, analysis={"scores": []})
+    assert client.get(f"/competitors/{drata.id}/changes").json()["scoreChanges"] == []
+
+
+def test_changes_with_one_or_no_completed_run(client, store, researched):
+    body = client.get(f"/competitors/{researched.id}/changes").json()
+    assert body["currentRunId"] is not None and body["previousRunId"] is None
+    assert body["hasChanges"] is False and body["addedFindings"] == []
+    fresh = store.add_competitor("New", "https://new.example")
+    body = client.get(f"/competitors/{fresh.id}/changes").json()
+    assert body["currentRunId"] is None and body["hasChanges"] is False
+
+
+def test_changes_unknown_competitor(client):
+    assert client.get("/competitors/999/changes").status_code == 404
+    assert client.get("/competitors/0/changes").status_code == 422
+
+
+def _conflict(a, b, a_url="https://drata.com/pricing", b_url="https://drata.com/faq"):
+    return {"claim_a": a, "claim_b": b, "claim_a_page_URL": a_url, "claim_b_page_URL": b_url}
+
+
+def test_profile_conflicting_data_groups_pairs_by_claim(client, store):
+    drata = store.add_competitor("Drata", "https://drata.com")
+    store.add_run(drata, ResearchStatus.COMPLETED, analysis={
+        "summary": "s",
+        "conflicting_data": {"company_name": "Drata", "conflicts": [
+            _conflict("Starts at $49/user/month", "Enterprise plans from $99/user/month"),
+            _conflict("Starts at $49/user/month", "Free tier with no per-seat fee",
+                      b_url="https://www.drata.com/blog/pricing/"),
+            _conflict("Hiring 4 engineers", "Team page lists 2 open roles",
+                      a_url="https://drata.com/careers", b_url="https://drata.com/team"),
+        ]},
+    })
+    conflicts = client.get(f"/competitors/{drata.id}").json()["conflictingData"]
+    assert conflicts == [
+        {
+            "id": "conflict-1",
+            "claim": {"text": "Starts at $49/user/month", "sourceLabel": "drata.com/pricing",
+                      "sourceUrl": "https://drata.com/pricing"},
+            "conflictsWith": [
+                {"text": "Enterprise plans from $99/user/month", "sourceLabel": "drata.com/faq",
+                 "sourceUrl": "https://drata.com/faq"},
+                {"text": "Free tier with no per-seat fee", "sourceLabel": "drata.com/blog/pricing",
+                 "sourceUrl": "https://www.drata.com/blog/pricing/"},
+            ],
+        },
+        {
+            "id": "conflict-2",
+            "claim": {"text": "Hiring 4 engineers", "sourceLabel": "drata.com/careers",
+                      "sourceUrl": "https://drata.com/careers"},
+            "conflictsWith": [{"text": "Team page lists 2 open roles",
+                               "sourceLabel": "drata.com/team",
+                               "sourceUrl": "https://drata.com/team"}],
+        },
+    ]
+
+
+def test_profile_conflicting_data_keeps_same_claim_from_different_pages_apart(client, store):
+    drata = store.add_competitor("Drata", "https://drata.com")
+    store.add_run(drata, ResearchStatus.COMPLETED, analysis={"conflicting_data": {"conflicts": [
+        _conflict("Starts at $7,500/year", "Pricing is custom",
+                  a_url="https://drata.com/pricing", b_url="https://drata.com/faq"),
+        _conflict("Starts at $7,500/year", "Contact sales for pricing",
+                  a_url="https://drata.com/blog/pricing", b_url="https://drata.com/demo"),
+    ]}})
+    rows = client.get(f"/competitors/{drata.id}").json()["conflictingData"]
+    assert [(r["claim"]["sourceUrl"], [c["text"] for c in r["conflictsWith"]]) for r in rows] == [
+        ("https://drata.com/pricing", ["Pricing is custom"]),
+        ("https://drata.com/blog/pricing", ["Contact sales for pricing"]),
+    ]
+
+
+def test_profile_conflicting_data_drops_bad_pairs_and_unsafe_links(client, store):
+    drata = store.add_competitor("Drata", "https://drata.com")
+    store.add_run(drata, ResearchStatus.COMPLETED, analysis={
+        "conflicting_data": {"conflicts": [
+            _conflict("", "Missing claim A"),
+            _conflict("Same text", "Same text"),
+            "not a dict",
+            _conflict("Claim", "Other", a_url="javascript:alert(1)", b_url=None),
+        ]},
+    })
+    conflicts = client.get(f"/competitors/{drata.id}").json()["conflictingData"]
+    assert conflicts == [{
+        "id": "conflict-1",
+        "claim": {"text": "Claim", "sourceLabel": "No source", "sourceUrl": None},
+        "conflictsWith": [{"text": "Other", "sourceLabel": "No source", "sourceUrl": None}],
+    }]
+
+
+@pytest.mark.parametrize("analysis", [
+    {"summary": "s"},
+    {"conflicting_data": None},
+    {"conflicting_data": {"company_name": "Drata", "conflicts": []}},
+    {"conflicting_data": {"conflicts": "not a list"}},
+])
+def test_profile_conflicting_data_empty_when_none_found(client, store, analysis):
+    drata = store.add_competitor("Drata", "https://drata.com")
+    store.add_run(drata, ResearchStatus.COMPLETED, analysis=analysis)
+    assert client.get(f"/competitors/{drata.id}").json()["conflictingData"] == []
+
+
+def test_profile_conflicting_data_from_reused_analysis(client, store):
+    drata = store.add_competitor("Drata", "https://drata.com")
+    first = store.add_run(drata, ResearchStatus.COMPLETED, analysis={
+        "conflicting_data": {"conflicts": [_conflict("A", "B")]}})
+    store.add_run(drata, ResearchStatus.COMPLETED, analysis={
+        "skipped_llm": True, "reused_from_run_id": first.id})
+    conflicts = client.get(f"/competitors/{drata.id}").json()["conflictingData"]
+    assert [c["claim"]["text"] for c in conflicts] == ["A"]
 
 
 @pytest.mark.parametrize("path,status", [("/competitors/999", 404), ("/competitors/abc", 422),
@@ -520,21 +729,107 @@ def test_swot_overview_prefers_overall(client, researched, store):
     assert body["threats"] == []
 
 
+def test_swot_overview_attributes_configured_baseline_and_multiple_competitor_sources(client, store):
+    store.overall_current = True
+    store.overall = [
+        SimpleNamespace(id=10, category=SWOTCategory.STRENGTH,
+                        content="SCADABLE offers developer-first remediation vs Vanta.",
+                        source_url="https://vanta.com/features", created_at=T0),
+        SimpleNamespace(id=11, category=SWOTCategory.WEAKNESS,
+                        content="SCADABLE has fewer supported frameworks.",
+                        source_url="https://scadable.com", created_at=T0),
+    ]
+    store.overall_contributions[1] = SimpleNamespace(entries=[
+        {"category": "strength", "content": store.overall[0].content,
+         "source_url": "https://vanta.com/features", "source_urls": [
+             "https://vanta.com/features", "https://vanta.com/pricing"],
+         "uses_scadable_baseline": True},
+        {"category": "weakness", "content": store.overall[1].content,
+         "source_url": "https://scadable.com", "source_urls": [],
+         "uses_scadable_baseline": True},
+    ])
+    # A second snapshot containing the same finding must add evidence, not duplicate it.
+    store.overall_contributions[2] = SimpleNamespace(entries=[
+        {"category": "strength", "content": store.overall[0].content,
+         "source_url": "https://scrut.io/platform", "source_urls": [
+             "https://vanta.com/features", "https://scrut.io/platform"],
+         "uses_scadable_baseline": True},
+    ])
+    body = client.get("/swot/overview").json()
+    assert body["isStale"] is False
+    assert body["strengths"][0]["sources"] == [
+        {"kind": "baseline", "label": "SCADABLE baseline (configured)", "url": None},
+        {"kind": "competitor", "label": "vanta.com/features", "url": "https://vanta.com/features"},
+        {"kind": "competitor", "label": "vanta.com/pricing", "url": "https://vanta.com/pricing"},
+        {"kind": "competitor", "label": "scrut.io/platform", "url": "https://scrut.io/platform"},
+    ]
+    assert body["weaknesses"][0]["sources"] == [
+        {"kind": "baseline", "label": "SCADABLE baseline (configured)", "url": None},
+    ]
+    # Older clients can still consume the legacy single citation field.
+    assert body["strengths"][0]["sourceUrl"] == "https://vanta.com/features"
+
+
+def test_swot_overview_legacy_snapshot_has_baseline_and_context_not_fabricated_sources(client, store):
+    store.overall_current = True
+    store.overall = [SimpleNamespace(
+        id=10, category=SWOTCategory.STRENGTH, content="SCADABLE works with developers",
+        source_url="https://vanta.com/features", created_at=T0,
+    )]
+    store.overall_contributions[1] = SimpleNamespace(entries=[
+        {"category": "strength", "content": store.overall[0].content,
+         "source_url": "https://vanta.com/features"},
+    ])
+    assert client.get("/swot/overview").json()["strengths"][0]["sources"] == [
+        {"kind": "baseline", "label": "SCADABLE baseline (configured)", "url": None},
+        {"kind": "competitor", "label": "vanta.com/features", "url": "https://vanta.com/features"},
+    ]
+
+
 def test_swot_overview_empty(client):
     assert client.get("/swot/overview").json() == {
         "isStale": False, "updatedAt": None, "strengths": [], "weaknesses": [],
         "opportunities": [], "threats": []}
 
 
-def test_swot_overview_hides_saved_findings_when_stale(client, researched, store):
+def test_swot_overview_preserves_last_published_findings_when_stale(client, researched, store):
     store.overall = [
         SimpleNamespace(id=99, category=SWOTCategory.STRENGTH, content="Old overall SWOT",
-                        source_url=None, created_at=T0)
+                        source_url="https://vanta.com/features", created_at=T0),
+        SimpleNamespace(id=100, category=SWOTCategory.WEAKNESS,
+                        content="Previously noted limited framework coverage",
+                        source_url=None, created_at=T0),
     ]
+    store.overall_contributions[researched.id] = SimpleNamespace(entries=[
+        {"category": "strength", "content": "Old overall SWOT",
+         "source_urls": ["https://vanta.com/features"],
+         "uses_scadable_baseline": True},
+    ])
     for url in ("/swot", "/swot/overview"):
         body = client.get(url).json()
         assert body["isStale"] is True
-        assert body["strengths"] == []
+        assert body["updatedAt"] == "2026-10-19T12:00:00Z"
+        assert [f["text"] for f in body["strengths"]] == ["Old overall SWOT"]
+        assert [f["text"] for f in body["weaknesses"]] == [
+            "Previously noted limited framework coverage"
+        ]
+        assert body["strengths"][0]["sources"] == [
+            {"kind": "baseline", "label": "SCADABLE baseline (configured)", "url": None},
+            {"kind": "competitor", "label": "vanta.com/features", "url": "https://vanta.com/features"},
+        ]
+        assert body["opportunities"] == []
+        assert body["threats"] == []
+
+
+def test_swot_overview_stale_without_any_published_findings(client, researched, store):
+    # A completed competitor run is not a substitute for an overall SWOT.
+    assert not store.overall
+    body = client.get("/swot/overview").json()
+    assert body["isStale"] is True
+    assert body["updatedAt"] is None
+    assert all(not body[key] for key in (
+        "strengths", "weaknesses", "opportunities", "threats"
+    ))
 
 
 # ---------------------------------------------------------------------------

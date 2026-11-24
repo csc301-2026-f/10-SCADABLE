@@ -38,7 +38,7 @@ def completed(session_factory, now, *, cost=None):
         repo.update_research_run_status(db, run.id, models.ResearchStatus.RUNNING)
         repo.update_research_run_status(db, run.id, models.ResearchStatus.COMPLETED)
         run.completed_at = now - timedelta(hours=1)
-        run.analysis_result = {"llm_calls": [f"run-{run.id}:vanta:analysis"]}
+        run.analysis_result = {"llm_calls": [f"run-{run.id}:vanta:extraction"]}
         if cost is not None:
             run.analysis_result["cost"] = cost
         db.commit()

@@ -1,6 +1,7 @@
 import { apiFetch, shouldUseMocks } from "@/lib/api/client";
 import type {
   AgentRun,
+  CompetitorChanges,
   CompetitorProfile,
   CompetitorSummary,
   CreateCompetitorInput,
@@ -164,6 +165,26 @@ export async function getCompetitor(id: string): Promise<CompetitorProfile> {
     return profile;
   }
   return apiFetch<CompetitorProfile>(`/competitors/${id}`);
+}
+
+/** What changed between the competitor's two most recent completed research runs. */
+export async function getCompetitorChanges(id: string): Promise<CompetitorChanges> {
+  if (shouldUseMocks()) {
+    await delay();
+    return {
+      competitorId: id,
+      currentRunId: null,
+      previousRunId: null,
+      currentAt: null,
+      previousAt: null,
+      websiteChanged: false,
+      hasChanges: false,
+      addedFindings: [],
+      removedFindings: [],
+      scoreChanges: [],
+    };
+  }
+  return apiFetch<CompetitorChanges>(`/competitors/${id}/changes`);
 }
 
 export async function createCompetitor(

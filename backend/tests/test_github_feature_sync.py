@@ -316,3 +316,29 @@ def test_webhook_duplicate_and_wrong_repo_cannot_trigger_sync(setup):
     assert client.post("/github/webhook", content=payload, headers=headers).json()["status"] == "ignored"
     assert client.get("/github/status", headers=HEADERS).json()["syncStatus"] == "not_synced"
     assert stub.calls == []
+
+def test_manifest_accepts_only_explicit_validated_limitations():
+    # Old manifests are compatible: no inferred limitations are introduced.
+    old = parse_feature_manifest(json.dumps(MANIFEST))
+    assert old["verified_limitations"] == []
+    document = {**MANIFEST, "verified_limitations": [
+        "Staging-only fixture limitation", "staging-only fixture limitation", "Planned fixture capability"
+    ]}
+    parsed = parse_feature_manifest(json.dumps(document))
+    assert parsed["verified_limitations"] == [
+        "Staging-only fixture limitation", "Planned fixture capability"
+    ]
+    with pytest.raises(FeatureFileError, match="verified_limitations"):
+        parse_feature_manifest(json.dumps({**MANIFEST, "verified_limitations": [" "]}))
+
+
+def test_synced_github_manifest_exposes_confirmed_limits_without_static_inheritance(setup):
+    client, _, stub = setup
+    _select(client)
+    stub.file = json.dumps({**MANIFEST, "verified_limitations": [
+        "Fixture plan is currently in beta"
+    ]})
+    assert client.post("/github/sync", headers=HEADERS).status_code == 200
+    baseline = client.get("/github/features", headers=HEADERS).json()["baseline"]
+    assert baseline["verified_limitations"] == ["Fixture plan is currently in beta"]
+    assert baseline["supported_frameworks"] == MANIFEST["supported_frameworks"]
