@@ -216,6 +216,50 @@ class CompetitorNote(BaseModel):
     company_name: str
     why_it_matters: str
 
+class SWOTFeedback(BaseModel):
+    what: SWOTComponent
+    why: str
+
+class CompanyFeedback(BaseModel):
+    company: str
+    feedbacks: list[SWOTFeedback]
+
+class SWOTFeedbacks(BaseModel):
+    """
+    A short feedback for the SWOT analysis, containing the names of the fields which had "bad outputs," along with 
+    how they can be corrected.
+    """
+    feedbacks: list[CompanyFeedback]
+
+class ExtractionFeedback(BaseModel):
+    """
+    a short feedback model for the company extraction.
+    """
+    what: str
+    why: str
+
+class ExtractionFeedbacks(BaseModel):
+    """
+    lists down all the feedback of failed output fields from the LLM response.
+    """
+    feedbacks: list[ExtractionFeedback]
+
+class FullExtractionFeedback(BaseModel):
+    """
+    lists down every feedback including citation indexing violations from the LLM output for data extraction.
+    """
+    feedback: ExtractionFeedbacks
+    citation_violations: list[tuple[str, int]]
+
+class FullSWOTFeedback(BaseModel):
+    """
+    lists down every feedback including citation violations from the LLM output for the final SWOT analysis.
+    """
+    feedback: SWOTFeedbacks
+    swot_citation_violations: list[str]
+    feature_score_violations: list[str]
+    competitor_swot_violations: list[str]
+    feature_pair_violations: list[str]
 
 class SWOTEntry(BaseModel):
     component: SWOTComponent

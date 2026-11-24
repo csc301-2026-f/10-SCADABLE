@@ -32,46 +32,99 @@ class OpenAIClient:
             tracing_enabled=bool(settings.langfuse_secret_key and settings.langfuse_public_key)
         )
 
-    async def generate_structured(
+    async def start_thread(
         self,
         *,
         instructions: str,
+        metadata: dict[str, str] | None = None,
+    ) -> str:
+        """Create a persistent conversation seeded with a step's instructions.
+
+        Returns the conversation id. Pass it to generate_in_thread() for the first
+        task call and for every feedback round after it.
+        """
+        conversation = await self.sdk.conversations.create(
+            metadata=metadata or {},
+            items=[
+                {
+                    "type": "message",
+                    "role": "developer",
+                    "content": instructions,
+                }
+            ],
+        )
+        return conversation.id
+
+    async def generate_in_thread(
+        self,
+        *,
+        conversation_id: str,
         input_text: str,
         output_schema: type[OutputModel],
-        observation_name: str="openai-api-call"
+        observation_name: str = "openai-api-thread-call",
     ) -> OutputModel:
-        """Send an explicit request and parse its output into a Pydantic model."""
+        """Send input into an existing conversation; prior turns are loaded server-side."""
+        return await self.generate_structured(
+            input_text=input_text,
+            output_schema=output_schema,
+            observation_name=observation_name,
+            conversation_id=conversation_id,
+        )
+
+    async def generate_structured(
+        self,
+        *,
+        instructions: str | None = None,
+        input_text: str,
+        output_schema: BaseModel,
+        observation_name: str="openai-api-call",
+        conversation_id: str | None = None,
+    ) -> BaseModel:
+        """Send an explicit request and parse its output into a Pydantic model.
+
+        Stateless by default (instructions required). With conversation_id, the
+        request runs inside that conversation: its instructions were seeded by
+        start_thread, and OpenAI stores both the input and the output in the thread.
+        """
+        input_items: list[dict] = []
+        request_kwargs: dict = {}
+        if conversation_id is None:
+            if instructions is None:
+                raise ValueError("instructions are required when no conversation_id is given.")
+            request_kwargs["instructions"] = instructions
+            input_items.append(
+                {
+                    "role": "developer",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": instructions,
+                            "prompt_cache_breakpoint": {
+                                "mode": "explicit",
+                            },
+                        }
+                    ],
+                }
+            )
+        else:
+            request_kwargs["conversation"] = conversation_id
+        input_items.append({"role": "user", "content": input_text})
+
         with self.cost_tracker.start_as_current_observation(
-            as_type="generation", 
-            name=observation_name, 
-            model=self.model
+            as_type="generation",
+            name=observation_name,
+            model=self.model,
+            input=input_items
             ) as generation:
             response = await self.sdk.responses.parse(
                 model=self.model,
-                instructions=instructions,
                 prompt_cache_options={
                     "mode": "explicit",
                     "ttl": "30m",
                 },
-                input=[
-                    {
-                        "role": "developer",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": instructions,
-                                "prompt_cache_breakpoint": {
-                                    "mode": "explicit",
-                                },
-                            }
-                        ],
-                    },
-                    {
-                        "role": "user",
-                        "content": input_text,
-                    },
-                ],
+                input=input_items,
                 text_format=output_schema,
+                **request_kwargs,
             )
 
             usage = response.usage

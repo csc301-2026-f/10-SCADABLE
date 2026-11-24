@@ -1,6 +1,14 @@
 """Structured analysis entry points with source-citation validation."""
+import os
+from dotenv import load_dotenv
 
 from llm.client import OpenAIClient
+from llm.prompts.validation import (
+    EXTRACTION_VALIDATION_SYSTEM_PROMPT,
+    SWOT_VALIDATION_SYSTEM_PROMPT,
+    build_swot_validation_user_prompt,
+    build_extraction_validation_user_prompt
+)
 from llm.prompts.comparison import (
     COMPARISON_SYSTEM_PROMPT,
     build_comparison_user_prompt,
@@ -9,6 +17,7 @@ from llm.prompts.competitor import (
     DATA_EXTRACTION_SYSTEM_PROMPT,
     build_extraction_user_prompt,
 )
+
 from llm.schemas import (
     AnalysisInput,
     ClaimCitedByURL,
@@ -23,78 +32,23 @@ from llm.schemas import (
     ExtractedInformationByIndex,
     ExtractedInformationByURL,
     FeatureScore,
-    FeatureScoreByIndex,
     SWOTAnalysisByIndex,
     SWOTAnalysisByURL,
     SWOTEntryByURL,
     SWOTEntryByIndex,
-    CompetitorSWOTByIndex,
     CompetitorSWOTByURL,
-    FeaturePairByIndex,
     FeaturePair,
+    FullExtractionFeedback, 
+    FullSWOTFeedback
 )
 
-def _validate_swot_citations(
-    company_urls: list[list[str]], entries: list[SWOTEntryByIndex],
-    *, owner_index: int = 0,
-) -> None:
-    for entry in entries:
-        if not entry.swot_citations:
-            raise ValueError("A SWOT entry must cite at least one page.")
-        for c in entry.swot_citations:
-            company, page = c.swot_component_company_index, c.swot_component_page_index
-            if not 0 <= company < len(company_urls):
-                raise ValueError(f"Company number {company} does not exist.")
-            if not 0 <= page < len(company_urls[company]):
-                raise ValueError(f"Page number {page} does not exist for company {company}.")
-        if entry.component in ("strength", "weakness") and not any(
-            c.swot_component_company_index == owner_index for c in entry.swot_citations
-        ):
-            raise ValueError(
-                "A strength or weakness must cite at least one page from its subject company."
-            )
+from llm.validators import *
 
-def _validate_feature_scores(company_count: int, scores: list[FeatureScoreByIndex]) -> None:
-    """Scores may belong to any company, including SCADABLE (index 0)."""
-    for score in scores:
-        if not 0 <= score.company_index < company_count:
-            raise ValueError(
-                f"Score company index {score.company_index} is out of range "
-                f"(valid: 0 to {company_count - 1})."
-            )
+load_dotenv()
+OPENAI_CALL_LIMIT = os.getenv("OPENAI_CALL_LIMIT")
 
-def _validate_competitor_swots(
-    company_urls: list[list[str]], blocks: list[CompetitorSWOTByIndex],
-) -> None:
-    seen: set[int] = set()
-    for block in blocks:
-        index = block.company_index
-        if not 1 <= index < len(company_urls):
-            raise ValueError(f"Competitor SWOT company index {index} is out of range.")
-        if index in seen:
-            raise ValueError(f"Duplicate competitor SWOT for company index {index}.")
-        seen.add(index)
-        _validate_swot_citations(company_urls, block.SWOT_entries, owner_index=index)
-
-
-def _validate_feature_pairs(
-    company_count: int, scores: list[FeatureScoreByIndex],
-    pairs: list[FeaturePairByIndex],
-) -> None:
-    scored = {(s.company_index, s.feature) for s in scores}
-    seen: set[tuple[int, str]] = set()
-    for pair in pairs:
-        if not 1 <= pair.company_index < company_count:
-            raise ValueError(f"Feature pair company index {pair.company_index} is out of range.")
-        key = (pair.company_index, pair.competitor_feature)
-        if key not in scored:
-            raise ValueError(f"Feature pair references unscored competitor feature: {key!r}.")
-        if key in seen:
-            raise ValueError(f"Duplicate feature pair for {key!r}.")
-        seen.add(key)
-        if pair.scadable_feature is not None and (0, pair.scadable_feature) not in scored:
-            raise ValueError("Feature pair references an unscored SCADABLE feature.")
-
+if not OPENAI_CALL_LIMIT:
+    OPENAI_CALL_LIMIT = 3
 
 def _extraction_by_index(position: int, company: ExtractedInformationByURL, url_index: list[dict[str, int]]) -> ExtractedInformationByIndex:
     """
@@ -123,11 +77,6 @@ def _extraction_by_index(position: int, company: ExtractedInformationByURL, url_
         ]
     )
 
-def _validate_citations(*, last_index: int, index_directory: dict[str, list]):
-    for what, indexes in index_directory.items():
-        for i in indexes or []:
-            if not 0 <= i <= last_index:
-                raise ValueError(f"{what} page index {i} is out of range (0 to {last_index}).")
 
 
 class Analyzer:
@@ -141,18 +90,32 @@ class Analyzer:
         return f"{self.trace_prefix}:{step}" if self.trace_prefix else default
 
     async def extract_information(self, data: AnalysisInput) -> ExtractedInformationByURL:
+        attempt_number = 1
+        conversation_id = await self.client.start_thread(instructions=DATA_EXTRACTION_SYSTEM_PROMPT, 
+                                                   metadata={"step": "extraction", "company": data.company_name})
         page_urls = [str(p.source.url) for p in data.pages]
         crawl_time_str = data.crawl_summary.finished_at.strftime("%Y-%m-%d %H:%M:%S")
-        partial = await self.client.generate_structured(
-            instructions=DATA_EXTRACTION_SYSTEM_PROMPT,
+        
+        partial = await self.client.generate_in_thread(
             input_text=build_extraction_user_prompt(data),
             output_schema=PartialExtractedInformationByIndex,
             observation_name=self._observation_name(
-                "extraction", data.company_name + "-extraction-" + crawl_time_str
+                f"extraction-{attempt_number}", data.company_name + f"-extraction-{attempt_number}-" + crawl_time_str
             ),
+            conversation_id=conversation_id
         )
-        
-        _validate_citations(
+
+        feedback = await validate_llm_response(client=self.client,
+                                               output_criteria=EXTRACTION_VALIDATION_SYSTEM_PROMPT, 
+                                               llm_output=build_extraction_validation_user_prompt(partial),
+                                               observation_name=self._observation_name(
+                                                   f"extraction-validation-{attempt_number}",
+                                                   data.company_name + f"-extraction-validation-{attempt_number}-" + crawl_time_str
+                                               ),
+                                               type="extraction")
+
+        full_feedback = FullExtractionFeedback(feedback=feedback, 
+                                                       citation_violations=citation_violations(
             last_index=len(page_urls) - 1,
             index_directory={"Claim": [p.claim_page_index for p in partial.claims_cited], 
                             "Job posting": [p.job_page_index for p in partial.job_postings],
@@ -160,7 +123,48 @@ class Analyzer:
                             "Conflicting data": [c.claim_a_page_index for c in partial.conflicting_data] + [c.claim_b_page_index for c in partial.conflicting_data]
                             }
 
-        )
+        ))
+
+        while (full_feedback.feedback.feedbacks or full_feedback.citation_violations) and attempt_number < OPENAI_CALL_LIMIT:
+            partial = await self.client.generate_in_thread(
+                        input_text=(
+                            "A reviewer found bad values in your previous output (some rules were violated)."
+                            "Fix them and return the corrected full output:\n"
+                            f"{full_feedback.feedback.model_dump_json()} \n"
+                            "The reviewer also found some issues with your citation indexes. The indexes should range from 0 to {len(page_urls) - 1} inclusive: \n"
+                            f"{full_feedback.citation_violations}\n"
+                            "Please fix the citations so you are citing the data from the correct page sources with no out-of-range indexes."
+                        ),
+                        output_schema=PartialExtractedInformationByIndex,
+                        observation_name=self._observation_name(
+                            f"extraction-{attempt_number}", data.company_name + f"-extraction-{attempt_number}-" + crawl_time_str
+                        ),
+                        conversation_id=conversation_id
+                    )
+            
+            feedback = await validate_llm_response(client=self.client,
+                                                    output_criteria=EXTRACTION_VALIDATION_SYSTEM_PROMPT, 
+                                                    llm_output=build_extraction_validation_user_prompt(partial),
+                                                    observation_name=self._observation_name(
+                                                        f"extraction-validation-{attempt_number}", 
+                                                        data.company_name + f"-extraction-validation-{attempt_number}-" + crawl_time_str
+                                                    ),
+                                                    type="extraction")
+
+            full_feedback = FullExtractionFeedback(feedback=feedback, 
+                                                                citation_violations=citation_violations(
+                    last_index=len(page_urls) - 1,
+                    index_directory={"Claim": [p.claim_page_index for p in partial.claims_cited], 
+                                    "Job posting": [p.job_page_index for p in partial.job_postings],
+                                    "Summary": partial.summary_page_indexes,
+                                    "Conflicting data": [c.claim_a_page_index for c in partial.conflicting_data] + [c.claim_b_page_index for c in partial.conflicting_data]
+                                    }
+        
+            ))
+
+            attempt_number += 1
+
+
         result = ExtractedInformationByURL(company_name=data.company_name, 
                                       summary=partial.summary,
                                       summary_page_urls=[page_urls[p] for p in partial.summary_page_indexes], 
@@ -172,6 +176,9 @@ class Analyzer:
         return result
 
     async def compare(self, data: ComparisonInput) -> SWOTAnalysisByURL:
+        attempt_number = 1
+        conversation_id = await self.client.start_thread(instructions=COMPARISON_SYSTEM_PROMPT, 
+                                                    metadata={"step": "extraction", "company": data.company_name})
         companies = [data.scadable, *data.competitors]
         company_urls = [list(dict.fromkeys([c.claim_page_url for c in company.claims_cited] + [j.job_page_url for j in company.job_postings]))
                         for company in companies]
@@ -185,17 +192,76 @@ class Analyzer:
         )
 
         response = await self.client.generate_structured(
-            instructions=COMPARISON_SYSTEM_PROMPT,
             input_text=build_comparison_user_prompt(llm_input),
             output_schema=SWOTAnalysisByIndex,
             observation_name=self._observation_name(
-                "comparison", "SWOT-" + data.scadable.crawl_time_string
+                f"comparison-{attempt_number}", f"SWOT-{attempt_number}-" + data.scadable.crawl_time_string
             ),
+            conversation_id=conversation_id
         )
-        _validate_swot_citations(company_urls, response.SWOT_entries)
-        _validate_feature_scores(len(companies), response.scores)
-        _validate_competitor_swots(company_urls, response.competitor_swots)
-        _validate_feature_pairs(len(companies), response.scores, response.feature_pairs)
+
+        feedback = await validate_llm_response(client=self.client, 
+                                               output_criteria=SWOT_VALIDATION_SYSTEM_PROMPT, 
+                                               llm_output=build_swot_validation_user_prompt(response), 
+                                               observation_name=self._observation_name(
+                                                   f"comparison-validation-{attempt_number}",
+                                                   f"SWOT-validation-{attempt_number}-" + data.scadable.crawl_time_string
+                                               ),
+                                               type="SWOT")
+
+        scv = swot_citation_violations(company_urls, response.SWOT_entries)
+        fsv = feature_score_violations(len(companies), response.scores)
+        csv = competitor_swot_violations(company_urls, response.competitor_swots)
+        fpv = feature_pair_violations(len(companies), response.scores, response.feature_pairs)
+
+        full_feedback = FullSWOTFeedback(feedback=feedback, 
+                                         swot_citation_violations=scv, 
+                                         feature_score_violations=fsv, 
+                                         competitor_swot_violations=csv, 
+                                         feature_pair_violations=fpv)
+
+        while (full_feedback.feedback.feedbacks or any([scv, fsv, csv, fpv])) and attempt_number < OPENAI_CALL_LIMIT:
+            response = await self.client.generate_in_thread(
+                                    input_text=(
+                                        "A reviewer went through your previous response to find any violations from your output. "
+                                        "Fix them and return the corrected full output:\n"
+                                        f"{full_feedback.feedback.model_dump_json()}\n"
+                                        "The reviewer also went ahead to specifically look at any violations from citations, feature ratings, and scorings. Please fix the ones below as well. \n" \
+                                        "Note that the 'Score object' refers to your feature scores from earlier, and uses zero-based indexing. Here are the violations:\n" \
+                                        f"swot citation violations: {scv}\n"
+                                        f"feature score violations: {fsv}\n"
+                                        f"competitor swot violations: {csv}\n"
+                                        f"feature pair violations: {fpv}\n"
+                                    ),
+                                    output_schema=SWOTAnalysisByIndex,
+                                    observation_name=self._observation_name(
+                                        f"comparison-{attempt_number}", f"SWOT-{attempt_number}-" + data.scadable.crawl_time_string
+                                    ),
+                                    conversation_id=conversation_id
+                                )
+                        
+            feedback = await validate_llm_response(client=self.client, 
+                                                           output_criteria=SWOT_VALIDATION_SYSTEM_PROMPT, 
+                                                           llm_output=build_swot_validation_user_prompt(response), 
+                                                           observation_name=self._observation_name(
+                                                               f"comparison-validation-{attempt_number}",
+                                                               f"SWOT-validation-{attempt_number}-" + data.scadable.crawl_time_string
+                                                           ),
+                                                           type="SWOT")
+
+            scv = swot_citation_violations(company_urls, response.SWOT_entries)
+            fsv = feature_score_violations(len(companies), response.scores)
+            csv = competitor_swot_violations(company_urls, response.competitor_swots)
+            fpv = feature_pair_violations(len(companies), response.scores, response.feature_pairs)
+    
+            full_feedback = FullSWOTFeedback(feedback=feedback, 
+                                                swot_citation_violations=scv, 
+                                                feature_score_violations=fsv, 
+                                                competitor_swot_violations=csv, 
+                                                feature_pair_violations=fpv)
+
+            attempt_number += 1
+
         # A crawled job URL may be valid, but SWOT findings must be supported
         # by a cited CLAIM, not merely a page containing a job posting.
         claim_indexes = [
