@@ -1,0 +1,32 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "incremental": false,
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "outDir": ".test-build",
+    "rootDir": ".",
+    "types": [
+      "node"
+    ],
+    "plugins": []
+  },
+  "include": [
+    "lib/api/client.ts",
+    "lib/api/competitors.ts",
+    "lib/api/swot.ts",
+    "lib/api/runs.ts",
+    "lib/errors.ts",
+    "lib/format.ts",
+    "lib/polling.ts",
+    "lib/scores.ts",
+    "lib/runs/stats.ts",
+    "lib/validation/competitor.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".test-build"
+  ]
+}

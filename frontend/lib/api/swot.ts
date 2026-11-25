@@ -1,6 +1,6 @@
-import { apiFetch, shouldUseMocks } from "@/lib/api/client";
+import { apiFetch, shouldUseMocks } from "./client";
 import type { SwotOverview } from "@/lib/api/types";
-import { mockSwot } from "@/lib/mocks/data";
+import { mockSwot } from "../mocks/data";
 
 export async function getSwotOverview(): Promise<SwotOverview> {
   if (shouldUseMocks()) {

@@ -78,8 +78,13 @@ results are saved as SWOT findings and feature scores. SCADABLE is then compared
 against every researched competitor to produce the overall SWOT.
 
 * Responses use camelCase keys and string IDs.
-* Errors are always `{"detail": "<message>"}` with a 404, 409, 422, or 500 status.
+* Application errors normally use `{"detail": "<message>"}`; authentication, validation,
+  upstream and service errors may use other documented HTTP status codes.
 * Research runs in the background; poll `GET /runs` or a competitor's profile for progress.
+* A successful research run can precede comparison scores and cost estimates.
+* The overall SWOT retains the last published findings when newer data makes it stale.
+* GitHub management and scraping updates require their respective server-only bearer
+  tokens; cancellation requires the account research bridge token.
 """
 
 OPENAPI_TAGS = [

@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import type { ChartPoint, ScoreSeries } from "@/lib/api";
+import { matchedScoreRows } from "@/lib/scores";
 import styles from "./CompetitorProfile.module.css";
 
 const COMPETITOR_FILL = "#55466f";
@@ -33,17 +34,13 @@ export function shortenScoreLabel(label: string, maxChars = 26): string {
   return `${(space > 8 ? truncated.slice(0, space) : truncated).trimEnd()}…`;
 }
 
-function hasScadableScore(row: ScoreSeries): boolean {
-  return typeof row.scadable === "number" && Number.isFinite(row.scadable);
-}
-
 /** Comparison chart: only features with both competitor and SCADABLE scores. */
 export function ScoresChart({ data }: { data: ScoreSeries[] }) {
   if (!data.length) {
     return <p className={styles.empty}>No feature scores available yet.</p>;
   }
 
-  const matched = data.filter(hasScadableScore);
+  const matched = matchedScoreRows(data);
   if (!matched.length) {
     return (
       <p className={styles.empty} role="status">

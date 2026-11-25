@@ -57,7 +57,7 @@ def get_run(
     db: Session = Depends(get_db),
 ) -> AgentRun:
     """One research run: crawl, analyze, and save steps, status, cost, and any error."""
-    run =repo.get_research_run(db, run_id)
+    run = repo.get_research_run(db, run_id)
     if run is None:
         raise repo.NotFoundError(f"Research run {run_id} not found.")
     return serializers.agent_run(run, run.competitor.name)
