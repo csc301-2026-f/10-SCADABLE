@@ -1,4 +1,4 @@
-# Live SWOT
+﻿# Live SWOT
 
 **Team 10 (Niche) | CSC301 | Deliverable 4**
 
@@ -12,8 +12,9 @@ SWOT stands for **strengths, weaknesses, opportunities and threats**. The overal
 
 - [Open Live SWOT](https://10-scadable.vercel.app/)
 - [Developer setup and maintenance guide](DEVELOPERS.md)
+- [Auth / invitations](frontend/docs/auth-access.md)
 
-Sign in with your invited SCADABLE account. If you do not have access, ask the application administrator to send you an invitation. For a quick evaluation, open an existing researched competitor and the overall SWOT before starting a new research run. If you cannot access the hosted application, follow the local setup below.
+Sign in with your invited SCADABLE account. Access is **invite-only** via Clerk’s **Development** instance (`pk_test_` / `sk_test_`), not Production — that avoids needing a custom domain on our free Vercel URL. If you do not have access, ask an administrator to invite you from the Clerk Dashboard (**Users → Invitations**, Development instance). For a quick evaluation, open an existing researched competitor and the overall SWOT before starting a new research run. If you cannot access the hosted application, follow the local setup below.
 
 ## Quick local setup
 
@@ -41,7 +42,7 @@ SCADABLE_DB_PORT=5436 ./setup.sh --start
 
 Use the same database port on subsequent runs. Press Ctrl+C to stop the application servers; `docker stop scadable-dev-postgres` stops the local database without deleting its data.
 
-**Evaluating locally:** A fresh database starts empty. You can browse the local dashboard without Clerk credentials, but creating or rerunning real research requires development Clerk credentials, an authorized account and an OpenAI key. See [environment configuration](DEVELOPERS.md#2-environment-configuration). For a UI-only walkthrough without paid research, set `NEXT_PUBLIC_USE_MOCKS=true` in `frontend/.env.local` and restart the frontend. This displays sample data, not live research. Do not use production credentials or the production database locally.
+**Evaluating locally:** A fresh database starts empty. Creating or rerunning real research requires **Clerk Development** keys, an invited account and an OpenAI key. See [environment configuration](DEVELOPERS.md#2-environment-configuration) and [auth access](frontend/docs/auth-access.md). For a UI-only walkthrough without paid research, set `NEXT_PUBLIC_USE_MOCKS=true` in `frontend/.env.local` and restart the frontend. This displays sample data, not live research. Do not use Clerk Production keys or the production database locally. The old **Go to dashboard** bypass button was removed; do not set `ALLOW_DEV_DASHBOARD_BYPASS` on Vercel.
 
 For manual installation, port conflicts, separate server commands and troubleshooting, see the [developer guide](DEVELOPERS.md#1-quick-local-setup).
 
