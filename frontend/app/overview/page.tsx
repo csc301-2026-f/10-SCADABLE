@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { getSwotOverview } from "@/lib/api/swot";
 import type { SwotOverview } from "@/lib/api/types";
+import { toUserFacingError } from "@/lib/errors";
 import styles from "./overview.module.css";
 
 type Finding = SwotOverview["strengths"][number];
@@ -109,8 +110,7 @@ export default function OverviewPage() {
     return (
       <div className={styles.state} role="alert">
         <p>
-          Couldn’t load the SWOT overview:{" "}
-          {(error as Error)?.message ?? "unknown error"}.
+          Couldn’t load the SWOT overview. {toUserFacingError(error)}
         </p>
         <button className={styles.retry} onClick={() => refetch()}>
           Try again
