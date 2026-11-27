@@ -70,6 +70,8 @@ They can then sign in on `/sign-in`.
 | Hosted (Vercel) | Set `ALLOW_DEV_DASHBOARD_BYPASS=true` |
 | Partner handoff | Leave unset or `false` so the button stays hidden |
 
+Bypass sessions are **read-only**: mutation controls (add/delete competitor, rerun/cancel, settings, GitHub sync) stay visible so TAs can see them, but they are disabled until a real Clerk sign-in.
+
 This is not real authentication — prefer Clerk invites for normal users.
 
 ## Who to invite (fill in)

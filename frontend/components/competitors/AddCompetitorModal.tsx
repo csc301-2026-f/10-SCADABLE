@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@clerk/nextjs";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { competitorsApi, type CompetitorSummary } from "@/lib/api";
@@ -19,6 +20,7 @@ type Props = {
 };
 
 export function AddCompetitorModal({ open, onClose }: Props) {
+  const { isSignedIn } = useAuth();
   const titleId = useId();
   const errorId = useId();
   const nameErrorId = useId();
@@ -30,6 +32,9 @@ export function AddCompetitorModal({ open, onClose }: Props) {
   const [fieldErrors, setFieldErrors] = useState<CompetitorFormErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const clerkEnabled = Boolean(
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
+  );
 
   const mutation = useMutation({
     mutationFn: competitorsApi.createCompetitor,
@@ -73,6 +78,11 @@ export function AddCompetitorModal({ open, onClose }: Props) {
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
+
+    if (clerkEnabled && !isSignedIn) {
+      setFormError("Sign in required to add competitors.");
+      return;
+    }
 
     const errors = validateCompetitorForm(name, website);
     setFieldErrors(errors);
