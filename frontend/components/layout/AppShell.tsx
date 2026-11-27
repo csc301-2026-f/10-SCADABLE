@@ -7,8 +7,9 @@ import {
 } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ComponentType, ReactNode } from "react";
+import { useEffect, type ComponentType, type ReactNode } from "react";
 import { ResearchSettings } from "@/components/accounts/ResearchSettings";
+import { clearDevDashboardBypassCookie } from "@/lib/auth/bypass";
 import {
   BrandMarkIcon,
   CompanyIcon,
@@ -17,6 +18,14 @@ import {
   RunsIcon,
 } from "./NavIcons";
 import styles from "./AppShell.module.css";
+
+/** Drop TA bypass cookie once a real Clerk session is active. */
+function ClearBypassOnSignIn() {
+  useEffect(() => {
+    clearDevDashboardBypassCookie();
+  }, []);
+  return null;
+}
 
 function ResearchSettingsIcon() {
   return (
@@ -96,6 +105,7 @@ export function AppShell({ children, clerkEnabled }: Props) {
                   </SignInButton>
                 </Show>
                 <Show when="signed-in">
+                  <ClearBypassOnSignIn />
                   <UserButton
                     userProfileProps={{
                       appearance: {

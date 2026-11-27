@@ -20,3 +20,9 @@ export function hasDevDashboardBypassCookie(): boolean {
     .split(";")
     .some((part) => part.trim() === `${DEV_DASHBOARD_BYPASS_COOKIE}=1`);
 }
+
+/** Drop the bypass cookie after a real Clerk sign-in. */
+export function clearDevDashboardBypassCookie(): void {
+  if (typeof document === "undefined") return;
+  document.cookie = `${DEV_DASHBOARD_BYPASS_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+}

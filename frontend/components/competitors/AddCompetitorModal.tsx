@@ -1,10 +1,10 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { competitorsApi, type CompetitorSummary } from "@/lib/api";
 import { useFocusTrap } from "@/lib/a11y/useFocusTrap";
+import { useDevDashboardBypass } from "@/lib/auth/useDevDashboardBypass";
 import { toUserFacingError } from "@/lib/errors";
 import {
   normalizeWebsiteInput,
@@ -20,7 +20,7 @@ type Props = {
 };
 
 export function AddCompetitorModal({ open, onClose }: Props) {
-  const { isSignedIn } = useAuth();
+  const readOnly = useDevDashboardBypass();
   const titleId = useId();
   const errorId = useId();
   const nameErrorId = useId();
@@ -32,9 +32,6 @@ export function AddCompetitorModal({ open, onClose }: Props) {
   const [fieldErrors, setFieldErrors] = useState<CompetitorFormErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const clerkEnabled = Boolean(
-    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
-  );
 
   const mutation = useMutation({
     mutationFn: competitorsApi.createCompetitor,
@@ -79,7 +76,7 @@ export function AddCompetitorModal({ open, onClose }: Props) {
     e.preventDefault();
     setFormError(null);
 
-    if (clerkEnabled && !isSignedIn) {
+    if (readOnly) {
       setFormError("Sign in required to add competitors.");
       return;
     }
