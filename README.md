@@ -42,7 +42,7 @@ SCADABLE_DB_PORT=5436 ./setup.sh --start
 
 Use the same database port on subsequent runs. Press Ctrl+C to stop the application servers; `docker stop scadable-dev-postgres` stops the local database without deleting its data.
 
-**Evaluating locally:** A fresh database starts empty. Creating or rerunning real research requires **Clerk Development** keys, an invited account and an OpenAI key. See [environment configuration](DEVELOPERS.md#2-environment-configuration) and [auth access](frontend/docs/auth-access.md). For a UI-only walkthrough without paid research, set `NEXT_PUBLIC_USE_MOCKS=true` in `frontend/.env.local` and restart the frontend. This displays sample data, not live research. Do not use Clerk Production keys or the production database locally. The old **Go to dashboard** bypass button was removed; do not set `ALLOW_DEV_DASHBOARD_BYPASS` on Vercel.
+**Evaluating locally:** A fresh database starts empty. Creating or rerunning real research requires **Clerk Development** keys, an invited account and an OpenAI key. See [environment configuration](DEVELOPERS.md#2-environment-configuration) and [auth access](frontend/docs/auth-access.md). For a UI-only walkthrough without paid research, set `NEXT_PUBLIC_USE_MOCKS=true` in `frontend/.env.local` and restart the frontend. This displays sample data, not live research. Do not use Clerk Production keys or the production database locally. For TA access without an invite, set `ALLOW_DEV_DASHBOARD_BYPASS=true` on Vercel (local `next dev` already shows **Go to dashboard**); leave that unset/false for partner handoff.
 
 For manual installation, port conflicts, separate server commands and troubleshooting, see the [developer guide](DEVELOPERS.md#1-quick-local-setup).
 

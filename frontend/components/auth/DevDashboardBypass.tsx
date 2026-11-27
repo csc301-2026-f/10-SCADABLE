@@ -1,11 +1,16 @@
 import Link from "next/link";
+import { isDevDashboardBypassAllowed } from "@/lib/auth/bypass";
 import styles from "./DevDashboardBypass.module.css";
 
 /**
- * Always shown. Hits an API route that sets a bypass cookie, then opens the app.
- * Works with or without Clerk keys configured.
+ * Shown only when bypass is allowed (local next dev, or ALLOW_DEV_DASHBOARD_BYPASS=true).
+ * Partner handoff: leave the env unset/false on Vercel so this stays hidden.
  */
 export function DevDashboardBypass() {
+  if (!isDevDashboardBypassAllowed()) {
+    return null;
+  }
+
   return (
     <div className={styles.bar}>
       <p className={styles.note}>Dev only</p>
