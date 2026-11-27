@@ -14,6 +14,21 @@ function delay(ms = 200) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Mock data lives in the browser, so mutations never hit Clerk-gated API routes.
+ * When Clerk is configured, require a real session before allowing writes
+ * (blocks TA dashboard bypass and any signed-out session).
+ */
+async function assertMockMutationAllowed() {
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim()) {
+    return;
+  }
+  const res = await fetch("/api/auth/required", { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error("Sign in required to change competitors.");
+  }
+}
+
 function findCompetitorIndex(id: string): number {
   return mockCompetitors.findIndex((c) => c.id === id);
 }
@@ -191,6 +206,7 @@ export async function createCompetitor(
   input: CreateCompetitorInput,
 ): Promise<CreateCompetitorResult> {
   if (shouldUseMocks()) {
+    await assertMockMutationAllowed();
     await delay();
     const sources = input.dataSources
       .map(normalizeSourceUrl)
@@ -247,6 +263,7 @@ export async function createCompetitor(
 
 export async function deleteCompetitor(id: string): Promise<void> {
   if (shouldUseMocks()) {
+    await assertMockMutationAllowed();
     await delay();
     const index = findCompetitorIndex(id);
     if (index === -1) {
@@ -256,7 +273,18 @@ export async function deleteCompetitor(id: string): Promise<void> {
     delete mockProfiles[id];
     return;
   }
-  await apiFetch<void>(`/competitors/${id}`, { method: "DELETE" });
+  // Clerk-gated gateway — dashboard bypass cannot delete
+  const response = await fetch(
+    `/api/research/competitors/${encodeURIComponent(id)}`,
+    { method: "DELETE", cache: "no-store" },
+  );
+  if (!response.ok) {
+    if (response.status >= 500) {
+      throw new Error("Something went wrong. Please try again.");
+    }
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `Request failed (${response.status})`);
+  }
 }
 
 /**
@@ -267,6 +295,7 @@ export async function rerunCompetitorResearch(
   id: string,
 ): Promise<CompetitorProfile> {
   if (shouldUseMocks()) {
+    await assertMockMutationAllowed();
     patchCompetitorSummary(id, { researchStatus: "running" });
     await delay(2200);
 

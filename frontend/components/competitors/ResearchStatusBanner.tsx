@@ -20,6 +20,9 @@ type Props = {
   onCancel?: () => void;
   cancelling?: boolean;
   cancelError?: string | null;
+  /** Keep buttons visible but not runnable (e.g. TA read-only bypass). */
+  actionsDisabled?: boolean;
+  actionsDisabledReason?: string;
 };
 
 export function ResearchStatusBanner({
@@ -31,6 +34,8 @@ export function ResearchStatusBanner({
   onCancel,
   cancelling = false,
   cancelError = null,
+  actionsDisabled = false,
+  actionsDisabledReason = "Sign in required",
 }: Props) {
   if (status === "success") return null;
 
@@ -49,7 +54,12 @@ export function ResearchStatusBanner({
           </p>
         </div>
         {onRerun ? (
-          <Button variant="secondary" onClick={onRerun} disabled={rerunning}>
+          <Button
+            variant="secondary"
+            onClick={onRerun}
+            disabled={rerunning || actionsDisabled}
+            title={actionsDisabled ? actionsDisabledReason : undefined}
+          >
             {rerunning ? "Rerunning…" : "Rerun agent"}
           </Button>
         ) : null}
@@ -71,7 +81,12 @@ export function ResearchStatusBanner({
           </p>
         </div>
         {onRerun ? (
-          <Button variant="secondary" onClick={onRerun} disabled={rerunning}>
+          <Button
+            variant="secondary"
+            onClick={onRerun}
+            disabled={rerunning || actionsDisabled}
+            title={actionsDisabled ? actionsDisabledReason : undefined}
+          >
             {rerunning ? "Rerunning…" : "Rerun agent"}
           </Button>
         ) : null}
@@ -109,7 +124,12 @@ export function ResearchStatusBanner({
         ) : null}
       </div>
       {onCancel ? (
-        <Button variant="secondary" onClick={onCancel} disabled={cancelling}>
+        <Button
+          variant="secondary"
+          onClick={onCancel}
+          disabled={cancelling || actionsDisabled}
+          title={actionsDisabled ? actionsDisabledReason : undefined}
+        >
           {cancelling ? "Cancelling…" : "Cancel run"}
         </Button>
       ) : null}

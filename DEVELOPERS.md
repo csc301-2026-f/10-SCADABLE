@@ -147,7 +147,7 @@ npm test
 npm run typecheck
 ```
 
-The frontend tests exercise validation, actual API client response handling (mocked HTTP transport), stale findings, error sanitization, polling and cost/cache calculations. They are unit/contract tests, not a browser end-to-end suite. To test the scraper independently, install [uv](https://docs.astral.sh/uv/) if needed, then run from the repository root:
+The frontend suite includes 12 unit/contract tests covering validation, API client response handling (mocked HTTP transport), stale findings, error sanitization, polling and cost/cache calculations, plus 29 component tests using Vitest and React Testing Library. The component tests cover the add-competitor dialog, competitor list, agent runs, SWOT overview and research status banner. `npm test` runs all 41 tests; `npm run test:components` runs the component tests alone. These are not full browser end-to-end tests. To test the scraper independently, install [uv](https://docs.astral.sh/uv/) if needed, then run from the repository root:
 
 ```bash
 cd scraper
@@ -170,7 +170,7 @@ See the [CI results in the main README](README.md#testing).
 | --- | --- |
 | Scraper Checks | Ruff lint, formatting and scraper tests |
 | Backend Tests | All backend tests (including crawler, scheduler, GitHub and PostgreSQL integration) and standalone LLM/pipeline tests, including setup tests |
-| Frontend Checks | ESLint, unit tests and TypeScript |
+| Frontend Checks | ESLint, unit/contract and component tests, and TypeScript |
 
 CI uses an isolated PostgreSQL database and disables paid live research.
 
@@ -248,7 +248,7 @@ Clerk handles frontend authentication; server-side tokens protect sensitive inte
 
 #### Temporary evaluator access
 
-The temporary read-only evaluator dashboard is intended for course grading. It allows visitors to view existing findings without a Clerk account. Data modifications, paid research and administrative settings must require an authorized Clerk session. Before enabling evaluator access, verify these restrictions at the API level, not just by checking whether controls are hidden in the frontend.
+The temporary read-only evaluator dashboard is intended for course grading. It allows visitors to view existing findings without a Clerk account. The frontend restricts mutation routes and controls to signed-in users, including competitor creation/deletion, research reruns/cancellation, GitHub changes and research settings. This is a dashboard-level restriction, not a complete backend authorization boundary. Before enabling evaluator access, verify the intended restrictions at the API level.
 
 To configure evaluator access in Vercel:
 
@@ -258,7 +258,7 @@ To configure evaluator access in Vercel:
 
 Clerk invitations are managed through the Development instance under Users → Invitations. Do not publish evaluator or partner credentials in the public repository.
 
-**Security considerations:** The evaluator toggle controls frontend dashboard access; it does not independently secure the backend. Keep administrative access policies configured and restrict direct API access. Do not enable evaluator access on a live dataset unless server-side write restrictions have been verified. If verification fails, use an isolated evaluator environment with non-sensitive data and no paid provider credentials, or invited accounts. Disable the bypass for private partner operation. Rate limiting and crawler network restrictions remain further hardening priorities.
+**Security considerations:** The evaluator toggle controls frontend dashboard access; it does not independently secure the backend. Direct FastAPI endpoints for competitor creation, deletion and reruns do not universally enforce Clerk authentication. Keep administrative access policies configured and restrict direct API access. Do not enable evaluator access on a live dataset unless server-side write restrictions have been verified. If verification fails, use an isolated evaluator environment with non-sensitive data and no paid provider credentials, or invited accounts. Disable the bypass for private partner operation. Rate limiting and crawler network restrictions remain further hardening priorities.
 
 ## 6. Maintenance and troubleshooting
 

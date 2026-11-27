@@ -15,7 +15,7 @@ SWOT stands for **strengths, weaknesses, opportunities and threats**. The overal
 
 ### For TAs and evaluators
 
-For course evaluation, select **Go to dashboard** at the top right of the sign-in page. When enabled, this temporary read-only evaluator option lets you browse existing competitor research, SWOT findings, feature scores and research activity without an account. Creating or deleting competitors, starting or cancelling research, and changing settings require an authorized signed-in account.
+For course evaluation, select **Go to dashboard** at the top right of the sign-in page. When enabled, this temporary read-only dashboard option lets you browse existing competitor research, SWOT findings, feature scores and research activity without an account. Through the dashboard, creating or deleting competitors, starting or cancelling research, and changing settings require a signed-in account. The developer guide explains the remaining direct backend access limitation.
 
 For a quick evaluation, open the overall SWOT and an existing researched competitor. If the dashboard option is unavailable, contact the team for access or use the local setup below with sample data.
 
@@ -139,7 +139,7 @@ The project includes automated tests for the backend, website crawler, AI analys
 
 The screenshot shows an earlier CI run; current results are linked below.
 
-The three CI jobs cover scraper tests and Ruff checks, backend and standalone LLM/pipeline tests, and frontend unit tests, ESLint and TypeScript. See the [CI configuration](.github/workflows/ci.yml) and [Actions history](https://github.com/csc301-2026-f/10-SCADABLE/actions).
+The three CI jobs cover scraper tests and Ruff checks, backend and standalone LLM/pipeline tests, and frontend unit and component tests, ESLint and TypeScript. See the [CI configuration](.github/workflows/ci.yml) and [Actions history](https://github.com/csc301-2026-f/10-SCADABLE/actions).
 
 After local setup, run these commands from the repository root. They use offline test data and disable scheduled research, GitHub sync and cost recovery.
 
@@ -160,13 +160,14 @@ D4 local verification (development machine):
 | Backend (PostgreSQL) | 267 passed, 1 skipped |
 | Scraper | 513 passed, 10 skipped |
 | Standalone LLM/pipeline checks | 3 passed, 3 skipped |
-| Frontend | 12 passed |
+| Frontend unit/contract tests | 12 passed (earlier local run) |
+| Frontend component tests | 29 additional tests added in D4; see current CI results |
 | Setup script | 2 passed |
 | Code quality | Ruff, ESLint and TypeScript checks passed |
 | Frontend dependency audit | No reported vulnerabilities at time of testing |
 | Local installation | Clean checkout-equivalent setup, database initialization and core application smoke checks passed |
 
-The backend suites overlap and are reported separately. These results are from local testing; CI results are available in the Actions history. See [current CI runs](https://github.com/csc301-2026-f/10-SCADABLE/actions) and the [full testing guide](DEVELOPERS.md#4-automated-testing-and-quality-checks) for PostgreSQL, scraper and optional integration test commands.
+The backend suites overlap and are reported separately. The frontend suite now contains 41 tests: 12 unit/contract tests and 29 component tests using Vitest and React Testing Library. The component tests cover the add-competitor dialog, competitor list, agent runs, SWOT overview and research status banner. `npm test` runs both suites; `npm run test:components` runs just the component suite. Reported pass counts are from earlier local testing, not a fresh run of the final release. Current CI results are available in the Actions history. See [current CI runs](https://github.com/csc301-2026-f/10-SCADABLE/actions) and the [full testing guide](DEVELOPERS.md#4-automated-testing-and-quality-checks) for PostgreSQL, scraper and optional integration test commands.
 
 ## Non-Functional Requirements
 
@@ -191,7 +192,7 @@ Generative AI tools, including but not limited to ChatGPT and Claude, were used 
 
 The extent of AI usage varied among team members and development tasks. AI assistance ranged from understanding technical concepts and clarifying syntax to debugging, generating code, writing tests, improving documentation and acting as a co-developer.
 
-Team members were responsible for evaluating, adapting and integrating AI-generated contributions into the project.
+Examples of D4 AI-assisted work include refactoring the backend research orchestrator, developing regression tests, improving the local setup script and preparing the user and developer documentation. Assistance included implementation suggestions, draft code and documentation revisions, with developers reviewing and adapting the results. Team members were responsible for evaluating, testing and integrating AI-generated contributions into the project.
 
 ## License
 
