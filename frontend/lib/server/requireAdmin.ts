@@ -8,6 +8,9 @@ import {
 
 /** Real Clerk session only — dashboard bypass does not count. */
 export async function requireClerkSignIn(): Promise<NextResponse | null> {
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim()) {
+    return NextResponse.json({ detail: "Sign-in is not configured." }, { status: 503 });
+  }
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ detail: "Sign in required." }, { status: 401 });

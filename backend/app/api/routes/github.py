@@ -1,8 +1,7 @@
 """GitHub App integration API with persistent repository selection.
 
 Management endpoints require a server-side admin token; NEVER expose this token
-in browser JavaScript. Replace it with authenticated-user permissions before
-connecting the Our Company page. Webhooks use GitHub's HMAC verification.
+in browser JavaScript. The Next.js server gateway checks the signed-in user before using it. Webhooks use GitHub's HMAC verification.
 """
 
 from __future__ import annotations
@@ -99,6 +98,7 @@ def get_selection_store(db: Session = Depends(get_db)) -> SelectionStore:
 
 @router.get("/installations", dependencies=[Depends(require_admin)])
 def installations(client: GitHubAppClient = Depends(get_github_client)) -> list[dict]:
+    """List installations available to the configured GitHub App (admin only)."""
     try:
         return client.list_installations()
     except GitHubClientError as exc:
@@ -107,6 +107,7 @@ def installations(client: GitHubAppClient = Depends(get_github_client)) -> list[
 
 @router.get("/repositories", dependencies=[Depends(require_admin)])
 def repositories(installation_id: int, client: GitHubAppClient = Depends(get_github_client)) -> list[GitHubRepo]:
+    """List repositories accessible to the selected installation (admin only)."""
     if installation_id <= 0:
         raise HTTPException(422, "Invalid installation ID")
     try:
@@ -117,6 +118,7 @@ def repositories(installation_id: int, client: GitHubAppClient = Depends(get_git
 
 @router.get("/status", dependencies=[Depends(require_admin)])
 def status(store: SelectionStore = Depends(get_selection_store)) -> SelectedRepository | None:
+    """Return repository selection, sync status and last valid file revision."""
     return store.get_selected()
 
 
@@ -126,6 +128,7 @@ def set_selection(
     store: SelectionStore = Depends(get_selection_store),
     client: GitHubAppClient = Depends(get_github_client),
 ) -> SelectedRepository:
+    """Persist an App-approved repository selection for feature syncing."""
     try:
         available = client.list_repositories(selection.installation_id)
     except GitHubClientError as exc:
@@ -193,6 +196,7 @@ async def webhook(
     x_github_delivery: str | None = Header(default=None),
     x_hub_signature_256: str | None = Header(default=None),
 ) -> dict[str, str]:
+    """Verify a GitHub signature and record eligible push events for the sync worker."""
     # Verify the signed raw bytes before interpreting any user-controlled JSON.
     secret = os.getenv("GITHUB_WEBHOOK_SECRET", "")
     if not secret:

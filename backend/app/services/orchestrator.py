@@ -475,6 +475,142 @@ async def execute_research_run(
             del _active_runs[run_id]
 
 
+async def _crawl_and_save_snapshot(
+    db: Session, run_id: int, competitor: Competitor,
+    crawler: CrawlerProtocol, timeout_seconds: float,
+) -> dict[str, Any]:
+    """Crawl with the per-step timeout and persist the exact snapshot for audit."""
+    # Step 2: Execute web crawling with timeout protection
+    logger.info("Executing crawler for %s (%s)", competitor.name, competitor.website_url)
+    scraped_data = await asyncio.wait_for(
+        crawler.crawl(
+            competitor.name, competitor.website_url, research_run_id=run_id
+        ),
+        timeout=timeout_seconds,
+    )
+
+    # Step 3: Persist scraped data snapshot
+    save_scraped_data(db, run_id, scraped_data)
+
+    return scraped_data
+
+
+def _reusable_analysis(previous_run: ResearchRun | None, scraped_data: dict[str, Any]) -> bool:
+    """Only reuse a completed analysis for unchanged content and policy."""
+    if previous_run is None:
+        return False
+    previous_analysis = previous_run.analysis_result
+    return (
+        isinstance(previous_analysis, dict)
+        and not has_content_changed(scraped_data, previous_run.scraped_data)
+        and previous_analysis.get("analysis_policy_version") == ANALYSIS_POLICY_VERSION
+    )
+
+
+async def _reuse_completed_analysis(
+    db: Session, run_id: int, competitor: Competitor, previous_run: ResearchRun,
+    active_analyzer: AnalyzerProtocol, timeout_seconds: float,
+) -> ResearchRun:
+    """Copy forward prior findings and refresh only a missing/stale comparison."""
+    logger.info(
+        "Scraped content unchanged for %s. Skipping LLM synthesis to conserve tokens.",
+        competitor.name,
+    )
+    # Link previous analysis result and copy forward existing SWOT findings
+    prev_analysis = (
+        previous_run.analysis_result
+        if isinstance(previous_run.analysis_result, dict)
+        else {}
+    )
+    reused_payload: dict[str, Any] = {
+        "skipped_llm": True,
+        "analysis_policy_version": ANALYSIS_POLICY_VERSION,
+        "reason": "Content unchanged from previous snapshot",
+        "reused_from_run_id": prev_analysis.get(
+            "reused_from_run_id", previous_run.id
+        ),
+    }
+    for key in ("summary", "features", "scores", "extracted_information", "conflicting_data"):
+        if key in prev_analysis:
+            reused_payload[key] = prev_analysis[key]
+    # A skipped refresh must retain role counts, including an explicit 0,
+    # without making another paid LLM call.
+    for key in ("job_postings", "open_roles"):
+        if key in prev_analysis:
+            reused_payload[key] = prev_analysis[key]
+
+    save_analysis_result(db, run_id, reused_payload)
+
+    # Re-persist the prior findings under this run for audit history
+    prior_entries = [
+        {
+            "category": entry.category.value,
+            "content": entry.content,
+            "source_url": entry.source_url,
+        }
+        for entry in previous_run.swot_entries
+    ]
+    if prior_entries:
+        save_swot_entries(db, run_id, prior_entries)
+
+    completed_run = update_research_run_status(db, run_id, ResearchStatus.COMPLETED)
+    # Nothing changed, so only compare if no overall SWOT exists yet
+    await refresh_overall_swot(
+        db,
+        active_analyzer,
+        timeout_seconds,
+        only_if_missing=True,
+        trace_prefix=run_trace_prefix(run_id),
+    )
+    return completed_run
+
+
+async def _analyze_and_publish_research(
+    db: Session, run_id: int, competitor: Competitor, scraped_data: dict[str, Any],
+    active_analyzer: AnalyzerProtocol, timeout_seconds: float,
+) -> ResearchRun:
+    """Persist new analysis, complete the run and refresh the overall SWOT."""
+    # Step 5: Feed competitor Markdown + SCADABLE baseline profile to LLM
+    baseline_profile = get_scadable_baseline(db)
+    logger.info("Invoking LLM SWOT synthesis for %s", competitor.name)
+    analysis_result = await asyncio.wait_for(
+        active_analyzer.analyze(
+            scraped_data,
+            baseline_profile,
+            trace_prefix=run_trace_prefix(run_id, competitor.name),
+        ),
+        timeout=timeout_seconds,
+    )
+
+    # Step 6: Save raw LLM analysis output
+    save_analysis_result(db, run_id, {
+        **analysis_result,
+        "analysis_policy_version": ANALYSIS_POLICY_VERSION,
+    })
+
+    # Step 7: Parse structured SWOT findings and persist with verified source citations
+    raw_entries = analysis_result.get("swot_entries", [])
+    if raw_entries:
+        save_swot_entries(db, run_id, raw_entries)
+
+    # A state-record failure must not turn successful research into failure.
+    try:
+        mark_overall_swot_stale(db)
+    except Exception:
+        db.rollback()
+        logger.exception("Unable to mark overall SWOT stale for run %s", run_id)
+
+    # Step 8: Mark task status as COMPLETED
+    updated_run = update_research_run_status(db, run_id, ResearchStatus.COMPLETED)
+    logger.info("Successfully completed research run %s for %s", run_id, competitor.name)
+
+    # Step 9: Refresh SCADABLE's overall SWOT now that this competitor changed
+    await refresh_overall_swot(
+        db, active_analyzer, timeout_seconds, trace_prefix=run_trace_prefix(run_id)
+    )
+    return updated_run
+
+
 async def _run_research_steps(
     db: Session,
     run_id: int,
@@ -516,121 +652,17 @@ async def _run_research_steps(
     active_analyzer = analyzer or get_default_analyzer()
 
     try:
-        # Step 2: Execute web crawling with timeout protection
-        logger.info("Executing crawler for %s (%s)", competitor.name, competitor.website_url)
-        scraped_data = await asyncio.wait_for(
-            active_crawler.crawl(
-                competitor.name, competitor.website_url, research_run_id=run_id
-            ),
-            timeout=timeout_seconds,
+        scraped_data = await _crawl_and_save_snapshot(
+            db, run_id, competitor, active_crawler, timeout_seconds
         )
-
-        # Step 3: Persist scraped data snapshot
-        save_scraped_data(db, run_id, scraped_data)
-
-        # Step 4: Noise filter & snapshot diffing against PostgreSQL
         previous_run = _get_previous_completed_run(db, competitor.id, run_id)
-        prev_scraped = previous_run.scraped_data if previous_run else None
-
-        previous_analysis = (
-            previous_run.analysis_result
-            if previous_run and isinstance(previous_run.analysis_result, dict)
-            else {}
-        )
-        if (previous_run
-                and not has_content_changed(scraped_data, prev_scraped)
-                and previous_analysis.get("analysis_policy_version") == ANALYSIS_POLICY_VERSION):
-            logger.info(
-                "Scraped content unchanged for %s. Skipping LLM synthesis to conserve tokens.",
-                competitor.name,
+        if previous_run is not None and _reusable_analysis(previous_run, scraped_data):
+            return await _reuse_completed_analysis(
+                db, run_id, competitor, previous_run, active_analyzer, timeout_seconds
             )
-            # Link previous analysis result and copy forward existing SWOT findings
-            prev_analysis = (
-                previous_run.analysis_result
-                if isinstance(previous_run.analysis_result, dict)
-                else {}
-            )
-            reused_payload: dict[str, Any] = {
-                "skipped_llm": True,
-                "analysis_policy_version": ANALYSIS_POLICY_VERSION,
-                "reason": "Content unchanged from previous snapshot",
-                "reused_from_run_id": prev_analysis.get(
-                    "reused_from_run_id", previous_run.id
-                ),
-            }
-            for key in ("summary", "features", "scores", "extracted_information", "conflicting_data"):
-                if key in prev_analysis:
-                    reused_payload[key] = prev_analysis[key]
-            # A skipped refresh must retain role counts, including an explicit 0,
-            # without making another paid LLM call.
-            for key in ("job_postings", "open_roles"):
-                if key in prev_analysis:
-                    reused_payload[key] = prev_analysis[key]
-
-            save_analysis_result(db, run_id, reused_payload)
-
-            # Re-persist the prior findings under this run for audit history
-            prior_entries = [
-                {
-                    "category": entry.category.value,
-                    "content": entry.content,
-                    "source_url": entry.source_url,
-                }
-                for entry in previous_run.swot_entries
-            ]
-            if prior_entries:
-                save_swot_entries(db, run_id, prior_entries)
-
-            completed_run = update_research_run_status(db, run_id, ResearchStatus.COMPLETED)
-            # Nothing changed, so only compare if no overall SWOT exists yet
-            await refresh_overall_swot(
-                db,
-                active_analyzer,
-                timeout_seconds,
-                only_if_missing=True,
-                trace_prefix=run_trace_prefix(run_id),
-            )
-            return completed_run
-
-        # Step 5: Feed competitor Markdown + SCADABLE baseline profile to LLM
-        baseline_profile = get_scadable_baseline(db)
-        logger.info("Invoking LLM SWOT synthesis for %s", competitor.name)
-        analysis_result = await asyncio.wait_for(
-            active_analyzer.analyze(
-                scraped_data,
-                baseline_profile,
-                trace_prefix=run_trace_prefix(run_id, competitor.name),
-            ),
-            timeout=timeout_seconds,
+        return await _analyze_and_publish_research(
+            db, run_id, competitor, scraped_data, active_analyzer, timeout_seconds
         )
-
-        # Step 6: Save raw LLM analysis output
-        save_analysis_result(db, run_id, {
-            **analysis_result,
-            "analysis_policy_version": ANALYSIS_POLICY_VERSION,
-        })
-
-        # Step 7: Parse structured SWOT findings and persist with verified source citations
-        raw_entries = analysis_result.get("swot_entries", [])
-        if raw_entries:
-            save_swot_entries(db, run_id, raw_entries)
-
-        # A state-record failure must not turn successful research into failure.
-        try:
-            mark_overall_swot_stale(db)
-        except Exception:
-            db.rollback()
-            logger.exception("Unable to mark overall SWOT stale for run %s", run_id)
-
-        # Step 8: Mark task status as COMPLETED
-        updated_run = update_research_run_status(db, run_id, ResearchStatus.COMPLETED)
-        logger.info("Successfully completed research run %s for %s", run_id, competitor.name)
-
-        # Step 9: Refresh SCADABLE's overall SWOT now that this competitor changed
-        await refresh_overall_swot(
-            db, active_analyzer, timeout_seconds, trace_prefix=run_trace_prefix(run_id)
-        )
-        return updated_run
 
     except asyncio.TimeoutError:
         error_msg = f"Research run timed out after {timeout_seconds} seconds."

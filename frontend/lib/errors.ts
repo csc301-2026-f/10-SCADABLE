@@ -1,4 +1,4 @@
-import { ApiError } from "@/lib/api/client";
+import { ApiError } from "./api/client";
 
 const GENERIC = "Something went wrong. Please try again.";
 
