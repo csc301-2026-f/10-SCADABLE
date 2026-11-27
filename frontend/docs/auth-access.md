@@ -1,23 +1,28 @@
 # Auth access (invite-only)
 
-Live SWOT uses Clerk with **restricted sign-up**. Random people cannot create accounts on your deployed app. Access is by **invitation** (and optionally an allowlist in the Clerk dashboard).
+Live SWOT uses Clerk with **restricted sign-up**. Random people cannot create accounts. Access is by **invitation** (and optionally an allowlist in the Clerk dashboard).
 
-## Current Clerk settings (development)
+## Current Clerk settings
+
+We run the Clerk **Development** instance (not Production).
 
 - Clerk application name: **LIVE SWOT**
+- Instance: **Development** (`pk_test_` / `sk_test_` on Vercel and in `.env.local`)
 - `sign_up_mode`: **restricted** (invite-only)
 - Public self-serve sign-up: **off**
-- App opens to **`/sign-in` only** — bare `/sign-up` redirects away (no “Access restricted” page)
+- App opens to **`/sign-in` only** — bare `/sign-up` redirects away
 - Invite acceptance UI only loads when the email link includes a Clerk ticket
-- Dev bypass (**Go to dashboard**) still works locally for UI testing without an account
+
+Production Clerk needs a custom domain (or a special proxy setup). We stay on Development so localhost and our free Vercel URL work without that.
 
 ## How teammates / SCADABLE get access
 
 ### Option A — Clerk Dashboard (easiest)
 
-1. Open [dashboard.clerk.com](https://dashboard.clerk.com/) → your **LIVE SWOT** app → **Users** → **Invitations**
-2. Invite emails (team + SCADABLE)
-3. They click the email link → finish account on `/sign-up` → then use **Sign in**
+1. Open [dashboard.clerk.com](https://dashboard.clerk.com/) → **LIVE SWOT** → make sure the instance switcher is on **Development**
+2. **Users** → **Invitations**
+3. Invite emails (team + SCADABLE)
+4. They click the email link → finish account on `/sign-up` → then use **Sign in**
 
 ### Option B — Clerk CLI
 
@@ -38,7 +43,7 @@ Edit `scripts/invite-body.json` first:
 }
 ```
 
-For production, set `redirect_url` to your Vercel URL, e.g. `https://your-app.vercel.app/sign-up`.
+For the hosted app, set `redirect_url` to your Vercel URL, e.g. `https://your-app.vercel.app/sign-up`.
 
 ### Option C — Create a user directly (no email invite)
 
@@ -52,18 +57,14 @@ They can then sign in on `/sign-in`.
 
 | Route | Role |
 | --- | --- |
-| `/sign-in` | Primary entry for allowed users |
+| `/sign-in` | Primary entry for invited users |
 | `/sign-up` | Used when accepting an **invitation** link |
-| **Go to dashboard** | Local/dev UI bypass only — not real auth |
 
-## Before SCADABLE production
+## Dev dashboard bypass (legacy)
 
-1. Create/configure Clerk **production** instance
-2. Keep sign-up mode **restricted**
-3. Invite only SCADABLE + team emails
-4. Put production keys in Vercel env vars
-5. Turn off `ALLOW_DEV_DASHBOARD_BYPASS` (never set it in prod)
-6. Optionally enable **Allowlist** in Clerk Dashboard → Restrictions if you want a hard email list in addition to invites
+The **Go to dashboard** button was removed from the UI.
+
+`ALLOW_DEV_DASHBOARD_BYPASS=true` (or local `next dev`) can still allow the API route `/api/dev/dashboard-bypass` to set a cookie that skips Clerk. **Do not set that env var on Vercel.** Prefer real Clerk invites.
 
 ## Who to invite (fill in)
 

@@ -30,11 +30,11 @@ The application helps users identify SCADABLE's strengths, weaknesses, market op
 
 ### 1. Authentication and Dashboard Access
 
-Live SWOT includes a sign-in page implemented using **Clerk**. Account registration is currently invitation-only for SCADABLE and the course team.
+Live SWOT uses **Clerk** for sign-in. Sign-up is **invitation-only** for SCADABLE and the course team.
 
-For D3 evaluation, the hosted application provides a **Dev only → Go to dashboard** shortcut at the **top right** of the sign-in page. TAs can use it to enter the dashboard without a Clerk account or invitation. The same shortcut is available during local development.
+We use Clerk’s **Development** instance (not Production): it works with our free Vercel URL and localhost without a custom domain. Invite users from the Clerk Dashboard (**Users → Invitations**). Details: [frontend/docs/auth-access.md](frontend/docs/auth-access.md).
 
-**Example use case:** A course evaluator opens the [D3 application](https://10-scadable.vercel.app/competitors), selects **Go to dashboard** at the top right if prompted to sign in, and explores the competitor research dashboard.
+**Example use case:** An invited teammate opens the app, signs in with the email from their Clerk invitation, and reaches the competitor research dashboard.
 
 ![Live SWOT sign-in page](docs/screenshots/image-1.png)
 
@@ -116,12 +116,12 @@ Estimated costs reflect the usage successfully recorded at the time of viewing. 
 
 **Backend API:** https://backend-d3-production.up.railway.app/
 
-**TA access (no account required):** Open the D3 application. On the sign-in page, click **Go to dashboard** in the **top-right corner** (next to **Dev only**). The dashboard opens without a Clerk invitation, just as in D2. Invited users can alternatively sign in through Clerk. For a locally run development instance, the same **Go to dashboard** shortcut is available without Clerk keys.
+**Access:** Invite-only via Clerk Development. Ask a team owner to send a Clerk invitation, then sign in at `/sign-in`. See [frontend/docs/auth-access.md](frontend/docs/auth-access.md).
 
 ### Suggested Evaluation Workflow
 
 1. Open https://10-scadable.vercel.app/competitors (or http://localhost:3000 for local setup).
-2. If redirected to sign-in, click **Dev only → Go to dashboard** at the top right; no account is required for course evaluation.
+2. If redirected to sign-in, use an invited Clerk account (Development instance keys on Vercel / `.env.local`).
 3. Browse **Competitors** and open an existing researched company.
 4. To test a new run, use **Add Competitor** with a unique company name and a reachable homepage URL.
 5. Open **Agent Runs** to follow the research progress and inspect the recorded API cost once available. Some websites block automated crawling; those runs may fail rather than return fabricated results.
@@ -213,8 +213,8 @@ Edit the three newly created files **locally**. The templates contain placeholde
 | `backend/.env` | `COMPETITOR_REFRESH_DAYS`, `COMPETITOR_REFRESH_RETRY_MINUTES`, `COMPETITOR_REFRESH_POLL_SECONDS` | Optional refresh configuration; template defaults are 7 days, 60 minutes and 60 seconds. |
 | `frontend/.env.local` | `NEXT_PUBLIC_API_URL` | Use `http://localhost:8000` for the local FastAPI server. |
 | `frontend/.env.local` | `NEXT_PUBLIC_USE_MOCKS` | Defaults to `false` in the D3 template so the frontend talks to FastAPI. Set to `true` only for standalone frontend development with fixtures; mock mode does **not** verify full-stack integration. |
-| `frontend/.env.local` | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | Required for real Clerk sign-in. Leave empty for the local development dashboard shortcut. The publishable key is public; the secret key is not. |
-| `frontend/.env.local` | `ALLOW_DEV_DASHBOARD_BYPASS` | Optional; **do not enable in production**. Local `next dev` already permits the development bypass. |
+| `frontend/.env.local` | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | Required for Clerk sign-in. Use **Development** instance keys (`pk_test_` / `sk_test_`). The publishable key is public; the secret key is not. |
+| `frontend/.env.local` | `ALLOW_DEV_DASHBOARD_BYPASS` | Optional leftover API flag. **Do not set on Vercel.** The sign-in bypass button was removed; leave this unset. |
 
 **Minimum local edits for the integrated app:**
 
@@ -316,7 +316,7 @@ npm ci
 npm run dev
 ```
 
-Open **http://localhost:3000**. If you have not configured Clerk, use **Dev only → Go to dashboard** for local development. The profile/competitor screens should request the local FastAPI API because `NEXT_PUBLIC_USE_MOCKS=false`.
+Open **http://localhost:3000**. Put Clerk **Development** keys in `frontend/.env.local` and sign in (or accept an invite). The profile/competitor screens should request the local FastAPI API because `NEXT_PUBLIC_USE_MOCKS=false`.
 
 If the frontend shows fixtures rather than real backend data, recheck `NEXT_PUBLIC_USE_MOCKS` and restart the Next.js server after changing environment variables. If requests fail, verify `/health` and `CORS_ORIGINS` in `backend/.env`.
 
@@ -359,7 +359,7 @@ If PostgreSQL was started on **host port 5436**, substitute `5436` for `5432` in
 
 **Fresh-clone verification — November 5, 2026 (macOS):** The application was installed in an independent checkout without existing project dependencies or environment files. The setup used Python 3.12.14, Node.js 24.21.0, npm 11.19.0 and Docker 29.5.2. All three environment templates were copied. PostgreSQL started in Docker on host port **5436**, and the tables initialized successfully with `python -m app.db.init_db`. Python dependencies were installed with `uv` after a Homebrew `ensurepip` problem.
 
-FastAPI launched successfully; `/health` returned `{"status":"ok"}` and `/docs` displayed the expected API endpoints. Next.js started, the development dashboard shortcut worked, and the frontend was configured with `NEXT_PUBLIC_USE_MOCKS=false`. `GET /competitors` and `GET /swot/overview` both returned **HTTP 200**, with empty results as expected for a new database.
+FastAPI launched successfully; `/health` returned `{"status":"ok"}` and `/docs` displayed the expected API endpoints. Next.js started with Clerk Development keys, and the frontend was configured with `NEXT_PUBLIC_USE_MOCKS=false`. `GET /competitors` and `GET /swot/overview` both returned **HTTP 200**, with empty results as expected for a new database.
 
 **Verification scope:** Fresh-clone application startup and local API responses were confirmed. The automated test suite was not rerun in the fresh checkout; automated checks are run separately by CI. Live third-party crawling and OpenAI calls were not part of this setup verification. Authorized OpenAI credentials are needed to test live research.
 

@@ -66,14 +66,15 @@ Mocks are **on by default** (`NEXT_PUBLIC_USE_MOCKS` unset or not `"false"`).
 Clerk is wired via `@clerk/nextjs`, `ClerkProvider`, and `proxy.ts` middleware.
 
 - Clerk app: **LIVE SWOT**
+- Instance: **Development** (`pk_test_` / `sk_test_`) — not Production (no custom domain / free Vercel URL)
 - **Invite-only** (`sign_up_mode: restricted`) — public self sign-up is closed
-- Unauthenticated users are sent to **`/sign-in`** only (no “Access restricted” sign-up page)
+- Unauthenticated users are sent to **`/sign-in`** only
 - **`/sign-up`** only appears from an invitation email link (ticket query param)
 - Signed-in users land on `/overview`
 - Keys live in `.env.local` (do not commit)
-- Access / invite docs: [docs/auth-access.md](./docs/auth-access.md)
+- Invite / access docs: [docs/auth-access.md](./docs/auth-access.md)
 
-**Go to dashboard (dev bypass):** Always shown on auth pages. Sets a short-lived cookie and opens `/overview` without signing in. Available in `next dev`, or when `ALLOW_DEV_DASHBOARD_BYPASS=true`. Never enable that in real production.
+The old **Go to dashboard** bypass button is removed. Do not set `ALLOW_DEV_DASHBOARD_BYPASS` on Vercel.
 
 ```bash
 npx -y clerk@latest doctor
