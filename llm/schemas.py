@@ -195,13 +195,11 @@ class CompanyAnalysisByIndex(BaseModel):
     features: list[str]
     claims_cited: list[ClaimCitedByIndex]
 
-
 class CompetitorResearchResult(BaseModel):
     """Analysis and extracted facts with the scraper's original run provenance."""
 
     crawl_summary: CrawlExportSummary
     extracted_information: ExtractedInformationByURL
-
 
 class ComparisonInput(BaseModel):
     scadable: ExtractedInformationByURL
@@ -284,7 +282,6 @@ class CompetitorSWOTByIndex(BaseModel):
     """Competitor-owned findings, produced in the same comparison request."""
     company_index: int
     SWOT_entries: list[SWOTEntryByIndex]
-
 
 class CompetitorSWOTByURL(BaseModel):
     company_name: str

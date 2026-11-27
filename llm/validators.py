@@ -96,8 +96,8 @@ async def validate_llm_response(*, client: OpenAIClient, output_criteria: str, l
     
     :return: 
     """
-    return await client.generate_structured(instructions=output_criteria,
+    response = await client.generate_response(instructions=output_criteria,
                                       input_text=llm_output,
                                       output_schema=SWOTFeedbacks if type == "SWOT" else ExtractionFeedbacks,
                                       observation_name=observation_name)
-    
+    return response.output_parsed

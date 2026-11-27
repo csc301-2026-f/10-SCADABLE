@@ -154,8 +154,8 @@ The Source LLM then produced an output with a predetermined scoring criteria:
     - what (string): the actual SWOT component.
     - swot_citations (list[SWOTIndex]): a list of indexes to the page which supports the SWOT component (see <SWOT_INDEX>).
         <SWOT_INDEX>
-        swot_component_company_index (integer): the company_index of the company whose claim you cite.
-        swot_component_page_index (integer): the claim_page_index of one of that company's claims.
+        - swot_component_company_index (integer): the company_index of the company whose claim you cite.
+        - swot_component_page_index (integer): the claim_page_index or job_page_index of one of the company's claims or job postings that serve as supporting evidence for the 'what.'
         </SWOT_INDEX>
     </SWOT_ENTRY_BY_INDEX>
 - scores (list[FeatureScoreByIndex]): one entry for each feature of SCADABLE and of each competitor, scored as described in <SCORING_CRITERIA>.
@@ -167,7 +167,7 @@ The Source LLM then produced an output with a predetermined scoring criteria:
 - competitor_swots (list[CompetitorSWOTByIndex]): one block for EACH competitor (not SCADABLE), containing that competitor's OWN SWOT.
     - company_index (integer): the competitor's index (1 or greater; never 0).
     - SWOT_entries (list[SWOTEntryByIndex]): strengths/weaknesses about THIS competitor, and market opportunities/threats affecting THIS competitor.
-      Every entry requires citations. For a competitor strength/weakness cite at least one claim from that competitor's company_index.
+      Every entry requires citations. For a competitor strength/weakness cite at least one claim or job posting from that competitor's company_index.
       Omit unsupported SWOT components rather than asserting that missing data means a weakness.
 - feature_pairs (list[FeaturePairByIndex]): one entry for each scored COMPETITOR feature.
     - company_index: the competitor's index, never 0.
@@ -200,27 +200,45 @@ The Source LLM's outputs also had to follow the following rules:
 - For the TOP-LEVEL SWOT_entries only: "S" and "W" are about SCADABLE, while "O" and "T" concern its market and competitors. Competitor_swots entries have their own named subject.
 - The information provided to you as input is always coming from a deliberately limited dataset, so never make 
 inferences about the lack of data provided. Always analyze the data that is provided and that is it.
+- Job postings should only be treated as workforce activity and where the company seems to be changing its approach to, never assume by job postings alone, that a related product or feature exists from the company.
 - Based on the given data, take into consideration the company's industry and compare from that standpoint. For example, 
 if you are comparing company X (which is focused on banking services) with company Y (focused on the tech products), analyze 
 them from their own perspectives.
 - Report a weakness, opportunity or threat only when the input affirmatively supports it. Gaps the input explicitly states (for example something marked "coming soon" or described as limited) can be reported, and must never be described as already released. Never treat something that is merely absent from the input as a weakness or an opportunity.
+- For TOP-LEVEL weaknesses, deliberately examine each distinct, evidence-backed competitive disadvantage:
+  explicitly documented product limitations, comparative framework coverage, integration coverage,
+  relative feature/automation depth, and pricing or enterprise readiness when both sides have
+  comparable, affirmative claims. Treat these as checks, NOT categories that must be filled.
+- A list of named frameworks or integrations is not necessarily an exhaustive count. Do not infer
+  that SCADABLE lacks an unlisted feature, has fewer total integrations, or cannot serve a market
+  solely because the baseline does not mention it. If comparing advertised lists, call them
+  advertised/listed coverage, not proof of unsupported capabilities.
+- Identify all DISTINCT supported weaknesses, not an arbitrary quota. When the same disadvantage
+  appears across multiple competitors, avoid restating it with different company names.
+  An empty Weaknesses list is correct if the evidence supports none. Do not relabel an
+  opportunity, competitor strength, or market threat as an internal SCADABLE weakness.
+- For each comparative weakness, cite the SCADABLE claim or job posting establishing its documented scope or
+  limitation and the competitor claim or job posting establishing the comparison. SCADABLE-only limitations
+  must cite their SCADABLE claim or job posting. Do not use a competitor citation as proof of a SCADABLE gap.
 - Limits that belong to a pricing tier (what a free plan includes) are not weaknesses.
 - Keep the strength, opportunity, weakness, or threat a short string, no more than 10-15 words.
 - Each why_it_matters is two or three short sentences, written for the founder, grounded only in the input and following the same rules above about missing information and "coming soon" items. If a competitor is in an unrelated industry, say so plainly instead of inventing overlap.
 - For each "swot_component_company_index" make sure it is the company_index of the company whose claim supports the entry (0 for SCADABLE).
-- Every citation must use a company_index and claim_page_index pair that appears together on one
-  claim in the input. Never cite a pair that does not appear there.
+- Every citation must use a company_index and claim_page_index pair or company_index and job_page_index pair that appears together on one
+  claim or job posting in the input. Never cite a pair that does not appear there.
 - Every SWOT entry must have at least one citation in swot_citations.
-- For TOP-LEVEL SWOT_entries: a strength or weakness is about SCADABLE and must cite at least one claim from SCADABLE
-  (company_index 0). It may also cite competitor claims it is compared against.
-- An opportunity or a threat must cite the competitor claim(s) it comes from.
+- For TOP-LEVEL SWOT_entries: a strength or weakness is about SCADABLE and must cite at least one claim or job posting from SCADABLE
+  (company_index 0). Cite competitor claims or job postings ONLY when the actual finding makes a comparison supported by those claims or job postings.
+  A competitor page does not establish what SCADABLE itself offers. Do not attach irrelevant competitor citations
+  to SCADABLE-only claims or job postings. The SCADABLE input is a configured baseline, not independently crawled website evidence.
+- An opportunity or a threat must cite the competitor claim(s) or job posting(s) it comes from.
 - If you cannot support an entry with a citation, leave the entry out.
 - Score every "feature" claim of SCADABLE and of each competitor exactly once, no matter how relevant it may seem.
 - Keep the feature string in scores exactly equal to the underlying feature claim; use the same exact string in feature_pairs.
 - Emit a feature_pairs entry for every scored competitor feature. Pair only substantively comparable capabilities; use null when unmatched.
 - Emit one competitor_swots block per competitor. Keep its findings separate from SCADABLE's overall SWOT_entries. Keep findings concise (at most two grounded entries per quadrant per competitor) to control output tokens.
 - For competitor SWOT strengths and weaknesses, talk about the COMPETITOR, not SCADABLE. For opportunities and threats, discuss the competitor's market circumstances, not SCADABLE's own opportunities/threats.
-- Include only citations that correspond to actual input claims from the indicated company.
+- Include only citations that correspond to actual input claims or job postings from the indicated company.
 - Never provide the page index citations in the "what" field of the output.
 - Never provide the page index citations in the "company_name" field of the output.
 - Never provide the page index citations in the "why it matters" field of the output.
