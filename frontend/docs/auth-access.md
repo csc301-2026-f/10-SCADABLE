@@ -60,11 +60,19 @@ They can then sign in on `/sign-in`.
 | `/sign-in` | Primary entry for invited users |
 | `/sign-up` | Used when accepting an **invitation** link |
 
-## Dev dashboard bypass (legacy)
+## Dev dashboard bypass (TA evaluation)
 
-The **Go to dashboard** button was removed from the UI.
+**Go to dashboard** on the sign-in page skips Clerk so TAs can mark without an invite.
 
-`ALLOW_DEV_DASHBOARD_BYPASS=true` (or local `next dev`) can still allow the API route `/api/dev/dashboard-bypass` to set a cookie that skips Clerk. **Do not set that env var on Vercel.** Prefer real Clerk invites.
+| Environment | How to enable |
+| --- | --- |
+| Local `next dev` | On automatically |
+| Hosted (Vercel) | Set `ALLOW_DEV_DASHBOARD_BYPASS=true` |
+| Partner handoff | Leave unset or `false` so the button stays hidden |
+
+Bypass sessions are **read-only**: mutation controls (add/delete competitor, rerun/cancel, settings, GitHub sync) stay visible so TAs can see them, but they are disabled until a real Clerk sign-in.
+
+This is not real authentication — prefer Clerk invites for normal users.
 
 ## Who to invite (fill in)
 

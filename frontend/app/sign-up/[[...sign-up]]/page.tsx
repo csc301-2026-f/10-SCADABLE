@@ -1,5 +1,6 @@
 import { SignUp } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
+import { DevDashboardBypass } from "@/components/auth/DevDashboardBypass";
 import { hasClerkInviteTicket } from "@/lib/auth/invite";
 import { isClerkConfigured } from "@/lib/auth/config";
 import styles from "../../auth.module.css";
@@ -25,6 +26,7 @@ export default async function SignUpPage({ searchParams }: Props) {
 
   return (
     <div className={styles.authPage}>
+      <DevDashboardBypass />
       <div className={styles.copy}>
         <p className={styles.eyebrow}>Live SWOT</p>
         <h1>Accept your invite</h1>

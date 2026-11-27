@@ -4,12 +4,14 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/Button";
+import { useSignInNote } from "@/components/ui/SignInNote";
 import {
   competitorsApi,
   type CompetitorSummary,
   type ResearchStatus,
   type Trend,
 } from "@/lib/api";
+import { useDevDashboardBypass } from "@/lib/auth/useDevDashboardBypass";
 import { toUserFacingError } from "@/lib/errors";
 import { displayWebsite, formatRelativePast } from "@/lib/format";
 import { competitorsPollInterval } from "@/lib/polling";
@@ -70,6 +72,8 @@ function matchesSearch(competitor: CompetitorSummary, query: string): boolean {
 
 export function CompetitorList() {
   const router = useRouter();
+  const readOnly = useDevDashboardBypass();
+  const { showSignInNote, signInNote } = useSignInNote();
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
@@ -111,7 +115,17 @@ export function CompetitorList() {
           </p>
         </div>
         <div className={styles.headActions}>
-          <Button onClick={() => setAddOpen(true)}>
+          <Button
+            onClick={() => {
+              if (readOnly) {
+                showSignInNote("Sign in required to add competitors.");
+                return;
+              }
+              setAddOpen(true);
+            }}
+            aria-disabled={readOnly || undefined}
+            title={readOnly ? "Sign in required to add competitors" : undefined}
+          >
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" aria-hidden="true">
               <path d="M12 5v14M5 12h14" strokeLinecap="round" />
             </svg>
@@ -120,6 +134,7 @@ export function CompetitorList() {
         </div>
       </header>
 
+      {signInNote}
       <AddCompetitorModal open={addOpen} onClose={() => setAddOpen(false)} />
 
       <div className={styles.listControls}>

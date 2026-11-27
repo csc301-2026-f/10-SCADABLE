@@ -18,7 +18,10 @@ export async function requireClerkSignIn(): Promise<NextResponse | null> {
   return null;
 }
 
-/** Signed-in Clerk user, or local dashboard bypass. */
+/**
+ * Signed-in Clerk user, or dashboard bypass.
+ * Prefer requireClerkSignIn for mutations — bypass is read-only.
+ */
 export async function requireSignedIn(): Promise<NextResponse | null> {
   if (isDevDashboardBypassAllowed()) {
     const jar = await cookies();
@@ -31,13 +34,13 @@ export async function requireSignedIn(): Promise<NextResponse | null> {
 
 /**
  * Gate mutating settings / GitHub admin gateways.
- * Requires a signed-in Clerk user (or local dashboard bypass).
+ * Requires a real Clerk sign-in — dashboard bypass is read-only and cannot mutate.
  * If SETTINGS_ADMIN_EMAILS is set (comma-separated), the user's primary/any
  * verified email must be on that list; otherwise any signed-in user is allowed
  * (invite-only app).
  */
 export async function requireSettingsAdmin(): Promise<NextResponse | null> {
-  const denied = await requireSignedIn();
+  const denied = await requireClerkSignIn();
   if (denied) return denied;
 
   const allowlist = (process.env.SETTINGS_ADMIN_EMAILS ?? "")
