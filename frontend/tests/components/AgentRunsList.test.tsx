@@ -3,7 +3,7 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import { AgentRunsList } from "@/components/runs/AgentRunsList";
 import { ApiError } from "@/lib/api/client";
 import { listRuns } from "@/lib/api/runs";
-import { makeRun, renderWithQuery } from "./helpers";
+import { LEAKY_SERVER_ERROR, makeRun, renderWithQuery } from "./helpers";
 
 const nav = vi.hoisted(() => ({ search: "" }));
 
@@ -111,12 +111,14 @@ describe("AgentRunsList", () => {
     expect(summaryValue("Recorded cost")).toBe("—");
   });
 
-  it("shows a friendly error when runs cannot load", async () => {
+  it("hides server internals when runs cannot load", async () => {
     nav.search = "";
-    runsApi.mockRejectedValue(new ApiError("Something went wrong. Please try again.", 500));
+    runsApi.mockRejectedValue(new ApiError(LEAKY_SERVER_ERROR, 500));
     renderWithQuery(<AgentRunsList />);
-    expect((await screen.findByRole("alert")).textContent).toBe(
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(
       "Could not load agent runs. Something went wrong. Please try again.",
     );
+    expect(document.body.textContent).not.toContain("sqlalchemy");
   });
 });

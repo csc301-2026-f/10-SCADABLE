@@ -2,6 +2,7 @@ import type { AnchorHTMLAttributes } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import OverviewPage from "@/app/overview/page";
+import { ApiError } from "@/lib/api/client";
 import { getSwotOverview } from "@/lib/api/swot";
 import type { SwotOverview } from "@/lib/api";
 import { makeFinding, renderWithQuery } from "./helpers";
@@ -87,12 +88,14 @@ describe("SWOT Overview page", () => {
     expect(screen.queryByRole("region", { name: "Strengths" })).toBeNull();
   });
 
-  it("shows an error with a working Try again button", async () => {
-    overviewApi.mockRejectedValueOnce(new Error("Network unavailable"));
+  it("shows a cleaned up error with a working Try again button", async () => {
+    overviewApi.mockRejectedValueOnce(new ApiError(JSON.stringify({ detail: "Not Found" }), 404));
     overviewApi.mockResolvedValueOnce(overview());
     renderWithQuery(<OverviewPage />);
 
-    expect((await screen.findByRole("alert")).textContent).toContain("Network unavailable");
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Couldn’t load the SWOT overview. Not Found");
+    expect(alert.textContent).not.toContain("{");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.getByText("SWOT overview")).toBeTruthy());
     expect(overviewApi).toHaveBeenCalledTimes(2);

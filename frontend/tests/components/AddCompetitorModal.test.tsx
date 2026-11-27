@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { AddCompetitorModal } from "@/components/competitors/AddCompetitorModal";
 import { ApiError } from "@/lib/api/client";
 import { createCompetitor } from "@/lib/api/competitors";
-import { makeCompetitor, renderWithQuery } from "./helpers";
+import { LEAKY_SERVER_ERROR, makeCompetitor, renderWithQuery } from "./helpers";
 
 vi.mock("@/lib/api/competitors", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/competitors")>()),
@@ -66,10 +66,11 @@ describe("AddCompetitorModal", () => {
   });
 
   it("hides server internals behind a friendly message", async () => {
-    create.mockRejectedValue(new ApiError("Something went wrong. Please try again.", 500));
+    create.mockRejectedValue(new ApiError(LEAKY_SERVER_ERROR, 500));
     renderWithQuery(<AddCompetitorModal open onClose={vi.fn()} />);
     fillAndSubmit("Acme", "acme.example");
 
     expect(await screen.findByText("Could not add competitor. Please try again.")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("sqlalchemy");
   });
 });

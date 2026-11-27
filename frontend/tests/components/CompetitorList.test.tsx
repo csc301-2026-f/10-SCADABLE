@@ -3,7 +3,7 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import { CompetitorList } from "@/components/competitors/CompetitorList";
 import { ApiError } from "@/lib/api/client";
 import { listCompetitors } from "@/lib/api/competitors";
-import { makeCompetitor, renderWithQuery } from "./helpers";
+import { LEAKY_SERVER_ERROR, makeCompetitor, renderWithQuery } from "./helpers";
 
 const { push } = vi.hoisted(() => ({ push: vi.fn() }));
 
@@ -31,12 +31,14 @@ function tableRows() {
 }
 
 describe("CompetitorList", () => {
-  it("shows a friendly error when loading fails", async () => {
-    list.mockRejectedValue(new ApiError("Something went wrong. Please try again.", 500));
+  it("hides server internals when loading fails", async () => {
+    list.mockRejectedValue(new ApiError(LEAKY_SERVER_ERROR, 500));
     renderWithQuery(<CompetitorList />);
-    expect((await screen.findByRole("alert")).textContent).toBe(
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(
       "Could not load competitors. Something went wrong. Please try again.",
     );
+    expect(document.body.textContent).not.toContain("sqlalchemy");
   });
 
   it("shows an empty state when there are no competitors", async () => {

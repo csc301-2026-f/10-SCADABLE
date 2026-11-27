@@ -16,6 +16,10 @@ export function renderWithQuery(ui: ReactElement) {
 
 const now = () => new Date().toISOString();
 
+/** A server error that leaks internals. The UI must never show this text. */
+export const LEAKY_SERVER_ERROR =
+  "sqlalchemy.exc.OperationalError: connection refused at db.internal:5432";
+
 export function makeCompetitor(
   overrides: Partial<CompetitorSummary> = {},
 ): CompetitorSummary {
