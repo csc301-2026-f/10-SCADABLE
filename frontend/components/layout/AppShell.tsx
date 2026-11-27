@@ -96,7 +96,18 @@ export function AppShell({ children, clerkEnabled }: Props) {
                   </SignInButton>
                 </Show>
                 <Show when="signed-in">
-                  <UserButton>
+                  <UserButton
+                    userProfileProps={{
+                      appearance: {
+                        elements: {
+                          // Invite-only tool: one email per account is enough
+                          profileSectionPrimaryButton__emailAddresses: {
+                            display: "none",
+                          },
+                        },
+                      },
+                    }}
+                  >
                     <UserButton.UserProfilePage
                       label="Research settings"
                       labelIcon={<ResearchSettingsIcon />}
