@@ -13,15 +13,15 @@ SWOT stands for **strengths, weaknesses, opportunities and threats**. The overal
 - [Open Live SWOT](https://10-scadable-jm2j.vercel.app/)
 - [Developer setup and maintenance guide](DEVELOPERS.md)
 
-Hosted access is invite-only through Clerk's Development instance, which supports the current Vercel URLs and local development without a custom domain.
-
 ### For TAs and evaluators
 
-Sign in with an invited account. If access has not been arranged, contact the team for an invitation or use the local setup below to evaluate the dashboard with sample data. For a quick hosted evaluation, open the overall SWOT and an existing researched competitor.
+For course evaluation, select **Go to dashboard** at the top right of the sign-in page. When enabled, this temporary read-only evaluator option lets you browse existing competitor research, SWOT findings, feature scores and research activity without an account. Creating or deleting competitors, starting or cancelling research, and changing settings require an authorized signed-in account.
+
+For a quick evaluation, open the overall SWOT and an existing researched competitor. If the dashboard option is unavailable, contact the team for access or use the local setup below with sample data.
 
 ### For SCADABLE
 
-Sign in with your invited SCADABLE account. Administrators manage invitations through Clerk Dashboard → Users → Invitations. See the [authentication and invitation guide](frontend/docs/auth-access.md).
+Sign in with your invited SCADABLE account. Administrators can manage invitations through Clerk Dashboard → Users → Invitations. The evaluator dashboard is a temporary option controlled by `ALLOW_DEV_DASHBOARD_BYPASS`. After grading, the partner can unset the flag or set it to `false` in Vercel and redeploy. See [Ownership and security](DEVELOPERS.md#ownership-and-security) and the [authentication guide](frontend/docs/auth-access.md).
 
 ## Quick local setup
 
@@ -49,7 +49,7 @@ SCADABLE_DB_PORT=5436 ./setup.sh --start
 
 Use the same database port on subsequent runs. Press Ctrl+C to stop the application servers; `docker stop scadable-dev-postgres` stops the local database without deleting its data.
 
-**Evaluating locally:** A fresh database starts empty. Without Clerk keys, local UI testing is available. Creating or rerunning real research requires Clerk Development credentials, an invited account and an OpenAI key. See [environment configuration](DEVELOPERS.md#2-environment-configuration). For a UI-only walkthrough without paid research, set `NEXT_PUBLIC_USE_MOCKS=true` in `frontend/.env.local` and restart the frontend. This displays sample data, not live research. Do not use production credentials or the production database locally.
+**Evaluating locally:** A fresh database starts empty. Without Clerk keys, local UI testing is available. Creating or rerunning real research through the dashboard requires Clerk Development credentials, an invited account and an OpenAI key. Local `next dev` enables the dashboard shortcut automatically. See [environment configuration](DEVELOPERS.md#2-environment-configuration). For a UI-only walkthrough without paid research, set `NEXT_PUBLIC_USE_MOCKS=true` in `frontend/.env.local` and restart the frontend. This displays sample data, not live research. Do not use production credentials or the production database locally.
 
 For manual installation, port conflicts, separate server commands and troubleshooting, see the [developer guide](DEVELOPERS.md#1-quick-local-setup).
 

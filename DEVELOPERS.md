@@ -40,7 +40,7 @@ npm run dev
 
 Open <http://localhost:3000>. The API health check at <http://localhost:8000/health> should return `{"status":"ok"}`. Swagger: <http://localhost:8000/docs>; schema: <http://localhost:8000/openapi.json>.
 
-A fresh database is empty. Local UI testing is available without Clerk keys; real research requires Clerk Development credentials, an invited account and an OpenAI key. For a UI-only walkthrough, set `NEXT_PUBLIC_USE_MOCKS=true` in `frontend/.env.local` and restart Next.js. This uses fixtures, not live research. Never use mock crawling in production or production credentials locally.
+A fresh database is empty. Local UI testing is available without Clerk keys; local `next dev` enables the dashboard shortcut automatically. Real research through the dashboard requires Clerk Development credentials, an invited account and an OpenAI key. For a UI-only walkthrough, set `NEXT_PUBLIC_USE_MOCKS=true` in `frontend/.env.local` and restart Next.js. This uses fixtures, not live research. Never use mock crawling in production or production credentials locally.
 
 ### Manual setup / custom local database
 
@@ -80,7 +80,7 @@ Copy the tracked examples (`./setup.sh --prepare`), edit locally, and never comm
 | Frontend `.env.local` | `NEXT_PUBLIC_API_URL=http://localhost:8000`, `BACKEND_API_URL=http://localhost:8000`, `NEXT_PUBLIC_USE_MOCKS=false`, development `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`. |
 | Shared server-only settings | Same `SCRAPING_SETTINGS_ADMIN_TOKEN`, `GITHUB_INTEGRATION_ADMIN_TOKEN` and `ACCOUNT_RESEARCH_BRIDGE_TOKEN` on Railway and trusted Next.js server as needed. `SETTINGS_ADMIN_EMAILS` optionally limits settings administrators. Never use `NEXT_PUBLIC_` for these values. |
 
-Clerk account keys are held in private metadata and forwarded for an authenticated research request only. The bridge token also authorizes cancellation. Hosted access uses invite-only Clerk Development authentication. The public dashboard bypass button has been removed. Keep `ALLOW_DEV_DASHBOARD_BYPASS` unset or false in hosted environments; the legacy bypass route remains in the code for local testing. Administrators can invite users through Clerk Dashboard → Users → Invitations. See the [authentication guide](frontend/docs/auth-access.md). Keep separate keys and service variables in development and production. No live provider key is required for offline tests.
+Clerk account keys are held in private metadata and forwarded for an authenticated research request only. The bridge token also authorizes cancellation. Hosted account access uses invite-only Clerk Development authentication. `ALLOW_DEV_DASHBOARD_BYPASS` is a server-side frontend setting for temporary evaluator access. In hosted environments with Clerk configured, the sign-in page shortcut, bypass route and bypass cookie acceptance respect the setting. Keep it false or unset outside evaluation. See Section 5 for the handoff procedure and security boundary. Keep separate keys and service variables in development and production. No live provider key is required for offline tests.
 
 ## 3. Architecture and project layout
 
@@ -246,7 +246,19 @@ Maintenance requires access to GitHub (course repository, deployment fork and Gi
 
 Clerk handles frontend authentication; server-side tokens protect sensitive integration and settings operations. Credentials remain in server environment variables or private account metadata.
 
-**Security limitations:** Direct backend routes do not universally enforce Clerk authentication. Private partner operation requires API-level authorization and restricted direct access; rate limiting and crawler network restrictions are further hardening priorities.
+#### Temporary evaluator access
+
+The temporary read-only evaluator dashboard is intended for course grading. It allows visitors to view existing findings without a Clerk account. Data modifications, paid research and administrative settings must require an authorized Clerk session. Before enabling evaluator access, verify these restrictions at the API level, not just by checking whether controls are hidden in the frontend.
+
+To configure evaluator access in Vercel:
+
+1. Open the frontend project → Settings → Environment Variables. Set the server-side `ALLOW_DEV_DASHBOARD_BYPASS` to `true` for Production only when the evaluator access controls have been verified. Redeploy the production frontend.
+2. Open the live site in a private browser window. Verify that existing findings are accessible without an account and that creating or deleting competitors, starting or cancelling research, and changing research or integration settings are denied, including through direct API requests.
+3. After grading, set `ALLOW_DEV_DASHBOARD_BYPASS=false` in Production (and any other hosted environment where it was enabled), then redeploy each affected frontend. Verify that the shortcut is hidden, direct bypass requests fail, previously issued bypass cookies no longer grant access and invited users can still sign in.
+
+Clerk invitations are managed through the Development instance under Users → Invitations. Do not publish evaluator or partner credentials in the public repository.
+
+**Security considerations:** The evaluator toggle controls frontend dashboard access; it does not independently secure the backend. Keep administrative access policies configured and restrict direct API access. Do not enable evaluator access on a live dataset unless server-side write restrictions have been verified. If verification fails, use an isolated evaluator environment with non-sensitive data and no paid provider credentials, or invited accounts. Disable the bypass for private partner operation. Rate limiting and crawler network restrictions remain further hardening priorities.
 
 ## 6. Maintenance and troubleshooting
 
