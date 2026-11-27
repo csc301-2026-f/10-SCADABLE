@@ -1,4 +1,4 @@
-import { apiFetch, shouldUseMocks } from "@/lib/api/client";
+import { apiFetch, shouldUseMocks } from "./client";
 import type {
   AgentRun,
   CompetitorChanges,
@@ -7,8 +7,8 @@ import type {
   CreateCompetitorInput,
   CreateCompetitorResult,
 } from "@/lib/api/types";
-import { normalizeSourceUrl } from "@/lib/format";
-import { mockCompetitors, mockProfiles, mockRuns } from "@/lib/mocks/data";
+import { normalizeSourceUrl } from "../format";
+import { mockCompetitors, mockProfiles, mockRuns } from "../mocks/data";
 
 function delay(ms = 200) {
   return new Promise((resolve) => setTimeout(resolve, ms));

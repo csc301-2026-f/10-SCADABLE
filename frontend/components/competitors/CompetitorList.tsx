@@ -80,7 +80,7 @@ export function CompetitorList() {
     refetchInterval: (query) => competitorsPollInterval(query.state.data),
   });
 
-  const competitors = data ?? [];
+  const competitors = useMemo(() => data ?? [], [data]);
 
   const visible = useMemo(() => {
     const query = search.trim();

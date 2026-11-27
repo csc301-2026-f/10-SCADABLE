@@ -1,6 +1,6 @@
-import { ApiError, apiFetch, shouldUseMocks } from "@/lib/api/client";
+import { ApiError, apiFetch, shouldUseMocks } from "./client";
 import type { AgentRun } from "@/lib/api/types";
-import { mockRuns } from "@/lib/mocks/data";
+import { mockRuns } from "../mocks/data";
 
 function delay(ms = 200) {
   return new Promise((resolve) => setTimeout(resolve, ms));

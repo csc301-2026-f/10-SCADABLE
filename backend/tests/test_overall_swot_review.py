@@ -132,3 +132,40 @@ def test_deleting_unresearched_competitor_does_not_invalidate_overview(db):
     repo.delete_competitor(db, new.id)
     assert repo.get_overall_swot_revision(db) == original
     assert repo.is_overall_swot_current(db)
+
+
+def test_unchanged_run_preserves_conflict_and_role_data_without_another_analysis(db):
+    class CountingAnalyzer(MockOpenAIAnalyzer):
+        calls = 0
+
+        async def analyze(self, scraped_data, baseline_context, trace_prefix=None):
+            self.calls += 1
+            result = await super().analyze(scraped_data, baseline_context, trace_prefix)
+            return {**result, "open_roles": 0, "conflicting_data": {"conflicts": []}}
+
+    company = repo.create_competitor(db, "Vanta", "https://vanta.com")
+    analyzer = CountingAnalyzer()
+    first = repo.create_research_run(db, company.id)
+    asyncio.run(orchestrator.execute_research_run(db, first.id, MockCrawl4AICrawler(), analyzer))
+    second = repo.create_research_run(db, company.id)
+    result = asyncio.run(orchestrator.execute_research_run(db, second.id, MockCrawl4AICrawler(), analyzer))
+    assert result.status == models.ResearchStatus.COMPLETED
+    assert analyzer.calls == 1
+    assert result.analysis_result["skipped_llm"] is True
+    assert result.analysis_result["reused_from_run_id"] == first.id
+    assert result.analysis_result["open_roles"] == 0
+    assert result.analysis_result["conflicting_data"] == {"conflicts": []}
+    assert repo.is_overall_swot_current(db)
+
+
+def test_failed_crawl_keeps_published_findings(db):
+    company, _ = _completed(db)
+    before = [entry.content for entry in repo.get_overall_swot(db)]
+    run = repo.create_research_run(db, company.id)
+    result = asyncio.run(orchestrator.execute_research_run(
+        db, run.id, MockCrawl4AICrawler(should_fail=True), MockOpenAIAnalyzer()
+    ))
+    assert result.status == models.ResearchStatus.FAILED
+    assert result.error_message == "Research failed due to an internal error."
+    assert [entry.content for entry in repo.get_overall_swot(db)] == before
+    assert repo.is_overall_swot_current(db)

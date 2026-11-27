@@ -43,16 +43,22 @@ def require_settings_admin(authorization: str | None = Header(default=None)) -> 
         raise HTTPException(status_code=401, detail="Unauthorized.")
 
 
-@router.get("", response_model=ScrapingSettingsResponse)
+@router.get("", response_model=ScrapingSettingsResponse, summary="Read scraping depth")
 def read_scraping_settings(db: Session = Depends(get_db)) -> ScrapingSettingsResponse:
+    """Read the shared depth and maximum pages per future crawl."""
     depth = get_scraping_depth(db)
     return ScrapingSettingsResponse(depth=depth, max_pages=PAGE_LIMITS[depth])
 
 
-@router.put("", response_model=ScrapingSettingsResponse, dependencies=[Depends(require_settings_admin)])
+@router.put(
+    "", response_model=ScrapingSettingsResponse,
+    dependencies=[Depends(require_settings_admin)],
+    summary="Update scraping depth (admin only)",
+)
 def update_scraping_settings(
     payload: UpdateScrapingSettings,
     db: Session = Depends(get_db),
 ) -> ScrapingSettingsResponse:
+    """Update the shared limit for future research runs, not already-running crawls."""
     max_pages = set_scraping_depth(db, payload.depth)
     return ScrapingSettingsResponse(depth=payload.depth, max_pages=max_pages)

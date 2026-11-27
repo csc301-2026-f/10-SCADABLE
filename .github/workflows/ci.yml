@@ -2,8 +2,6 @@
 name: CI
 
 on:
-  push:
-    branches: [feature/github-app-integration]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -72,6 +70,8 @@ jobs:
       RUN_LIVE_PIPELINE_TEST: "0"
       AUTO_REFRESH_ENABLED: "false"
       GITHUB_SYNC_ENABLED: "false"
+      LANGFUSE_COST_RECOVERY_ENABLED: "false"
+      SCRAPER_BROWSER_TESTS: "0"
 
     steps:
       - name: Checkout repository
@@ -90,12 +90,15 @@ jobs:
         # ./llm must be listed: pip cannot resolve the local scadable-llm dependency on its own.
         run: python -m pip install ./scraper -e ./llm -e ".[dev]"
 
-      - name: Run all backend tests (including GitHub App + feature sync)
+      - name: Run all backend tests (crawler, scheduler, API and integration)
         working-directory: backend
         run: python -m pytest tests/ -q
 
+      - name: Run standalone LLM and pipeline tests
+        run: python -m pytest tests/ -q
+
   frontend:
-    name: Frontend Lint
+    name: Frontend Checks
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -119,3 +122,9 @@ jobs:
 
       - name: Run ESLint
         run: npm run lint
+
+      - name: Run frontend unit tests
+        run: npm test
+
+      - name: Type-check frontend
+        run: npm run typecheck

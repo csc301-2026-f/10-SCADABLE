@@ -339,7 +339,11 @@ export function CompetitorProfileView({ id }: { id: string }) {
           <section className={styles.card}>
             <h2>Feature & automation score</h2>
             {data.chartSeries.scores.length === 0 ? (
-              <p className={styles.empty}>Scores not researched yet.</p>
+              <p className={styles.empty} role="status">
+                {data.researchStatus === "success"
+                  ? "Scores are not available yet. Comparison may still be processing."
+                  : "Scores not researched yet."}
+              </p>
             ) : (
               data.chartSeries.scores.map((row) => (
                 <div key={row.label} className={styles.featureRow}>
