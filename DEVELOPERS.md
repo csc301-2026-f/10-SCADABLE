@@ -135,7 +135,7 @@ npm test
 npm run typecheck
 ```
 
-The frontend tests exercise validation, actual API client response handling (mocked HTTP transport), stale findings, error sanitization, polling and cost/cache calculations. They are unit/contract tests, not a browser end-to-end suite. To test the scraper independently:
+The frontend tests exercise validation, actual API client response handling (mocked HTTP transport), stale findings, error sanitization, polling and cost/cache calculations. `npm test` also runs Vitest component tests in `frontend/tests/components/`, which render the add competitor form, research status banner, competitor list, Agent Runs list and SWOT Overview page in jsdom with a mocked API (`npm run test:components` runs only these). They are unit/contract tests, not a browser end-to-end suite. To test the scraper independently:
 
 ```bash
 cd scraper
