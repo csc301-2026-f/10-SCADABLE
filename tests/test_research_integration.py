@@ -141,15 +141,24 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
                     "usage": {"input_tokens": 100},
                 },
             )
+        if request.url.path == "/v1/conversations":
+            return httpx2.Response(
+                200,
+                json={"id": "conv_offline", "object": "conversation", "created_at": 0, "metadata": {}},
+            )
         assert request.url.path == "/v1/responses"
-        # Analysis must read the completed, exact Markdown export, not a second crawl.
-        assert index.is_file()
-        assert (index.parent / "pages/index.md").read_text(encoding="utf-8") == MARKDOWN
-        assert payload["text"]["format"]["name"] == "PartialExtractedInformationByIndex"
-        user_text = payload["input"][-1]["content"]
-        assert MARKDOWN in user_text and pricing in user_text
-        assert "page_index: 0" in user_text and "page_index: 1" in user_text
-        response = partial_facts
+        if payload["text"]["format"]["name"] == "ExtractionFeedbacks":
+            # The validator reports no problems.
+            output_text = '{"feedbacks": []}'
+        else:
+            # Analysis must read the completed, exact Markdown export, not a second crawl.
+            assert index.is_file()
+            assert (index.parent / "pages/index.md").read_text(encoding="utf-8") == MARKDOWN
+            assert payload["text"]["format"]["name"] == "PartialExtractedInformationByIndex"
+            user_text = payload["input"][-1]["content"]
+            assert MARKDOWN in user_text and pricing in user_text
+            assert "page_index: 0" in user_text and "page_index: 1" in user_text
+            output_text = partial_facts.model_dump_json()
         return httpx2.Response(
             200,
             json={
@@ -167,7 +176,7 @@ async def test_scraper_markdown_flows_through_decisions_and_llm_and_can_be_repla
                         "content": [
                             {
                                 "type": "output_text",
-                                "text": response.model_dump_json(),
+                                "text": output_text,
                                 "annotations": [],
                             }
                         ],

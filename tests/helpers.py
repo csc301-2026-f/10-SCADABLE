@@ -15,6 +15,10 @@ from llm.schemas import (
 from scraper import CompetitorCrawlResult, ScrapedPage
 from scraper.output import competitor_directory, export_competitor
 
+from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 NOW = datetime(2026, 10, 19, 12, tzinfo=UTC)
 # make_result() finishes one second after NOW; extraction formats that time like this.
 CRAWL_TIME = (NOW + timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S")
@@ -78,6 +82,27 @@ def company_result(company, *, empty=False):
         pages=pages,
     )
 
+class FakeThreadClient:
+    """Adds the thread, span and validator methods to a fake that defines generate_structured()."""
+
+    instructions = None
+
+    async def start_thread(self, *, instructions, metadata=None):
+        self.instructions = instructions
+        return "conv_fake"
+
+    @contextmanager
+    def create_session(self, *, name, session_id):
+        yield MagicMock()
+
+    async def generate_in_thread(self, *, input_text, output_schema, **_):
+        return await self.generate_structured(
+            instructions=self.instructions, input_text=input_text, output_schema=output_schema
+        )
+
+    async def generate_response(self, *, output_schema, **_):
+        # The validator reports no problems.
+        return SimpleNamespace(output_parsed=output_schema(feedbacks=[]))
 
 class StubScraper:
     """Yield completed competitors in reverse order to exercise completion-order handoff."""
