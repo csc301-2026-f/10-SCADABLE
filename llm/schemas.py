@@ -33,6 +33,13 @@ SWOTComponent = Literal[
     "threat"
 ]
 
+ExtractionKeys = Literal[
+    "summary", 
+    "job_postings",
+    "claims_cited",
+    "conflicting_data"
+]
+
 class AnalysisPage(BaseModel):
     """One exported page's metadata alongside its unchanged Markdown."""
 
@@ -233,7 +240,7 @@ class ExtractionFeedback(BaseModel):
     """
     a short feedback model for the company extraction.
     """
-    what: str
+    what: ExtractionKeys
     why: str
 
 class ExtractionFeedbacks(BaseModel):

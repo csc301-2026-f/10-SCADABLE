@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from langfuse import LangfuseSpan
 from pydantic import BaseModel
+from copy import deepcopy
 
 from llm.client import OpenAIClient
 from llm.prompts.validation import (
@@ -53,6 +54,22 @@ try:
 except ValueError:
     OPENAI_CALL_LIMIT = 3
 
+FIELDS_BY_KEY = {
+    "summary": ("summary", "summary_page_indexes"),
+    "job_postings": ("job_postings",),
+    "claims_cited": ("claims_cited",),
+    "conflicting_data": ("conflicting_data",),
+}
+
+KEY_BY_CITATION_LABEL = {
+    "Summary": "summary",
+    "Job posting": "job_postings",
+    "Claim": "claims_cited",
+    "Conflicting data": "conflicting_data",
+
+}
+
+
 def _extraction_by_index(position: int, company: ExtractedInformationByURL, url_index: list[dict[str, int]]) -> ExtractedInformationByIndex:
     """
     A helper function to build an Extract
@@ -83,23 +100,30 @@ def _extraction_by_index(position: int, company: ExtractedInformationByURL, url_
 
 
 class Analyzer:
-    def __init__(self, client: OpenAIClient, trace_prefix: str | None = None) -> None:
-        """trace_prefix names each call "{prefix}:{step}" for cost lookups (e.g. "run-42");
-        without it, calls are named from the company and crawl time."""
+    def __init__(self, client: OpenAIClient, trace_prefix: str | None = None, session_id: str | None = None) -> None:
+        """Initializes an Analyzer.
+        
+        :param client: the OpenAIClient object (or LLM) which will conduct the full research.
+        :param trace_prefix: the name of the specific chat trace within a chat session (used for tracking individual API calls).
+        :param session_id: the ID of a langfuse session (to track the overall cost of all API calls in both extraction and comparison).
+        """
         self.client = client
         self.trace_prefix = trace_prefix
+        self.session_id = session_id
 
     def _observation_name(self, step: str, default: str) -> str:
         return f"{self.trace_prefix}:{step}" if self.trace_prefix else default
 
     async def extract_information(self, data: AnalysisInput) -> ExtractedInformationByURL:
+        finalized = None # RETURNED AS OUTPUT
         attempt_number = 1
         conversation_id = await self.client.start_thread(instructions=DATA_EXTRACTION_SYSTEM_PROMPT, 
                                                    metadata={"step": "extraction", "company": data.company_name})
         page_urls = [str(p.source.url) for p in data.pages]
         crawl_time_str = data.crawl_summary.finished_at.strftime("%Y-%m-%d %H:%M:%S")
 
-        with self.client.create_session(name=self._observation_name("extraction-session", f"{data.company_name}-extraction"), conversation_id=conversation_id) as session:
+        with self.client.create_session(name=self._observation_name("extraction-session", f"{data.company_name}-extraction"), 
+                                        session_id=self.session_id) as session:
             partial = await self.client.generate_in_thread(
                 session=session,
                 input_text=build_extraction_user_prompt(data),
@@ -112,9 +136,11 @@ class Analyzer:
                 post_status=f"Validating {data.company_name}'s data extraction (attempt {attempt_number})"
             )
 
+            finalized = partial.model_copy()
+
             feedback = await validate_llm_response(client=self.client,
                                                 output_criteria=EXTRACTION_VALIDATION_SYSTEM_PROMPT, 
-                                                llm_output=build_extraction_validation_user_prompt(partial),
+                                                llm_output=build_extraction_validation_user_prompt(scraped_pages=data, llm_output=partial),
                                                 observation_name=self._observation_name(
                                                     f"extraction-validation-{attempt_number}",
                                                     data.company_name + f"-extraction-validation-{attempt_number}-" + crawl_time_str
@@ -153,10 +179,22 @@ class Analyzer:
                             pre_status=f"Extracting {data.company_name}'s information (attempt {attempt_number})",
                             post_status=f"Validating {data.company_name}'s data extraction (attempt {attempt_number})"
                         )
+
+                # full_feedback is still the feedback that caused this retry
+                what_to_change = {f.what for f in full_feedback.feedback.feedbacks}
+                what_to_change |= {KEY_BY_CITATION_LABEL[label] for label, _ in full_feedback.citation_violations}
+
+                updates = {
+                    field: getattr(partial, field)
+                    for key in what_to_change
+                    for field in FIELDS_BY_KEY[key]
+                }
+
+                finalized = finalized.model_copy(update=updates)
                 
                 feedback = await validate_llm_response(client=self.client,
                                                         output_criteria=EXTRACTION_VALIDATION_SYSTEM_PROMPT, 
-                                                        llm_output=build_extraction_validation_user_prompt(partial),
+                                                        llm_output=build_extraction_validation_user_prompt(scraped_pages=data, llm_output=finalized),
                                                         observation_name=self._observation_name(
                                                             f"extraction-validation-{attempt_number}", 
                                                             data.company_name + f"-extraction-validation-{attempt_number}-" + crawl_time_str
@@ -176,22 +214,18 @@ class Analyzer:
 
             session.update(status_message=f"Extraction complete")
 
-            # The retry budget may run out with citations still invalid; fail loudly then.
-            if full_feedback.citation_violations:
-                what, index = full_feedback.citation_violations[0]
-                raise ValueError(f"{what} page index {index} is out of range (0 to {len(page_urls) - 1}).")
-
             result = ExtractedInformationByURL(company_name=data.company_name, 
-                                        summary=partial.summary,
-                                        summary_page_urls=[page_urls[p] for p in partial.summary_page_indexes], 
-                                        job_postings=[JobCitedByURL(role=job.role, category=job.category, job_families=job.job_families, job_page_url=page_urls[job.job_page_index]) for job in partial.job_postings],
-                                        claims_cited=[ClaimCitedByURL(category=c.category, claim=c.claim, claim_page_url=page_urls[c.claim_page_index]) for c in partial.claims_cited],
-                                        conflicting_data=ConflictEntry(company_name=data.company_name, conflicts=[ConflictCitedByURL(claim_a=c.claim_a, claim_a_page_URL=page_urls[c.claim_a_page_index], claim_b=c.claim_b, claim_b_page_URL=page_urls[c.claim_b_page_index]) for c in partial.conflicting_data]),
+                                        summary=finalized.summary,
+                                        summary_page_urls=[page_urls[p] for p in finalized.summary_page_indexes], 
+                                        job_postings=[JobCitedByURL(role=job.role, category=job.category, job_families=job.job_families, job_page_url=page_urls[job.job_page_index]) for job in finalized.job_postings],
+                                        claims_cited=[ClaimCitedByURL(category=c.category, claim=c.claim, claim_page_url=page_urls[c.claim_page_index]) for c in finalized.claims_cited],
+                                        conflicting_data=ConflictEntry(company_name=data.company_name, conflicts=[ConflictCitedByURL(claim_a=c.claim_a, claim_a_page_URL=page_urls[c.claim_a_page_index], claim_b=c.claim_b, claim_b_page_URL=page_urls[c.claim_b_page_index]) for c in finalized.conflicting_data]),
                                         crawl_time_string=crawl_time_str
                                         )
             return result
 
     async def compare(self, data: ComparisonInput) -> SWOTAnalysisByURL:
+        finalized = None # RETURNED AS OUTPUT
         attempt_number = 1
         conversation_id = await self.client.start_thread(instructions=COMPARISON_SYSTEM_PROMPT, 
                                                     metadata={"step": "comparison"})
@@ -207,7 +241,7 @@ class Analyzer:
                          for p, c in enumerate(data.competitors, start=1)],
         )
 
-        with self.client.create_session(name="comparison-session", conversation_id=conversation_id) as session:
+        with self.client.create_session(name="comparison-session", session_id=self.session_id) as session:
             response = await self.client.generate_in_thread(
                 input_text=build_comparison_user_prompt(llm_input),
                 output_schema=SWOTAnalysisByIndex,
@@ -221,12 +255,28 @@ class Analyzer:
 
             feedback = await validate_llm_response(client=self.client, 
                                                 output_criteria=SWOT_VALIDATION_SYSTEM_PROMPT, 
-                                                llm_output=build_swot_validation_user_prompt(response), 
+                                                llm_output=build_swot_validation_user_prompt(comparison_input=data, llm_response=response), 
                                                 observation_name=self._observation_name(
                                                     f"comparison-validation-{attempt_number}",
                                                     f"SWOT-validation-{attempt_number}-" + data.scadable.crawl_time_string
                                                 ),
                                                 type="SWOT")
+
+            
+            finalized = feedback.model_copy()
+
+            
+            # full_feedback is still the feedback that caused this retry
+            what_to_change = {f.what for f in full_feedback.feedback.feedbacks}
+            what_to_change |= {KEY_BY_CITATION_LABEL[label] for label, _ in full_feedback.citation_violations}
+
+            updates = {
+                field: getattr(feedback, field)
+                for key in what_to_change
+                for field in FIELDS_BY_KEY[key]
+            }
+
+            finalized = finalized.model_copy(update=updates)
 
             scv = swot_citation_violations(company_urls, response.SWOT_entries)
             fsv = feature_score_violations(len(companies), response.scores)
@@ -264,7 +314,7 @@ class Analyzer:
                             
                 feedback = await validate_llm_response(client=self.client, 
                                                             output_criteria=SWOT_VALIDATION_SYSTEM_PROMPT, 
-                                                            llm_output=build_swot_validation_user_prompt(response), 
+                                                            llm_output=build_swot_validation_user_prompt(comparison_input=data, llm_response=response), 
                                                             observation_name=self._observation_name(
                                                                 f"comparison-validation-{attempt_number}",
                                                                 f"SWOT-validation-{attempt_number}-" + data.scadable.crawl_time_string
@@ -275,7 +325,19 @@ class Analyzer:
                 fsv = feature_score_violations(len(companies), response.scores)
                 csv = competitor_swot_violations(company_urls, response.competitor_swots)
                 fpv = feature_pair_violations(len(companies), response.scores, response.feature_pairs)
-        
+                
+                # full_feedback is still the feedback that caused this retry
+                what_to_change = {f.what for f in full_feedback.feedback.feedbacks}
+                what_to_change |= {KEY_BY_CITATION_LABEL[label] for label, _ in full_feedback.citation_violations}
+    
+                updates = {
+                    field: getattr(feedback, field)
+                    for key in what_to_change
+                    for field in FIELDS_BY_KEY[key]
+                }
+    
+                finalized = finalized.model_copy(update=updates)
+                
                 full_feedback = FullSWOTFeedback(feedback=feedback, 
                                                     swot_citation_violations=scv, 
                                                     feature_score_violations=fsv, 
@@ -290,14 +352,14 @@ class Analyzer:
 
             session.update(status_message="Completed full pipeline")
             return SWOTAnalysisByURL(
-                competitor_notes=response.competitor_notes,
+                competitor_notes=finalized.competitor_notes,
                 SWOT_entries=[
                     SWOTEntryByURL(
                         component=swot.component,
                         what=swot.what,
                         swot_component_page_urls=cited_urls(swot),
                     )
-                    for swot in response.SWOT_entries
+                    for swot in finalized.SWOT_entries
                 ],
                 scores=[
                     FeatureScore(
@@ -305,7 +367,7 @@ class Analyzer:
                         feature=score.feature,
                         score=score.score,
                     )
-                    for score in response.scores
+                    for score in finalized.scores
                 ],
                 conflicting_data=[data.scadable.conflicting_data] + [c.conflicting_data for c in data.competitors],
                 competitor_swots=[
@@ -320,7 +382,7 @@ class Analyzer:
                             for entry in block.SWOT_entries
                         ],
                     )
-                    for block in response.competitor_swots
+                    for block in finalized.competitor_swots
                 ],
                 feature_pairs=[
                     FeaturePair(
@@ -328,6 +390,6 @@ class Analyzer:
                         competitor_feature=pair.competitor_feature,
                         scadable_feature=pair.scadable_feature,
                     )
-                    for pair in response.feature_pairs
+                    for pair in finalized.feature_pairs
                 ],
             )

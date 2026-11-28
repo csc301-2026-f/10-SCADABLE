@@ -94,7 +94,7 @@ async def validate_llm_response(*, client: OpenAIClient, output_criteria: str, l
     """
     Checks whether the LLM output satisfies the output criteria for the expected prompt set.
     
-    :return: 
+    :return: an object containing all the feedbacks for a specific analysis.
     """
     response = await client.generate_response(instructions=output_criteria,
                                       input_text=llm_output,

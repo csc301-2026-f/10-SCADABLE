@@ -57,10 +57,10 @@ class OpenAIClient:
         return conversation.id
         
     @contextmanager
-    def create_session(self, *, name: str, conversation_id: str):
+    def create_session(self, *, name: str, session_id: str):
         """One parent span for every call and retry in a pipeline step. This is to have the cost-tracking done as a whole 
         session on Langfuse, so it accounts for cost in cache hit from all generations and validation."""
-        with propagate_attributes(session_id=conversation_id):
+        with propagate_attributes(session_id=session_id):
             with self.cost_tracker.start_as_current_observation(as_type="span", name=name) as session:
                 yield session
 
