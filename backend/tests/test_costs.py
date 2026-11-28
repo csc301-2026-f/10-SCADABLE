@@ -23,10 +23,10 @@ from app.db.repository import (
 from app.db.models import ResearchStatus
 from app.services import costs, orchestrator
 from app.services.costs import (
-    CallCost,
-    _cost_for_name,
+    SessionCost,
+    _session_cost_from_api,
     company_slug,
-    run_call_names,
+    run_session_id,
 )
 from app.services.crawler import MockCrawl4AICrawler
 from app.services.llm import MockOpenAIAnalyzer
@@ -53,16 +53,26 @@ def run_id(session_factory):
         return run.id
 
 
-def _fake_costs(monkeypatch, by_name):
-    async def fetch(names):
-        return {name: by_name.get(name, CallCost(found=0, usd=0.0)) for name in names}
+def _fake_costs(monkeypatch, calls):
+    """Fake the run's Langfuse session holding these (call name, price) pairs."""
+    lookups = []
 
-    monkeypatch.setattr(orchestrator, "fetch_call_costs", fetch)
+    async def fetch(session_id, *, started_at):
+        lookups.append(session_id)
+        prices = [usd for _, usd in calls]
+        return SessionCost(
+            found=len(calls),
+            usd=None if None in prices else round(sum(prices), 9),
+            names=[name for name, _ in calls],
+        )
+
+    monkeypatch.setattr(orchestrator, "fetch_session_cost", fetch)
 
     async def no_decisions(run_id, reference, *, expected_requests, started_at):
         return costs.DecisionsCost(found=0, usd=0.0, complete=True, expected=0)
 
     monkeypatch.setattr(orchestrator, "fetch_decisions_cost", no_decisions)
+    return lookups
 
 
 def _cost(session_factory, run_id):
@@ -83,38 +93,55 @@ def test_company_slug(name, slug):
     assert company_slug(name) == slug
 
 
-def test_run_call_names():
-    assert run_call_names(42, "Vanta") == [
-        "run-42:vanta:extraction",
-        "run-42:comparison",
-    ]
+def test_run_session_id():
+    assert run_session_id(42) == "run-42"
 
 
 class PrefixRecordingAnalyzer(MockOpenAIAnalyzer):
-    def __init__(self):
+    def __init__(self, paid_comparison=False):
         super().__init__()
         self.prefixes = []
+        self.paid_comparison = paid_comparison
 
-    async def analyze(self, scraped_data, baseline_context, trace_prefix=None):
-        self.prefixes.append(("analyze", trace_prefix))
+    async def analyze(self, scraped_data, baseline_context, trace_prefix=None, session_id=None):
+        self.prefixes.append(("analyze", trace_prefix, session_id))
         return await super().analyze(scraped_data, baseline_context)
 
-    async def compare(self, baseline_context, competitors, trace_prefix=None):
-        self.prefixes.append(("compare", trace_prefix))
-        return await super().compare(baseline_context, competitors)
+    async def compare(self, baseline_context, competitors, trace_prefix=None, session_id=None):
+        self.prefixes.append(("compare", trace_prefix, session_id))
+        result = await super().compare(baseline_context, competitors)
+        if self.paid_comparison:
+            # The real adapter reports the paid calls it made
+            result["llm_calls"] = [f"{trace_prefix}:comparison"]
+        return result
 
 
-def test_run_names_its_calls_by_run_and_company(session_factory):
+def test_run_names_its_calls_and_bills_them_to_its_session(session_factory):
     analyzer = PrefixRecordingAnalyzer()
     with session_factory() as db:
         competitor = create_competitor(db, name="Vanta Inc.", website_url="https://vanta.com")
         run = create_research_run(db, competitor.id)
         asyncio.run(orchestrator.execute_research_run(db, run.id, MockCrawl4AICrawler(), analyzer))
+        analysis = get_research_run(db, run.id).analysis_result
 
+    session = f"run-{run.id}"
     assert analyzer.prefixes == [
-        ("analyze", f"run-{run.id}:vanta-inc"),
-        ("compare", f"run-{run.id}"),
+        ("analyze", f"run-{run.id}:vanta-inc", session),
+        ("compare", f"run-{run.id}", session),
     ]
+    # The mock makes no paid calls, so the cost lookup must not wait for any
+    assert "llm_calls" not in analysis
+
+
+def test_paid_comparison_is_expected_in_the_runs_cost(session_factory):
+    analyzer = PrefixRecordingAnalyzer(paid_comparison=True)
+    with session_factory() as db:
+        competitor = create_competitor(db, name="Vanta", website_url="https://vanta.com")
+        run = create_research_run(db, competitor.id)
+        asyncio.run(orchestrator.execute_research_run(db, run.id, MockCrawl4AICrawler(), analyzer))
+        analysis = get_research_run(db, run.id).analysis_result
+
+    assert analysis["llm_calls"] == [f"run-{run.id}:comparison"]
 
 
 # --- Reading Langfuse --------------------------------------------------------
@@ -131,39 +158,82 @@ class FakeObservations:
 
 def _page(observations, cursor=None):
     return SimpleNamespace(
-        data=[SimpleNamespace(name=name, total_cost=cost) for name, cost in observations],
+        data=[
+            SimpleNamespace(id=f"obs-{i}-{name}", name=name, total_cost=cost)
+            for i, (name, cost) in enumerate(observations)
+        ],
         meta=SimpleNamespace(cursor=cursor),
     )
 
 
-def test_cost_for_name_sums_every_page_and_ignores_other_names():
-    observations = FakeObservations([
-        _page([("run-1:comparison", 0.002), ("run-10:comparison", 5.0)], cursor="next"),
-        _page([("run-1:comparison", 0.001)]),
-    ])
+def _session_cost(pages, started_at=None):
+    observations = FakeObservations(pages)
     api = SimpleNamespace(observations=observations)
+    return asyncio.run(_session_cost_from_api(api, "run-1", started_at)), observations
 
-    cost = asyncio.run(_cost_for_name(api, "run-1:comparison"))
 
-    assert cost == CallCost(found=2, usd=pytest.approx(0.003))
-    assert observations.calls[0]["name"] == "run-1:comparison"
+def test_session_cost_sums_every_page_including_reviews_and_retries():
+    cost, observations = _session_cost([
+        _page([("run-1:vanta:extraction-1", 0.002), ("run-1:vanta:extraction-validation-1", 0.001)], cursor="next"),
+        _page([("run-1:comparison-1", 0.003), ("run-1:comparison-2", 0.004)]),
+    ])
+
+    assert cost.found == 4
+    assert cost.usd == pytest.approx(0.01)
+    assert cost.has_step("run-1:vanta:extraction") and cost.has_step("run-1:comparison")
+    assert observations.calls[0]["session_id"] == "run-1"
+    assert observations.calls[0]["type"] == "GENERATION"
     assert observations.calls[1]["cursor"] == "next"
 
 
-def test_cost_for_name_is_unknown_when_a_call_has_no_price():
-    observations = FakeObservations([_page([("run-1:comparison", 0.002), ("run-1:comparison", None)])])
-    api = SimpleNamespace(observations=observations)
+def test_session_cost_only_counts_calls_from_around_this_run():
+    # Run numbers repeat across deployments and database resets, so the lookup
+    # is bounded to the run's own time.
+    from datetime import datetime, timedelta, timezone
 
-    assert asyncio.run(_cost_for_name(api, "run-1:comparison")) == CallCost(found=2, usd=None)
+    started = datetime(2026, 11, 27, 12, tzinfo=timezone.utc)
+    _, observations = _session_cost([_page([])], started_at=started)
+
+    assert observations.calls[0]["from_start_time"] == started - timedelta(minutes=3)
+    assert observations.calls[0]["to_start_time"] > started
 
 
-def test_fetch_call_costs_is_none_without_langfuse_keys(monkeypatch):
+def test_session_cost_leaves_decisions_calls_to_their_own_lookup():
+    cost, _ = _session_cost([_page([("run-1:vanta:extraction-1", 0.002), ("scraper.decisions.content", 0.5)])])
+
+    assert cost.found == 1
+    assert cost.usd == pytest.approx(0.002)
+
+
+def test_session_cost_counts_a_repeated_observation_once():
+    page = _page([("run-1:comparison-1", 0.002)])
+    cost, _ = _session_cost([SimpleNamespace(data=page.data, meta=SimpleNamespace(cursor="next")), page])
+
+    assert cost.found == 1
+
+
+def test_session_cost_is_unknown_when_a_call_has_no_price():
+    cost, _ = _session_cost([_page([("run-1:comparison-1", 0.002), ("run-1:comparison-validation-1", None)])])
+
+    assert cost.found == 2
+    assert cost.usd is None
+
+
+def test_step_matching_does_not_confuse_similar_names():
+    cost = SessionCost(found=1, usd=0.0, names=["run-1:comparison-1"])
+
+    assert cost.has_step("run-1:comparison")
+    assert not cost.has_step("run-1:compar")
+    assert not SessionCost(found=1, usd=0.0, names=["run-12:comparison-1"]).has_step("run-1:comparison")
+
+
+def test_fetch_session_cost_is_none_without_langfuse_keys(monkeypatch):
     monkeypatch.setattr(costs, "_langfuse_settings", lambda: None)
 
-    assert asyncio.run(costs.fetch_call_costs(run_call_names(1, "Vanta"))) is None
+    assert asyncio.run(costs.fetch_session_cost("run-1", started_at=None)) is None
 
 
-def test_fetch_call_costs_keeps_the_shared_langfuse_recorder_running(monkeypatch):
+def test_fetch_session_cost_keeps_the_shared_langfuse_recorder_running(monkeypatch):
     langfuse = pytest.importorskip("langfuse")
     langfuse_api = pytest.importorskip("langfuse.api")
     from langfuse._client.resource_manager import LangfuseResourceManager
@@ -174,7 +244,7 @@ def test_fetch_call_costs_keeps_the_shared_langfuse_recorder_running(monkeypatch
         langfuse_base_url="http://127.0.0.1:9",
     )
     monkeypatch.setattr(costs, "_langfuse_settings", lambda: settings)
-    pages = FakeObservations([_page([("run-1:vanta:extraction", 0.01)]), _page([])])
+    pages = FakeObservations([_page([("run-1:vanta:extraction-1", 0.01)]), _page([])])
     monkeypatch.setattr(
         langfuse_api, "AsyncLangfuseAPI", lambda **kwargs: SimpleNamespace(observations=pages)
     )
@@ -184,9 +254,9 @@ def test_fetch_call_costs_keeps_the_shared_langfuse_recorder_running(monkeypatch
         public_key="pk-lf-test", secret_key="sk-lf-test", base_url="http://127.0.0.1:9"
     )
     try:
-        result = asyncio.run(costs.fetch_call_costs(run_call_names(1, "Vanta")))
+        result = asyncio.run(costs.fetch_session_cost("run-1", started_at=None))
 
-        assert result["run-1:vanta:extraction"] == CallCost(found=1, usd=0.01)
+        assert result == SessionCost(found=1, usd=0.01, names=["run-1:vanta:extraction-1"])
         assert not LangfuseResourceManager._instances["pk-lf-test"]._shutdown
     finally:
         recorder.shutdown()
@@ -196,16 +266,19 @@ def test_fetch_call_costs_keeps_the_shared_langfuse_recorder_running(monkeypatch
 # --- Saving a run's cost -----------------------------------------------------
 
 def test_record_run_cost_saves_total_and_keeps_other_fields(monkeypatch, session_factory, run_id):
-    _fake_costs(monkeypatch, {
-        f"run-{run_id}:vanta:extraction": CallCost(found=1, usd=0.01),
-        f"run-{run_id}:comparison": CallCost(found=1, usd=0.005),
-    })
+    lookups = _fake_costs(monkeypatch, [
+        (f"run-{run_id}:vanta:extraction-1", 0.01),
+        (f"run-{run_id}:vanta:extraction-validation-1", 0.002),
+        (f"run-{run_id}:comparison-1", 0.005),
+    ])
 
     with session_factory() as db:
         assert asyncio.run(orchestrator.record_run_cost(db, run_id))
 
+    assert lookups == [f"run-{run_id}"]
     cost = _cost(session_factory, run_id)
-    assert cost["usd"] == pytest.approx(0.015)
+    assert cost["usd"] == pytest.approx(0.017)
+    assert cost["analysis_calls"] == 3
     assert cost["complete"] is True
     with session_factory() as db:
         assert get_research_run(db, run_id).analysis_result["scores"]  # not overwritten
@@ -215,7 +288,7 @@ def test_record_run_cost_waits_for_missing_calls_before_the_final_attempt(
     monkeypatch, session_factory, run_id
 ):
     # Extraction isn't ingested yet
-    _fake_costs(monkeypatch, {f"run-{run_id}:comparison": CallCost(found=1, usd=0.01)})
+    _fake_costs(monkeypatch, [(f"run-{run_id}:comparison-1", 0.01)])
 
     with session_factory() as db:
         assert not asyncio.run(orchestrator.record_run_cost(db, run_id, final=False))
@@ -226,21 +299,36 @@ def test_record_run_cost_waits_for_missing_calls_before_the_final_attempt(
     cost = _cost(session_factory, run_id)
     assert cost["usd"] is None
     assert cost["analysis_usd"] == pytest.approx(0.01)
+    assert cost["analysis_missing_steps"] == [f"run-{run_id}:vanta:extraction"]
     assert cost["complete"] is False
 
 
+def test_record_run_cost_waits_for_a_comparison_that_arrives_late(monkeypatch, session_factory, run_id):
+    # Extraction is in Langfuse but the comparison the run started is not yet
+    with session_factory() as db:
+        analysis = get_research_run(db, run_id).analysis_result
+        save_analysis_result(db, run_id, {
+            **analysis, "llm_calls": analysis["llm_calls"] + [f"run-{run_id}:comparison"],
+        })
+    _fake_costs(monkeypatch, [(f"run-{run_id}:vanta:extraction-1", 0.01)])
+
+    with session_factory() as db:
+        assert not asyncio.run(orchestrator.record_run_cost(db, run_id, final=False))
+    assert _cost(session_factory, run_id) is None
+
+
 def test_record_run_cost_marks_unpriced_calls_incomplete(monkeypatch, session_factory, run_id):
-    _fake_costs(monkeypatch, {
-        f"run-{run_id}:vanta:extraction": CallCost(found=1, usd=0.01),
-        f"run-{run_id}:comparison": CallCost(found=1, usd=None),
-    })
+    _fake_costs(monkeypatch, [
+        (f"run-{run_id}:vanta:extraction-1", 0.01),
+        (f"run-{run_id}:comparison-1", None),
+    ])
 
     with session_factory() as db:
         asyncio.run(orchestrator.record_run_cost(db, run_id))
 
     cost = _cost(session_factory, run_id)
     assert cost["usd"] is None
-    assert cost["analysis_usd"] == pytest.approx(0.01)
+    assert cost["analysis_usd"] is None
     assert cost["complete"] is False
 
 
@@ -251,19 +339,19 @@ def test_record_run_cost_with_no_calls_saves_zero(monkeypatch, session_factory):
         run = create_research_run(db, competitor.id)
         save_analysis_result(db, run.id, {"skipped_llm": True})
         run_id = run.id
-    _fake_costs(monkeypatch, {})
+    _fake_costs(monkeypatch, [])
 
     with session_factory() as db:
         assert asyncio.run(orchestrator.record_run_cost(db, run_id, final=False))
 
     cost = _cost(session_factory, run_id)
     assert cost["usd"] == 0.0
-    assert cost["calls"] == {}
+    assert cost["analysis_calls"] == 0
     assert cost["complete"] is True
 
 
 def test_record_run_cost_skips_deleted_runs(monkeypatch, session_factory, run_id):
-    _fake_costs(monkeypatch, {})
+    _fake_costs(monkeypatch, [])
     with session_factory() as db:
         delete_competitor(db, get_research_run(db, run_id).competitor_id)
 
@@ -272,10 +360,10 @@ def test_record_run_cost_skips_deleted_runs(monkeypatch, session_factory, run_id
 
 
 def test_record_run_cost_does_nothing_without_langfuse(monkeypatch, session_factory, run_id):
-    async def not_configured(names):
+    async def not_configured(session_id, *, started_at):
         return None
 
-    monkeypatch.setattr(orchestrator, "fetch_call_costs", not_configured)
+    monkeypatch.setattr(orchestrator, "fetch_session_cost", not_configured)
 
     with session_factory() as db:
         assert asyncio.run(orchestrator.record_run_cost(db, run_id))
@@ -342,7 +430,7 @@ def test_saved_cost_does_not_mark_a_failed_crawl_as_analyzed(monkeypatch, sessio
         update_research_run_status(
             db, run_id, ResearchStatus.FAILED, error_message="Could not crawl the competitor's website."
         )
-    _fake_costs(monkeypatch, {})
+    _fake_costs(monkeypatch, [])
 
     with session_factory() as db:
         assert asyncio.run(orchestrator.record_run_cost(db, run_id))
@@ -366,10 +454,10 @@ def test_record_run_cost_adds_decisions_to_analysis_cost(monkeypatch, session_fa
             "decision_usage": {"request_count": 2, "estimated_cost_usd": 99.0},
             "decision_tracking": {"trace_id": "a"*32, "observation_id": "b"*16},
         })
-    _fake_costs(monkeypatch, {
-        f"run-{run_id}:vanta:extraction": CallCost(found=1, usd=0.01),
-        f"run-{run_id}:comparison": CallCost(found=1, usd=0.02),
-    })
+    _fake_costs(monkeypatch, [
+        (f"run-{run_id}:vanta:extraction-1", 0.01),
+        (f"run-{run_id}:comparison-1", 0.02),
+    ])
 
     async def decisions(target_run, reference, *, expected_requests, started_at):
         assert target_run == run_id
@@ -390,10 +478,10 @@ def test_record_run_cost_adds_decisions_to_analysis_cost(monkeypatch, session_fa
 def test_record_run_cost_incomplete_decisions_is_not_measured_zero(
     monkeypatch, session_factory, run_id
 ):
-    _fake_costs(monkeypatch, {
-        f"run-{run_id}:vanta:extraction": CallCost(found=1, usd=0.01),
-        f"run-{run_id}:comparison": CallCost(found=1, usd=0.02),
-    })
+    _fake_costs(monkeypatch, [
+        (f"run-{run_id}:vanta:extraction-1", 0.01),
+        (f"run-{run_id}:comparison-1", 0.02),
+    ])
     async def incomplete(*args, **kwargs):
         return costs.DecisionsCost(found=0, usd=0.0, complete=False, expected=2)
     monkeypatch.setattr(orchestrator, "fetch_decisions_cost", incomplete)
@@ -420,7 +508,7 @@ def test_unchanged_analysis_can_still_have_scraper_decisions_costs(
             "decision_usage": {"request_count": 1},
         })
         save_analysis_result(db, run_id, {"skipped_llm": True})
-    _fake_costs(monkeypatch, {})
+    _fake_costs(monkeypatch, [])
 
     async def paid_decisions(*args, **kwargs):
         return costs.DecisionsCost(found=1, usd=0.0008, complete=True, expected=1)
@@ -441,7 +529,7 @@ def test_failed_crawl_without_scraper_telemetry_keeps_cost_unavailable(
         competitor = create_competitor(db, name="Foresite", website_url="https://foresite.com")
         run_id = create_research_run(db, competitor.id).id
         update_research_run_status(db, run_id, ResearchStatus.FAILED)
-    _fake_costs(monkeypatch, {})
+    _fake_costs(monkeypatch, [])
     async def unknown(*args, **kwargs):
         return costs.DecisionsCost(found=0, usd=0.0, complete=False, expected=None)
     monkeypatch.setattr(orchestrator, "fetch_decisions_cost", unknown)

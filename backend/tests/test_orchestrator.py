@@ -178,7 +178,7 @@ class EmptyScoresAnalyzer(MockOpenAIAnalyzer):
         super().__init__()
         self.scores = scores
 
-    async def compare(self, baseline_context, competitors, trace_prefix=None):
+    async def compare(self, baseline_context, competitors, trace_prefix=None, session_id=None):
         result = await super().compare(baseline_context, competitors)
         return {**result, "scores": self.scores}
 
@@ -195,14 +195,14 @@ def test_trigger_overall_swot_refresh():
 class CompareFailingAnalyzer(MockOpenAIAnalyzer):
     """Analyzes normally but fails the overall comparison."""
 
-    async def compare(self, baseline_context, competitors, trace_prefix=None):
+    async def compare(self, baseline_context, competitors, trace_prefix=None, session_id=None):
         raise RuntimeError("Simulated comparison failure.")
 
 
 class EmptyComparisonAnalyzer(MockOpenAIAnalyzer):
     """LLM comparison succeeded at transport level but yielded no findings."""
 
-    async def compare(self, baseline_context, competitors, trace_prefix=None):
+    async def compare(self, baseline_context, competitors, trace_prefix=None, session_id=None):
         result = await super().compare(baseline_context, competitors)
         return {**result, "swot_entries": []}
 

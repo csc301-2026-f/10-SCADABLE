@@ -12,6 +12,10 @@ import pytest
 pytest.importorskip("openai")
 pytest.importorskip("pydantic_settings")
 
+from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 from llm.schemas import (  # noqa: E402
     ClaimCitedByIndex,
     FeatureScoreByIndex,
@@ -23,7 +27,7 @@ from llm.schemas import (  # noqa: E402
     SWOTEntryByIndex,
     SWOTIndex,
     CompetitorSWOTByIndex,
-    FeaturePairByIndex,
+    FeatureByIndex,
 )
 
 from app.core.baseline import get_scadable_baseline  # noqa: E402
@@ -39,13 +43,41 @@ class FakeClient:
         self.closed = False
         self.observation_names = []
         self.prompt_calls = []
+        self.sessions = []
 
-    async def generate_structured(
-        self, *, instructions, input_text, output_schema, observation_name="openai-api-call"
+    async def start_thread(self, *, instructions, metadata=None):
+        return "conv_fake"
+
+    @contextmanager
+    def create_session(self, *, name, session_id):
+        self.sessions.append({"name": name, "session_id": session_id})
+        yield MagicMock()
+
+    async def generate_in_thread(
+        self, *, session, conversation_id, input_text, output_schema,
+        observation_name="openai-api-thread-call", pre_status, post_status,
+    ):
+        assert session is not None, "task calls must run inside the run's session"
+        response = await self.generate_response(
+            input_text=input_text,
+            output_schema=output_schema,
+            observation_name=observation_name,
+            conversation_id=conversation_id,
+        )
+        return response.output_parsed
+
+    async def generate_response(
+        self, *, instructions=None, input_text, output_schema, observation_name,
+        conversation_id=None, session=None,
     ):
         self.observation_names.append(observation_name)
+        name = output_schema.__name__
+        if name not in self.responses and name in ("ExtractionFeedbacks", "SWOTFeedbacks"):
+            # Validators default to "no problems found" so revision loops end after one pass.
+            return SimpleNamespace(output_parsed=output_schema(feedbacks=[]))
         self.prompt_calls.append(input_text)
-        return self.responses[output_schema.__name__]
+        return SimpleNamespace(output_parsed=self.responses[name])
+
 
     async def close(self):
         self.closed = True
@@ -120,7 +152,9 @@ def test_analyze_uses_real_llm_schemas(fake_client, monkeypatch, duplicate):
         ],
     }]
     # Calls are named for cost lookups, and the run records which ones it made
-    assert client.observation_names == ["run-42:vanta:extraction"]
+    assert client.observation_names == [
+        "run-42:vanta:extraction-1", "run-42:vanta:extraction-validation-1",
+    ]
     assert result["llm_calls"] == ["run-42:vanta:extraction"]
     assert client.closed
 
@@ -148,7 +182,10 @@ def test_analyze_invalid_citation_fails_instead_of_fabricating_results(fake_clie
         asyncio.run(OpenAIAdapter().analyze(
             scraped, get_scadable_baseline(), trace_prefix="run-42:vanta"
         ))
-    assert client.observation_names == ["run-42:vanta:extraction"]
+    # The fake never fixes its citations, so the loop retries up to the call limit first.
+    assert client.observation_names[:2] == [
+        "run-42:vanta:extraction-1", "run-42:vanta:extraction-validation-1",
+    ]
     assert client.closed
 
     # Opt-in mocks remain available for offline demonstrations only.
@@ -200,7 +237,9 @@ def test_compare_uses_real_llm_schemas(fake_client):
         OpenAIAdapter().compare(get_scadable_baseline(), competitors, trace_prefix="run-42")
     )
 
-    assert client.observation_names == ["run-42:comparison"]
+    assert client.observation_names == [
+        "run-42:comparison-1", "run-42:comparison-validation-1",
+    ]
     assert result["swot_entries"] == [
         {
             "category": "strength", "content": "Native EU CRA tracking Vanta lacks.",
@@ -258,7 +297,9 @@ def test_compare_reuses_full_extraction_including_conflicts(fake_client):
             "summary": "ignored legacy summary", "features": [], "claims": [],
         }], trace_prefix="run-45",
     ))
-    assert client.observation_names == ["run-45:comparison"]
+    assert client.observation_names == [
+        "run-45:comparison-1", "run-45:comparison-validation-1",
+    ]
     assert result["mode"] == "real"
     assert result["scores"] == [
         {"company_name": "SCADABLE", "feature": "Automated evidence collection", "score": 6},
@@ -325,7 +366,7 @@ def test_research_run_uses_two_stage_adapter_and_persists_scores(monkeypatch):
                 ),
                 FeatureScoreByIndex(company_index=1, feature="Automated evidence collection", score=8),
             ],
-            feature_pairs=[FeaturePairByIndex(
+            features=[FeatureByIndex(
                 company_index=1,
                 competitor_feature="Automated evidence collection",
                 scadable_feature="Continuous automated evidence collection from cloud providers and dev tools",
@@ -379,6 +420,11 @@ def test_research_run_uses_two_stage_adapter_and_persists_scores(monkeypatch):
             ]
             assert len(get_overall_swot(db)) == 1
             assert get_overall_swot(db)[0].source_url == "https://vanta.com/features"
+            # Extraction and comparison both bill to this run's Langfuse session,
+            # and both steps are expected before the run's cost counts as complete.
+            session_name = f"run-{run.id}"
+            assert [s["session_id"] for c in clients for s in c.sessions] == [session_name, session_name]
+            assert analysis["llm_calls"] == [f"run-{run.id}:vanta:extraction", f"run-{run.id}:comparison"]
 
             # An unchanged refresh must reuse the facts and chart scores, not
             # pay for another extraction or comparison.
@@ -400,7 +446,8 @@ def test_research_run_uses_two_stage_adapter_and_persists_scores(monkeypatch):
 
     assert len(clients) == 2
     assert [c.observation_names for c in clients] == [
-        ["run-1:vanta:extraction"], ["run-1:comparison"],
+        ["run-1:vanta:extraction-1", "run-1:vanta:extraction-validation-1"],
+        ["run-1:comparison-1", "run-1:comparison-validation-1"],
     ]
     assert all(c.closed for c in clients)
 
@@ -415,7 +462,7 @@ def test_compare_returns_cited_competitor_swot_and_explicit_pairs(fake_client):
                 FeatureScoreByIndex(company_index=0, feature="Automated evidence collection", score=6),
                 FeatureScoreByIndex(company_index=1, feature="Compliance evidence automation", score=9),
             ],
-            feature_pairs=[FeaturePairByIndex(
+            features=[FeatureByIndex(
                 company_index=1, competitor_feature="Compliance evidence automation",
                 scadable_feature="Automated evidence collection",
             )],
@@ -454,7 +501,9 @@ def test_compare_returns_cited_competitor_swot_and_explicit_pairs(fake_client):
             "source_url": "https://vanta.com/features",
         }],
     }]
-    assert client.observation_names == ["run-77:comparison"]
+    assert client.observation_names == [
+        "run-77:comparison-1", "run-77:comparison-validation-1",
+    ]
 
 def test_verified_baseline_limitations_reach_comparison_prompt_without_inferred_gaps(fake_client):
     """Only owner-specified limitations become SCADABLE weakness claims."""

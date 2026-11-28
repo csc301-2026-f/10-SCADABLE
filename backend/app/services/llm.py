@@ -26,6 +26,7 @@ class AnalyzerProtocol(Protocol):
         scraped_data: dict[str, Any],
         baseline_context: dict[str, Any],
         trace_prefix: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]: ...
 
     async def compare(
@@ -33,6 +34,7 @@ class AnalyzerProtocol(Protocol):
         baseline_context: dict[str, Any],
         competitors: list[dict[str, Any]],
         trace_prefix: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -84,6 +86,7 @@ class MockOpenAIAnalyzer:
         scraped_data: dict[str, Any],
         baseline_context: dict[str, Any],
         trace_prefix: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         if self.delay_seconds > 0:
             await asyncio.sleep(self.delay_seconds)
@@ -167,6 +170,7 @@ class MockOpenAIAnalyzer:
         baseline_context: dict[str, Any],
         competitors: list[dict[str, Any]],
         trace_prefix: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         if self.delay_seconds > 0:
             await asyncio.sleep(self.delay_seconds)
@@ -232,6 +236,7 @@ class OpenAIAdapter:
         scraped_data: dict[str, Any],
         baseline_context: dict[str, Any],
         trace_prefix: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         # Names of paid OpenAI calls started, kept even if we fall back to the mock
         llm_calls: list[str] = []
@@ -315,7 +320,7 @@ class OpenAIAdapter:
 
             client = self._new_client()
             try:
-                analyzer = Analyzer(client, trace_prefix=trace_prefix)
+                analyzer = Analyzer(client, trace_prefix=trace_prefix, session_id=session_id)
                 if trace_prefix:
                     llm_calls.append(f"{trace_prefix}:extraction")
                 facts = await analyzer.extract_information(analysis_input)
@@ -366,6 +371,7 @@ class OpenAIAdapter:
         baseline_context: dict[str, Any],
         competitors: list[dict[str, Any]],
         trace_prefix: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         """Run stage-2 SWOT comparison using the stored stage-1 extractions.
 
@@ -469,7 +475,7 @@ class OpenAIAdapter:
             result["mode"] = "mock"
             return result
         try:
-            swot = await Analyzer(client, trace_prefix=trace_prefix).compare(
+            swot = await Analyzer(client, trace_prefix=trace_prefix, session_id=session_id).compare(
                 ComparisonInput(scadable=baseline, competitors=comparison_competitors)
             )
         except Exception:
@@ -529,10 +535,12 @@ class OpenAIAdapter:
                 if entry.what.strip()
             ],
             "scores": [score.model_dump() for score in swot.scores],
-            "feature_pairs": [pair.model_dump() for pair in swot.feature_pairs],
+            "feature_pairs": [pair.model_dump() for pair in swot.features],
             "competitor_swots": competitor_swots,
             "conflicting_data": [item.model_dump(mode="json") for item in swot.conflicting_data],
             "competitor_notes": [item.model_dump(mode="json") for item in swot.competitor_notes],
+            # Paid calls made, so the run's cost waits for them (mock results have none)
+            "llm_calls": [f"{trace_prefix}:comparison"] if trace_prefix else [],
         }
 
 

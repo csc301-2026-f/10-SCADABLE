@@ -33,6 +33,21 @@ SWOTComponent = Literal[
     "threat"
 ]
 
+ExtractionKeys = Literal[
+    "summary", 
+    "job_postings",
+    "claims_cited",
+    "conflicting_data"
+]
+
+SWOTKeys = Literal[
+    "SWOT_entries", 
+    "scores", 
+    "competitor_swots",
+    "features",
+    "competitor_notes"
+]
+
 class AnalysisPage(BaseModel):
     """One exported page's metadata alongside its unchanged Markdown."""
 
@@ -41,6 +56,9 @@ class AnalysisPage(BaseModel):
 
 
 class AnalysisInput(BaseModel):
+    """
+    Input for all the pages that were crawled (used for the data extraction).
+    """
     crawl_summary: CrawlExportSummary
     pages: list[AnalysisPage] = Field(min_length=1)
 
@@ -74,7 +92,7 @@ class JobCitedByIndex(JobCited):
 
 class JobCitedByURL(JobCited):
     """
-    A url-based version of a cited job (use this for converting the job citations from ints to strings).
+    A url-based version of a cited job (use this when converting the LLM outputs into final function outputs).
     """
     job_page_url: str
 
@@ -101,6 +119,9 @@ class ClaimCitedByURL(ClaimCited):
 
 
 def _check_score_range(value: int) -> int:
+    """
+    Checks if the score of a feature is in a valid range.
+    """
     if not 0 <= value <= 10:
         raise ValueError("score must be between 0 and 10")
     return value
@@ -150,18 +171,19 @@ class FeatureScoreByIndex(BaseModel):
 
 
 class FeatureScore(BaseModel):
-    """One competitor feature scored 0-10, by company name. Use this after the LLM output has been converted."""
+    """One competitor feature scored 0-10, by company name. Use this after the LLM had made its output."""
     company_name: str
     feature: str
     score: Score
 
 class PartialExtractedInformation(BaseModel):
-    """Parent schema for LLM prompting (Never explicitly use this for the output schema)."""
+    """Parent schema for data extraction LLM prompting (Never use this for the LLM output schema)."""
     summary: str
 
 
 class PartialExtractedInformationByIndex(PartialExtractedInformation):
-    """Used for the LLM output schema (lower chances of made-up links)."""
+    """Used to get all **new** information from the LLM and 
+    uses integers to cite the pages instead of copying URLs, reducing chance of hallucinations."""
     summary_page_indexes: list[int]
     job_postings: list[JobCitedByIndex]
     claims_cited: list[ClaimCitedByIndex]
@@ -188,26 +210,23 @@ class ExtractedInformationByIndex(ExtractedInformation):
     job_postings: list[JobCitedByIndex]
     claims_cited: list[ClaimCitedByIndex]
 
-class CompanyAnalysisByIndex(BaseModel):
-    company_index: int
-    company_name: str
-    summary: str
-    features: list[str]
-    claims_cited: list[ClaimCitedByIndex]
-
-
 class CompetitorResearchResult(BaseModel):
     """Analysis and extracted facts with the scraper's original run provenance."""
 
     crawl_summary: CrawlExportSummary
     extracted_information: ExtractedInformationByURL
 
-
 class ComparisonInput(BaseModel):
+    """
+    Contains input of extracted data from SCADABLE and competitors.
+    """
     scadable: ExtractedInformationByURL
     competitors: list[ExtractedInformationByURL]
 
 class ComparisonInputByIndex(BaseModel):
+    """
+    LLM input with data citations using numerical indexing instead of URLs.
+    """
     scadable: ExtractedInformationByIndex
     competitors: list[ExtractedInformationByIndex]
 
@@ -216,60 +235,126 @@ class CompetitorNote(BaseModel):
     company_name: str
     why_it_matters: str
 
+class SWOTFeedback(BaseModel):
+    """
+    Contains feedback for specific high-level fields in the SWOT analysis that can be fixed.
+    """
+    what: SWOTKeys
+    why: str
+
+class SWOTFeedbacks(BaseModel):
+    """
+    A short feedback for the SWOT analysis, containing the names of the fields which had "bad outputs," along with 
+    how they can be corrected.
+    """
+    feedbacks: list[SWOTFeedback]
+
+class ExtractionFeedback(BaseModel):
+    """
+    a short feedback model for the company extraction.
+    """
+    what: ExtractionKeys
+    why: str
+
+class ExtractionFeedbacks(BaseModel):
+    """
+    lists down all the feedback of failed output fields from the LLM response.
+    """
+    feedbacks: list[ExtractionFeedback]
+
+class FullExtractionFeedback(BaseModel):
+    """
+    lists down every feedback including citation indexing violations from the LLM output for data extraction.
+    """
+    feedback: ExtractionFeedbacks
+    citation_violations: list[tuple[str, int]]
+
+class FullSWOTFeedback(BaseModel):
+    """
+    lists down every feedback including citation violations from the LLM output for the final SWOT analysis.
+    """
+    feedback: SWOTFeedbacks
+    swot_citation_violations: list[str]
+    feature_score_violations: list[str]
+    competitor_swot_violations: list[str]
+    feature_pair_violations: list[str]
 
 class SWOTEntry(BaseModel):
+    """
+    A SWOT analysis entry.
+    """
     component: SWOTComponent
     what: str
 
 class SWOTIndex(BaseModel):
+    """
+    The citation to a specific SWOT entry.
+    """
     swot_component_company_index: int
     swot_component_page_index: int
 
 class SWOTEntryByIndex(SWOTEntry):
+    """
+    A SWOT entry with index-based citations.
+    """
     swot_citations: list[SWOTIndex]
 
 class SWOTEntryByURL(SWOTEntry):
+    """
+    A SWOT entry with URL-based citations.
+    """
     swot_component_page_urls: list[str]
 
-# NOTE THIS IS THE BASE CLASS FOR THE LLM OUTPUT
 class SWOTAnalysis(BaseModel):
+    """
+    The base class for a SWOT analysis output (NEVER use this in the LLM output).
+    """
     competitor_notes: list[CompetitorNote]
 
-# NOTE THIS IS ONLY USED FOR THE LLM OUTPUT
 class CompetitorSWOTByIndex(BaseModel):
     """Competitor-owned findings, produced in the same comparison request."""
     company_index: int
     SWOT_entries: list[SWOTEntryByIndex]
 
-
 class CompetitorSWOTByURL(BaseModel):
+    """
+    competitor-owned findings, with URL-based citations. 
+    """
     company_name: str
     SWOT_entries: list[SWOTEntryByURL]
 
 
-class FeaturePairByIndex(BaseModel):
-    """An explicitly comparable pair of already-scored feature names."""
+class FeatureByIndex(BaseModel):
+    """An explicitly comparable pair of already-scored features."""
     company_index: int
     competitor_feature: str
     scadable_feature: str | None
 
 
-class FeaturePair(BaseModel):
+class Feature(BaseModel):
+    """
+    A feature from a company, compared with SCADABLE.
+    """
     company_name: str
     competitor_feature: str
     scadable_feature: str | None
 
 
 class SWOTAnalysisByIndex(SWOTAnalysis):
-    SWOT_entries: list[SWOTEntryByIndex]
-    scores: list[FeatureScoreByIndex]
+    """
+    A full SWOT analysis with index-based citations (used in LLM output only)
+    """
+    SWOT_entries: list[SWOTEntryByIndex] = Field(default_factory=list)
+    scores: list[FeatureScoreByIndex] = Field(default_factory=list)
     competitor_swots: list[CompetitorSWOTByIndex] = Field(default_factory=list)
-    feature_pairs: list[FeaturePairByIndex] = Field(default_factory=list)
+    features: list[FeatureByIndex] = Field(default_factory=list)
 
-# NOTE THIS IS USED FOR THE FINAL OUTPUT
 class SWOTAnalysisByURL(SWOTAnalysis):
+    """
+    A full SWOT analysis with URL-based citations (used in the final return statement of the outer function).
+    """
     SWOT_entries: list[SWOTEntryByURL]
     scores: list[FeatureScore]
     conflicting_data: list[ConflictEntry]
     competitor_swots: list[CompetitorSWOTByURL] = Field(default_factory=list)
-    feature_pairs: list[FeaturePair] = Field(default_factory=list)
+    features: list[Feature] = Field(default_factory=list)

@@ -5,7 +5,8 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from llm.config import Settings
-from langfuse import Langfuse
+from langfuse import Langfuse, propagate_attributes, LangfuseSpan
+from contextlib import contextmanager
 import asyncio
 
 OutputModel = TypeVar("OutputModel", bound=BaseModel)
@@ -32,46 +33,118 @@ class OpenAIClient:
             tracing_enabled=bool(settings.langfuse_secret_key and settings.langfuse_public_key)
         )
 
-    async def generate_structured(
+    async def start_thread(
         self,
         *,
         instructions: str,
+        metadata: dict[str, str] | None = None,
+    ) -> str:
+        """Create a persistent conversation for OpenAI, seeded with a step's instructions.
+
+        Returns the conversation id. Pass it to generate_in_thread() for the first
+        task call and for every feedback round after it.
+        """
+        conversation = await self.sdk.conversations.create(
+            metadata=metadata or {},
+            items=[
+                {
+                    "type": "message",
+                    "role": "developer",
+                    "content": instructions,
+                }
+            ],
+        )
+        return conversation.id
+        
+    @contextmanager
+    def create_session(self, *, name: str, session_id: str):
+        """One parent span for every call and retry in a pipeline step. This is to have the cost-tracking done as a whole 
+        session on Langfuse, so it accounts for cost in cache hit from all generations and validation."""
+        with propagate_attributes(session_id=session_id):
+            with self.cost_tracker.start_as_current_observation(as_type="span", name=name) as session:
+                yield session
+
+    async def generate_in_thread(
+        self,
+        *,
+        session: LangfuseSpan,
+        conversation_id: str,
         input_text: str,
         output_schema: type[OutputModel],
-        observation_name: str="openai-api-call"
+        observation_name: str = "openai-api-thread-call",
+        pre_status: str,
+        post_status: str
     ) -> OutputModel:
-        """Send an explicit request and parse its output into a Pydantic model."""
-        with self.cost_tracker.start_as_current_observation(
-            as_type="generation", 
-            name=observation_name, 
-            model=self.model
-            ) as generation:
+        """Send input into an existing conversation; prior turns are loaded server-side."""
+        session.update(metadata={"status": pre_status}, status_message=pre_status)
+        response = await self.generate_response(input_text=input_text,
+                                                output_schema=output_schema,
+                                                conversation_id=conversation_id,
+                                                observation_name=observation_name, 
+                                                session=session)
+        session.update(metadata={"status": post_status}, status_message=post_status)
+
+        return response.output_parsed
+
+    async def generate_response(
+        self,
+        *,
+        instructions: str | None = None,
+        input_text: str,
+        output_schema: BaseModel,
+        conversation_id: str | None = None,
+        observation_name: str, 
+        session: LangfuseSpan | None = None
+    ) -> BaseModel:
+        """Send an explicit request and parse its output into a Pydantic model.
+
+        Stateless by default (instructions required). With conversation_id, the
+        request runs inside that conversation: its instructions were seeded by
+        start_thread, and OpenAI stores both the input and the output in the thread.
+        """
+        input_items: list[dict] = []
+        request_kwargs: dict = {}
+        if conversation_id is None:
+            if instructions is None:
+                raise ValueError("instructions are required when no conversation_id is given.")
+            input_items.append(
+                {
+                    "role": "developer",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": instructions,
+                            "prompt_cache_breakpoint": {
+                                "mode": "explicit",
+                            },
+                        }
+                    ],
+                }
+            )
+        else:
+            request_kwargs["conversation"] = conversation_id
+        input_items.append({"role": "user", "content": input_text})
+
+        logged_input = []
+        if instructions is not None:
+            logged_input.append({"role": "developer", "content": instructions})
+        logged_input.append({"role": "user", "content": input_text})
+
+        ses = session if session else self.cost_tracker 
+
+        with (ses.start_as_current_observation(as_type="generation", 
+                                                   name=observation_name,
+                                                   model=self.model, 
+                                                   input=logged_input)) as generation:
             response = await self.sdk.responses.parse(
                 model=self.model,
-                instructions=instructions,
                 prompt_cache_options={
                     "mode": "explicit",
                     "ttl": "30m",
                 },
-                input=[
-                    {
-                        "role": "developer",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": instructions,
-                                "prompt_cache_breakpoint": {
-                                    "mode": "explicit",
-                                },
-                            }
-                        ],
-                    },
-                    {
-                        "role": "user",
-                        "content": input_text,
-                    },
-                ],
+                input=input_items,
                 text_format=output_schema,
+                **request_kwargs,
             )
 
             usage = response.usage
@@ -87,13 +160,15 @@ class OpenAIClient:
                                 "input_cached_tokens": cached,
                                 "output_reasoning_tokens": reasoning,
                             }
-                        )
+                        )  
             
             if response.output_parsed is None:
                 # Refusals and incomplete responses can have no parsed model.
                 raise ValueError("OpenAI returned no parsed structured output.")
 
-            return response.output_parsed
+            generation.update(output=response.output_parsed)
+
+            return response
 
     async def close(self) -> None:
         """Release SDK HTTP resources without making an API request."""

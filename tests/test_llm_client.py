@@ -100,18 +100,20 @@ def test_responses_structured_output(monkeypatch, has_output):
         )
         try:
             if has_output:
-                result = await client.generate_structured(
+                response = await client.generate_response(
                     instructions="Test instructions",
                     input_text="Test facts",
                     output_schema=SWOTAnalysisByIndex,
+                    observation_name="test-call",
                 )
-                assert result == expected
+                assert response.output_parsed == expected
             else:
                 with pytest.raises(ValueError, match="no parsed structured output"):
-                    await client.generate_structured(
+                    await client.generate_response(
                         instructions="Test instructions",
                         input_text="Test facts",
                         output_schema=SWOTAnalysisByIndex,
+                        observation_name="test-call",
                     )
         finally:
             await client.close()

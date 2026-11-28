@@ -11,12 +11,12 @@ from llm.schemas import (
     JobFamily,
     PartialExtractedInformationByIndex,
 )
-from tests.helpers import CRAWL_TIME, MARKDOWN, make_page, make_result, write_export
+from tests.helpers import CRAWL_TIME, MARKDOWN, make_page, make_result, write_export, FakeThreadClient
 
 pytestmark = pytest.mark.asyncio
 
 
-class ResponseClient:
+class ResponseClient(FakeThreadClient):
     def __init__(self, response):
         self.response = response
         self.requests = []

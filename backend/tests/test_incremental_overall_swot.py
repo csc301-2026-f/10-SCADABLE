@@ -38,7 +38,7 @@ class PerCompetitorAnalyzer(MockOpenAIAnalyzer):
         super().__init__()
         self.comparisons = []
 
-    async def compare(self, baseline_context, competitors, trace_prefix=None):
+    async def compare(self, baseline_context, competitors, trace_prefix=None, session_id=None):
         self.comparisons.append(([c["company_name"] for c in competitors], baseline_context["summary"]))
         name = competitors[0]["company_name"]
         return {
@@ -133,7 +133,7 @@ def test_new_baseline_invalidates_and_recomputes_all(db, monkeypatch):
 
 def test_failed_comparison_retains_old_rows_but_marks_stale(db):
     class CompareError(PerCompetitorAnalyzer):
-        async def compare(self, baseline_context, competitors, trace_prefix=None):
+        async def compare(self, baseline_context, competitors, trace_prefix=None, session_id=None):
             raise RuntimeError("no LLM")
 
     analyzer = PerCompetitorAnalyzer()
@@ -159,7 +159,7 @@ def test_inflight_comparison_cannot_publish_after_revision_changes(db):
     company = repo.create_competitor(db, "Vanta", "https://vanta.com")
 
     class ConcurrentUpdateAnalyzer(PerCompetitorAnalyzer):
-        async def compare(self, baseline_context, competitors, trace_prefix=None):
+        async def compare(self, baseline_context, competitors, trace_prefix=None, session_id=None):
             # Simulate a newer competitor or baseline change during the await.
             repo.mark_overall_swot_stale(db)
             return await super().compare(baseline_context, competitors, trace_prefix)
@@ -282,7 +282,7 @@ def test_only_if_missing_does_not_skip_comparison_policy_upgrade(db, monkeypatch
 def test_distinct_supported_weaknesses_are_preserved_without_a_quota(db):
     """Fixture supplies two different supported gaps; neither is dropped."""
     class TwoWeaknessAnalyzer(PerCompetitorAnalyzer):
-        async def compare(self, baseline_context, competitors, trace_prefix=None):
+        async def compare(self, baseline_context, competitors, trace_prefix=None, session_id=None):
             name = competitors[0]["company_name"]
             self.comparisons.append(([name], baseline_context["summary"]))
             return {
