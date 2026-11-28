@@ -4,7 +4,6 @@ import pytest
 from pydantic import ValidationError
 
 from llm.analyzer import Analyzer
-from tests.helpers import ThreadedFakeClient
 from llm.prompts.comparison import COMPARISON_SYSTEM_PROMPT
 from llm.schemas import (
     ClaimCitedByURL, ComparisonInput, CompetitorNote, ConflictEntry,
@@ -12,6 +11,7 @@ from llm.schemas import (
     SWOTAnalysisByIndex, SWOTEntryByIndex, SWOTIndex,
 )
 
+from tests.helpers import FakeThreadClient
 
 def company(name, features, page):
     return ExtractedInformationByURL(
@@ -34,7 +34,7 @@ DATA = ComparisonInput(
 )
 
 
-class FakeClient(ThreadedFakeClient):
+class FakeClient(FakeThreadClient):
     def __init__(self, scores):
         self.scores = scores
         self.requests = []
@@ -142,7 +142,7 @@ def test_comparison_prompt_contains_scoring_rubric():
 async def test_comparison_returns_per_competitor_swot_and_pairs():
     from llm.schemas import CompetitorSWOTByIndex, FeatureByIndex
 
-    class RichClient(ThreadedFakeClient):
+    class RichClient(FakeThreadClient):
         async def generate_structured(self, **request):
             return SWOTAnalysisByIndex(
                 competitor_notes=[], SWOT_entries=[],
@@ -170,7 +170,7 @@ async def test_comparison_returns_per_competitor_swot_and_pairs():
 async def test_competitor_swot_requires_own_citation():
     from llm.schemas import CompetitorSWOTByIndex
 
-    class BadClient(ThreadedFakeClient):
+    class BadClient(FakeThreadClient):
         async def generate_structured(self, **request):
             return SWOTAnalysisByIndex(
                 competitor_notes=[], SWOT_entries=[], scores=[],
@@ -193,10 +193,10 @@ async def test_competitor_swot_requires_own_citation():
     {"company_index": 1, "competitor_feature": "Broad frameworks", "scadable_feature": "Missing baseline score"},
 ])
 @pytest.mark.asyncio
-async def test_rejects_invalid_explicit_feature_pairs(bad_pair):
+async def test_rejects_invalid_explicit_features(bad_pair):
     from llm.schemas import FeatureByIndex
 
-    class BadClient(ThreadedFakeClient):
+    class BadClient(FakeThreadClient):
         async def generate_structured(self, **request):
             return SWOTAnalysisByIndex(
                 competitor_notes=[], SWOT_entries=[],
@@ -211,7 +211,7 @@ async def test_rejects_invalid_explicit_feature_pairs(bad_pair):
 async def test_competitor_swot_rejects_invalid_company_index():
     from llm.schemas import CompetitorSWOTByIndex
 
-    class BadClient(ThreadedFakeClient):
+    class BadClient(FakeThreadClient):
         async def generate_structured(self, **request):
             return SWOTAnalysisByIndex(
                 competitor_notes=[], SWOT_entries=[], scores=[],
