@@ -221,10 +221,11 @@ class Analyzer:
                 full_feedback = FullExtractionFeedback(feedback=feedback, 
                                                                     citation_violations=citation_violations(
                         last_index=len(page_urls) - 1,
-                        index_directory={"Claim": [p.claim_page_index for p in partial.claims_cited], 
-                                        "Job posting": [p.job_page_index for p in partial.job_postings],
-                                        "Summary": partial.summary_page_indexes,
-                                        "Conflicting data": [c.claim_a_page_index for c in partial.conflicting_data] + [c.claim_b_page_index for c in partial.conflicting_data]
+                        # Check what will be returned (finalized), not fields of the reply that were not taken
+                        index_directory={"Claim": [p.claim_page_index for p in finalized.claims_cited], 
+                                        "Job posting": [p.job_page_index for p in finalized.job_postings],
+                                        "Summary": finalized.summary_page_indexes,
+                                        "Conflicting data": [c.claim_a_page_index for c in finalized.conflicting_data] + [c.claim_b_page_index for c in finalized.conflicting_data]
                                         }
             
                 ))

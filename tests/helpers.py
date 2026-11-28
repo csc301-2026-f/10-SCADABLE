@@ -1,19 +1,73 @@
 """Scraper fixtures and analysis-boundary doubles for offline research tests."""
 
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 from llm.analyzer import Analyzer
 from llm.schemas import (
     ConflictEntry,
     CompetitorNote,
     ExtractedInformationByURL,
+    ExtractionFeedbacks,
     FeatureScore,
     SWOTAnalysisByURL,
-    SWOTEntryByURL
+    SWOTEntryByURL,
+    SWOTFeedbacks,
 )
 from scraper import CompetitorCrawlResult, ScrapedPage
 from scraper.output import competitor_directory, export_competitor
+
+
+class _FakeSpan:
+    def __init__(self):
+        self.updates = []
+
+    def update(self, **fields):
+        self.updates.append(fields)
+
+
+class ThreadedFakeClient:
+    """Gives a fake with generate_structured(**request) the OpenAIClient thread API.
+
+    Each task call reaches generate_structured with the thread's instructions, so
+    tests can keep inspecting requests. Reviewer (validation) calls approve the
+    output, so only the fake's own answers decide what the analyzer returns.
+    """
+
+    async def start_thread(self, *, instructions, metadata=None):
+        threads = self.__dict__.setdefault("_threads", {})
+        conversation_id = f"thread-{len(threads)}"
+        threads[conversation_id] = instructions
+        return conversation_id
+
+    @contextmanager
+    def create_session(self, *, name, session_id):
+        self.__dict__.setdefault("sessions", []).append({"name": name, "session_id": session_id})
+        yield _FakeSpan()
+
+    async def generate_in_thread(self, *, session, conversation_id, input_text, output_schema,
+                                 observation_name="", pre_status="", post_status=""):
+        return await self.generate_structured(
+            instructions=self._threads[conversation_id],
+            input_text=input_text,
+            output_schema=output_schema,
+            observation_name=observation_name,
+        )
+
+    async def generate_response(self, *, input_text, output_schema, observation_name,
+                                instructions=None, conversation_id=None, session=None):
+        if output_schema in (ExtractionFeedbacks, SWOTFeedbacks):
+            return SimpleNamespace(output_parsed=output_schema(feedbacks=[]))
+        parsed = await self.generate_structured(
+            instructions=instructions,
+            input_text=input_text,
+            output_schema=output_schema,
+            observation_name=observation_name,
+        )
+        return SimpleNamespace(output_parsed=parsed)
+
 
 NOW = datetime(2026, 10, 19, 12, tzinfo=UTC)
 # make_result() finishes one second after NOW; extraction formats that time like this.
