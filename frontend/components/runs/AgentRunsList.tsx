@@ -238,7 +238,7 @@ export function AgentRunsList() {
     refetchInterval: (query) => runsPollInterval(query.state.data),
   });
 
-  const runs = data ?? [];
+  const runs = useMemo(() => data ?? [], [data]);
 
   const weeklyStats = useMemo(() => computeWeeklyRunStats(runs), [runs]);
   const latestRows = useMemo(() => latestRunPerCompetitor(runs), [runs]);
@@ -275,15 +275,15 @@ export function AgentRunsList() {
           <span className={styles.summaryValue}>{weeklyStats.successful}</span>
         </div>
         <div className={styles.summaryCard}>
-          <span className={styles.summaryLabel}>Estimated cost</span>
+          <span className={styles.summaryLabel} title="Sum of available cost estimates for returned runs from the past seven days.">Recorded cost</span>
           <span className={styles.summaryValue}>
             {formatRunCost(weeklyStats.estimatedCostUsd)}
           </span>
         </div>
         <div className={styles.summaryCard}>
-          <span className={styles.summaryLabel}>Cache hit rate</span>
+          <span className={styles.summaryLabel} title="Percentage of analyzed runs that reused prior analysis because website content was unchanged.">Cache hit rate</span>
           <span className={styles.summaryValue}>
-            {weeklyStats.cacheHitRatePct}%
+            {weeklyStats.cacheHitRatePct === null ? "—" : `${weeklyStats.cacheHitRatePct}%`}
           </span>
         </div>
       </div>

@@ -17,6 +17,7 @@ export function formatRelativePast(iso: string | null): string {
   if (!iso) return "Not checked";
 
   const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "Not checked";
   const now = Date.now();
   const minutes = Math.max(0, Math.floor((now - then) / (1000 * 60)));
 
@@ -42,6 +43,7 @@ export function formatRelativeFuture(iso: string | null): string {
   if (!iso) return "Not scheduled";
 
   const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "Not scheduled";
   const now = Date.now();
   const days = Math.ceil((then - now) / (1000 * 60 * 60 * 24));
 

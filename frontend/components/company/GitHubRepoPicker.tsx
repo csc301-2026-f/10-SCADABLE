@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Pill } from "@/components/ui/Pill";
+import { useSignInNote } from "@/components/ui/SignInNote";
 import {
   getGitHubIntegrationStatus,
   listGitHubInstallations,
@@ -12,6 +13,7 @@ import {
   syncGitHubFeatures,
   type GitHubIntegrationStatus,
 } from "@/lib/api/github";
+import { useDevDashboardBypass } from "@/lib/auth/useDevDashboardBypass";
 import styles from "./GitHubRepoPicker.module.css";
 
 const DEFAULT_FILE_PATH = "docs/scadable-features.json";
@@ -44,6 +46,8 @@ export function GitHubRepoPicker({
   companyRecentChange,
   onCompanyRefresh,
 }: Props) {
+  const readOnly = useDevDashboardBypass();
+  const { showSignInNote, signInNote } = useSignInNote();
   const queryClient = useQueryClient();
   const [installationId, setInstallationId] = useState<number | "">("");
   const [repositoryId, setRepositoryId] = useState<number | "">("");
@@ -148,6 +152,13 @@ export function GitHubRepoPicker({
         <p className={styles.hint}>{status.message}</p>
       ) : null}
 
+      {readOnly ? (
+        <p className={styles.hint}>
+          Read-only evaluation session — sign in with Clerk to change GitHub
+          settings.
+        </p>
+      ) : null}
+
       <div className={styles.picker}>
         <h3 className={styles.pickerTitle}>Choose repository</h3>
         <p className={styles.hint}>
@@ -158,7 +169,7 @@ export function GitHubRepoPicker({
           server (same value as backend).
         </p>
 
-        {installationsQuery.isError ? (
+        {installationsQuery.isError && !readOnly ? (
           <p className={styles.error} role="alert">
             {installationsQuery.error instanceof Error
               ? installationsQuery.error.message
@@ -173,7 +184,11 @@ export function GitHubRepoPicker({
           id="github-installation"
           className={styles.select}
           value={installationId === "" ? "" : String(installationId)}
-          disabled={installationsQuery.isPending || installationsQuery.isError}
+          disabled={
+            readOnly ||
+            installationsQuery.isPending ||
+            installationsQuery.isError
+          }
           onChange={(e) => {
             const next = e.target.value ? Number(e.target.value) : "";
             setInstallationId(next);
@@ -183,9 +198,11 @@ export function GitHubRepoPicker({
           }}
         >
           <option value="">
-            {installationsQuery.isPending
-              ? "Loading installations…"
-              : "Select installation…"}
+            {readOnly
+              ? "Sign in to choose an installation…"
+              : installationsQuery.isPending
+                ? "Loading installations…"
+                : "Select installation…"}
           </option>
           {(installationsQuery.data ?? []).map((item) => (
             <option key={item.id} value={item.id}>
@@ -203,6 +220,7 @@ export function GitHubRepoPicker({
           className={styles.select}
           value={repositoryId === "" ? "" : String(repositoryId)}
           disabled={
+            readOnly ||
             typeof installationId !== "number" ||
             reposQuery.isPending ||
             Boolean(reposQuery.isError)
@@ -214,11 +232,13 @@ export function GitHubRepoPicker({
           }}
         >
           <option value="">
-            {typeof installationId !== "number"
-              ? "Select an installation first…"
-              : reposQuery.isPending
-                ? "Loading repositories…"
-                : "Select repository…"}
+            {readOnly
+              ? "Sign in to choose a repository…"
+              : typeof installationId !== "number"
+                ? "Select an installation first…"
+                : reposQuery.isPending
+                  ? "Loading repositories…"
+                  : "Select repository…"}
           </option>
           {(reposQuery.data ?? []).map((repo) => (
             <option key={repo.id} value={repo.id}>
@@ -228,7 +248,7 @@ export function GitHubRepoPicker({
           ))}
         </select>
 
-        {reposQuery.isError ? (
+        {reposQuery.isError && !readOnly ? (
           <p className={styles.error} role="alert">
             {reposQuery.error instanceof Error
               ? reposQuery.error.message
@@ -247,6 +267,8 @@ export function GitHubRepoPicker({
           onChange={(e) => setFilePath(e.target.value)}
           placeholder={DEFAULT_FILE_PATH}
           autoComplete="off"
+          disabled={readOnly}
+          readOnly={readOnly}
         />
 
         {error ? (
@@ -263,21 +285,39 @@ export function GitHubRepoPicker({
         <div className={styles.actions}>
           <Button
             type="button"
-            disabled={!canSave || selectMutation.isPending}
-            onClick={() =>
+            aria-disabled={readOnly || undefined}
+            title={
+              readOnly ? "Sign in required to change GitHub settings" : undefined
+            }
+            disabled={!readOnly && (!canSave || selectMutation.isPending)}
+            onClick={() => {
+              if (readOnly) {
+                showSignInNote("Sign in required to change GitHub settings.");
+                return;
+              }
               selectMutation.mutate({
                 installationId: Number(installationId),
                 repositoryId: Number(repositoryId),
                 filePath: filePath.trim(),
-              })
-            }
+              });
+            }}
           >
             {selectMutation.isPending ? "Saving…" : "Save selection"}
           </Button>
           <Button
             type="button"
-            disabled={syncMutation.isPending || !status?.configured}
-            onClick={() => syncMutation.mutate()}
+            aria-disabled={readOnly || undefined}
+            title={
+              readOnly ? "Sign in required to change GitHub settings" : undefined
+            }
+            disabled={!readOnly && (syncMutation.isPending || !status?.configured)}
+            onClick={() => {
+              if (readOnly) {
+                showSignInNote("Sign in required to change GitHub settings.");
+                return;
+              }
+              syncMutation.mutate();
+            }}
           >
             {syncMutation.isPending ? "Syncing…" : "Sync from GitHub"}
           </Button>
@@ -297,6 +337,7 @@ export function GitHubRepoPicker({
           </Button>
         </div>
       </div>
+      {signInNote}
     </div>
   );
 }
