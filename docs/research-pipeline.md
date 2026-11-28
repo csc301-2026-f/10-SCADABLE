@@ -4,18 +4,40 @@ For connecting this pipeline to the FastAPI backend on `main`, see the
 [backend integration plan](superpowers/plans/2026-10-20-backend-integration.md).
 
 The scraper owns discovery, Decisions scoring, rendering, Markdown cleanup, and export.
-The separate LLM layer consumes those exports to extract cited facts and produce company
-analysis. No API server, database, scheduler, or frontend integration is included.
+The separate LLM layer consumes those exports to extract cited facts and compare companies
+in a SWOT analysis. No API server, database, scheduler, or frontend integration is included.
 
 ```text
 CompetitorInput URLs
   -> CompetitorScraper.crawl_many() + Decisions
   -> export_competitor(): crawl_summary.json + pages/*.md
   -> load_analysis_input(): validated metadata + exact Markdown
-  -> Analyzer.extract_information() -> Analyzer.analyze_company()
-  -> CompetitorResearchResult: crawl provenance + facts + analysis
-  -> (optional, across companies) Analyzer.compare(): cited SWOT entries, feature scores, notes
+  -> Analyzer.extract_information()
+  -> CompetitorResearchResult: crawl provenance + extracted facts
+  -> (optional, across companies) Analyzer.compare(): cited SWOTs, feature scores and pairs, notes
 ```
+
+## Validation and revisions
+
+Extraction and comparison each follow the same loop:
+
+1. The step starts its own OpenAI conversation, seeded with its instructions, and generates
+   an output.
+2. A separate validator call, which uses no conversation, reviews the output. Code checks run
+   on it too: page ranges for extraction; citations, scores, competitor SWOTs and feature
+   pairs for comparison.
+3. Any problems are sent back into the step's conversation, and the model returns a new full
+   output. Only the flagged fields replace the earlier ones (`scores` and `features` are
+   replaced together). The merged result is what gets checked and returned.
+4. This repeats until there are no problems or the step reaches `OPENAI_CALL_LIMIT`
+   generation attempts.
+
+At the limit, out-of-range extraction citations and SWOT code violations raise an error.
+Remaining validator feedback does not, so a result can be returned with problems that only
+the validator found. The validator can also miss problems or report mistaken ones.
+
+Conversations are stored by OpenAI. Each later attempt is billed for the earlier history as
+input, and every extraction validation call includes the scraped pages again.
 
 ## Setup
 
@@ -93,13 +115,32 @@ python examples/research_pipeline.py https://competitor.example/ --max-pages 3
 ```
 
 Multiple homepage arguments are supported. By default, each invocation chooses a fresh
-UTC-named directory under `scraper/output/`. Use `--output` to choose a fresh run root,
+UTC-named directory under `examples/output/`, with any crawl exports in its `scraper/`
+folder. Use `--output` to choose a fresh run root,
 `--env-file` to select a credential file, or `--selection-mode structural` to disable only
 the scraper's model requests. Downstream analysis still uses OpenAI.
 
-The example prints a JSON array of research results. Page Markdown and `crawl_summary.json`
+This example runs extraction only. It prints a JSON array of research results and saves the
+same JSON as `extraction.json` in the run directory. Page Markdown and `crawl_summary.json`
 keep the scraper's existing output structure; analysis does not rewrite those files.
-Progress logs go to stderr; stdout remains the JSON result.
+With `--report`, diagnostics go to stderr; stdout remains the JSON result.
+
+To also run the comparison, use `examples/compare_companies.py`. With saved exports it skips
+crawling but runs extraction again for every company:
+
+```powershell
+python examples/compare_companies.py --scadable-export <SCADABLE crawl_summary.json> --export <competitor crawl_summary.json>
+```
+
+To crawl first:
+
+```powershell
+python examples/compare_companies.py --scadable https://scadable.com/ https://competitor.example/ --max-pages 3
+```
+
+Repeat `--export`, or add more competitor URLs, to compare more companies. It prints a
+readable report, or the raw result with `--json`. Fresh crawls are saved under
+`scraper/output/` by default.
 
 ## Python interfaces
 
@@ -114,21 +155,21 @@ llm/
   config.py        Analysis environment settings
   pipeline.py      Scraper export and analysis orchestration
   inputs.py        Markdown bundle loader
-  analyzer.py      Extraction, company analysis, and comparison
-  client.py        OpenAI structured-output client
+  analyzer.py      Extraction, comparison and revision loops
+  validators.py    Citation and score checks, and the LLM validator call
+  client.py        OpenAI client: structured output, conversations and tracking
   schemas.py       Analysis input and output contracts
   swot_entries.py  Source-linked SWOT rows
-  prompts/         Extraction, analysis, and comparison instructions
+  prompts/         Extraction, comparison and validation instructions
 ```
 
 | Interface | Purpose and return value |
 | --- | --- |
 | `load_analysis_input(summary_path)` | Synchronously read a validated bundle into `AnalysisInput` |
-| `await analyze_export(summary_path, analyzer=...)` | Analyze a saved bundle and return a `CompetitorResearchResult` (SCADABLE is also treated like a "Competitor" as well, calling "analyze_company()" on SCADABLE). |
-| `await run_pipeline(competitors, output_directory=..., analyzer=...)` | Collect and analyze a sequence of `CompetitorInput`; return research results in crawl-completion order |
-| `await run_competitor(competitor, ...)` / `await run_scadable(scadable, ...)` | Return one `CompetitorResearchResult`. Both functions use the same "analyze_company()" |
-| `await run_comparison(scadable, competitors=..., ...)` | Collect and analyze every company through one shared crawl, then call `Analyzer.compare`. It returns a `SWOTAnalysisByURL`: cited SWOT entries, per-competitor feature scores and competitor notes. It 
-recrawls every company on each call to ensure the data is up to date.|
+| `await analyze_export(summary_path, analyzer=...)` | Run extraction on a saved bundle and return a `CompetitorResearchResult` (SCADABLE is extracted the same way as a competitor) |
+| `await run_pipeline(competitors, output_directory=..., analyzer=...)` | Collect and extract a sequence of `CompetitorInput`; return research results in crawl-completion order |
+| `await run_competitor(competitor, ...)` / `await run_scadable(scadable, ...)` | Return one `CompetitorResearchResult` |
+| `await run_comparison(scadable, competitors=..., ...)` | Collect and extract every company through one shared crawl, then call `Analyzer.compare`. Returns a `SWOTAnalysisByURL`. Recrawls every company on each call to keep the data current |
 
 The collection functions accept optional `scraper_settings: ScraperConfig` and an injected
 `scraper: ScraperService`. `run_pipeline(..., scadable=...)` includes SCADABLE in the same
@@ -177,6 +218,7 @@ it does not start a nested event loop or close an injected analysis client.
 | `OPENAI_API_KEY` | Shared credential for Decisions and downstream analysis |
 | `OPENAI_MODEL` | Downstream analysis model; does not change the Decisions model |
 | `OPENAI_TIMEOUT_SECONDS` | Analysis SDK request timeout; default 30 seconds |
+| `OPENAI_CALL_LIMIT` | Maximum generation attempts per analysis step, including the first; default 3 |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Optional analysis cost tracking; on only when both are set |
 | `LANGFUSE_BASE_URL` | Langfuse region URL, e.g. `https://us.cloud.langfuse.com` |
 
@@ -193,8 +235,9 @@ Each `CompetitorResearchResult` contains:
 
 - `crawl_summary`: the unchanged schema `2.1` scraper index, including source/final URLs,
   page file references, titles, categories, UTC timestamps, counts, warnings, and Decisions usage.
-- `extracted_information`: an `ExtractedInformationByURL` with the summary and its source page URLs, job postings (with citations), and categorized claims, each with a `claim_page_url`.
-- `analysis`: the existing `CompanyAnalysis` with cited strengths/weaknesses, cited workforce improvements/declines.
+- `extracted_information`: an `ExtractedInformationByURL` with `company_name`, the summary and
+  its source page URLs, job postings and categorized claims (each with a page URL),
+  conflicting data, and `crawl_time_string`.
 
 Serialize with `result.model_dump(mode="json")` or `result.model_dump_json()`. The
 [scraper output guide](../scraper/docs/output-layout.md) remains the authority for filenames,
@@ -204,17 +247,38 @@ completion markers, provenance, and no-overwrite behavior.
 
 `Analyzer.compare()` returns a `SWOTAnalysisByURL`:
 
-- `SWOT_entries`: `component` (strength, weakness, opportunity or threat), `what`, and
-  `swot_component_page_urls` (the supporting page URLs, at least one per entry).
-- `scores`: `company_name`, `feature` and `score` (0-10) for each competitor feature.
-- `competitor_notes`: one note per competitor, in input order.
+- `SWOT_entries`: SCADABLE's SWOT. Each entry has a `component` (strength, weakness,
+  opportunity or threat), `what`, and `swot_component_page_urls`, which can be claim or job
+  posting pages.
+- `scores`: `company_name`, `feature` and `score` (0-10), for SCADABLE and competitor features.
+- `features`: pairs of a competitor feature and the comparable SCADABLE feature, if any.
+- `competitor_swots`: each competitor's own SWOT.
+- `competitor_notes`: one note per competitor.
+- `conflicting_data`: the conflicting claims found during extraction, per company.
 
-Each company costs two model calls (extraction and analysis); the comparison adds one call over
-all companies. With Langfuse keys set, `OpenAIClient` records each of these calls as a Langfuse
-generation with its token usage, and Langfuse computes the cost in USD. The scraper's
-Decisions calls do not go through this client. With `scraper[langfuse]` installed, the
-scraper records them separately using the same Langfuse environment settings; see the
-[Decisions tracking guide](../scraper/docs/decision-cost-tracking.md) for correlation
+With the default `OPENAI_CALL_LIMIT` of 3, extraction makes 2 to 6 model calls per company,
+and each `compare()` call makes 2 to 6, unless an error stops a step early.
+
+## Cost tracking
+
+With Langfuse keys set, `OpenAIClient` records each model response, including validator calls
+and retries, as a generation with its token usage, and Langfuse computes the cost in USD.
+Each step has a parent span, and generation names include the step and attempt number.
+
+**Session IDs:** the backend must pass a `session_id` to `Analyzer`, using the same ID for
+extraction and comparison in a research run, so that Langfuse groups their calls in one
+session. Without one, no session ID is set; this includes the example scripts. The code does
+not enforce this, and the backend does not pass one yet.
+
+**Run cost totals:** the backend's lookup still searches for generations by their old exact
+names, which no longer match. Until it is updated to find a run's calls by session ID,
+analysis costs are missed: run totals stay incomplete and the dashboard cost stays empty for
+real runs. The updated lookup should also confirm that all expected calls have arrived before
+marking a total complete.
+
+The scraper's Decisions calls do not go through this client. With `scraper[langfuse]`
+installed, the scraper records them separately using the same Langfuse environment settings;
+see the [Decisions tracking guide](../scraper/docs/decision-cost-tracking.md) for correlation
 references and backend cost-retrieval responsibilities.
 
 ## Failure handling and current limits
@@ -228,14 +292,16 @@ references and backend cost-retrieval responsibilities.
 - An unusable export error includes its competitor, URL, status, saved index, crawl warnings,
   and page failures. A missing browser includes the executing interpreter, cache setting,
   and install command, instead of being replaced by a generic empty-content error.
-- To reduce likelihood of false citation generations, the model cites its information by nonnegative integer 
-  (page index) assigned to each page. After the model responds, each page index is then converted back to its 
-  corresponding URL before returning the final result. A page number outside its range, a SWOT entry with no 
-  citation, a strength or weakness that doesn't cite a SCADABLE page, or a feature score for SCADABLE fails 
-  before any result is built. The prompts show page numbers, titles and categories, not URLs, and redirect destinations
-  remain metadata.
-- In each layer of the analysis, a new "index directory" is created to map all the provided pages with page indexes, starting 
-from 0, ending at n-1 for the provided n pages.
+- The model cites pages by number, and code converts the numbers back to URLs. Extraction
+  numbers the scraped pages from 0. Comparison numbers each company's claim and job posting
+  pages separately, from 0.
+- Extraction page numbers must be in range. In comparison, every SWOT entry needs a citation to
+  an existing company and page, and a strength or weakness must cite its subject company
+  (SCADABLE for the top-level SWOT, the competitor for its own). Score company numbers,
+  competitor SWOT blocks and feature pairs are checked too. These checks trigger revisions,
+  and fail the step if still violated at the call limit.
+- The extraction prompt shows page numbers, titles and categories alongside the page text. A
+  valid page number does not prove the page supports a statement.
 - A batch fails fast when a company has no usable content or export/analysis raises.
   The crawl iterator is closed when supported, including on cancellation. Published exports
   remain available for `analyze_export()` retries; cancellation does not roll back files.
