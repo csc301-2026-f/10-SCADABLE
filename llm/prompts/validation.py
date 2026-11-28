@@ -1,4 +1,4 @@
-from llm.schemas import AnalysisInput, AnalysisPage, ComparisonInput, ExtractedInformationByIndex, SWOTAnalysisByIndex
+from llm.schemas import AnalysisInput, AnalysisPage, ComparisonInputByIndex, ExtractedInformationByIndex, SWOTAnalysisByIndex
 
 EXTRACTION_VALIDATION_SYSTEM_PROMPT="""You are an LLM response validation layer for an LLM (let's call this LLM the 'Source LLM'), analyzing whether the data extracted from a given company's 
 scraped websites, matches the output schema. 
@@ -177,7 +177,7 @@ The Source LLM then produced an output with a predetermined scoring criteria:
     - SWOT_entries (list[SWOTEntryByIndex]): strengths/weaknesses about THIS competitor, and market opportunities/threats affecting THIS competitor.
       Every entry requires citations. For a competitor strength/weakness cite at least one claim or job posting from that competitor's company_index.
       Omit unsupported SWOT components rather than asserting that missing data means a weakness.
-- feature_pairs (list[FeaturePairByIndex]): one entry for each scored COMPETITOR feature.
+- features (list[FeatureByIndex]): one entry for each scored COMPETITOR feature.
     - company_index: the competitor's index, never 0.
     - competitor_feature (string): EXACT feature name used in that company's scores output.
     - scadable_feature (string or null): EXACT SCADABLE feature name from the scores output if genuinely comparable, otherwise null.
@@ -242,8 +242,8 @@ them from their own perspectives.
 - An opportunity or a threat must cite the competitor claim(s) or job posting(s) it comes from.
 - If you cannot support an entry with a citation, leave the entry out.
 - Score every "feature" claim of SCADABLE and of each competitor exactly once, no matter how relevant it may seem.
-- Keep the feature string in scores exactly equal to the underlying feature claim; use the same exact string in feature_pairs.
-- Emit a feature_pairs entry for every scored competitor feature. Pair only substantively comparable capabilities; use null when unmatched.
+- Keep the feature string in scores exactly equal to the underlying feature claim; use the same exact string in features.
+- Emit a features entry for every scored competitor feature. Pair only substantively comparable capabilities; use null when unmatched.
 - Emit one competitor_swots block per competitor. Keep its findings separate from SCADABLE's overall SWOT_entries. Keep findings concise (at most two grounded entries per quadrant per competitor) to control output tokens.
 - For competitor SWOT strengths and weaknesses, talk about the COMPETITOR, not SCADABLE. For opportunities and threats, discuss the competitor's market circumstances, not SCADABLE's own opportunities/threats.
 - Include only citations that correspond to actual input claims or job postings from the indicated company.
@@ -256,32 +256,19 @@ them from their own perspectives.
 Your job is to evaluate the Source LLM's outputs (provided in the user prompt) and state any deviations the Source LLM's outputs had from SOURCE_LLM_RULES. 
 Your output must follow the following structure:
 <SWOTFeedbacks>
-- feedbacks (list[CompanyFeedback]): a list containing the feedback of any bad output fields from the Source LLM's outputs (see COMPANY_FEEDBACK for reference).
-    <COMPANY_FEEDBACK>
-    - company (integer): the index of the company that had the bad output (see INDEXING_RULES to determine which index to provide)
-    - feedbacks (list[SWOTFeedback]): the feedback of the bad outputs from the SWOT analysis from the Source LLM for this company.
-        <SWOT_FEEDBACK>
-        - what (SWOTComponent): the field that had a bad value.
-        - why (string): reason(s) for why this field had a bad value.
-        </SWOT_FEEDBACK>
-    </COMPANY_FEEDBACK>
+- feedbacks (list[SWOTFeedback]): a list containing the feedback of any bad output fields from the Source LLM's outputs (see SWOT_FEEDBACK for reference).
+    <SWOT_FEEDBACK>
+    - what (SWOTKeys): the field that had a bad value.
+    - why (string): reason(s) for why this field had the bad value(s).
+    </SWOT_FEEDBACK>
 </SWOTFeedbacks>
-
-The following rules depend on the Source LLM's output (SWOT_ANALYSIS_BY_INDEX) so each of the variables referred to within CONDITIONS, and the last rule in INDEXING_RULES, all come from SWOT_ANALYSIS_BY_INDEX.
-<INDEXING_RULES>
-- The company in COMPANY_FEEDBACK must always take on exactly one of the following values based on the given condition(s):
-    <CONDITIONS>
-    - swot_component_company_index if one of the SWOT component field values are wrong for a specific company.
-    - company_index if the Source LLM's output has a value that deviates from the rules set for scores, competitor_swots, feature_pairs
-    </CONDITIONS>
-- the company in COMPANY_FEEDBACK must never take the company_name.
-</INDEXING_RULES>
 
 You as the validator must follow these rules:
 <RULES>
 - If the Source LLM's output is missing a field, mention the name of the field in the 'what' and mention that it is missing in the 'why.'
 - Any violated rules from the Source LLM's deviating field must be included in the 'why.'
 - If the Source LLM's output includes any special unicode character codes (such as 'U\\XXXX' or 'U+XXXX') then flag that in the 'why' of the field as well.
+- Since the Source LLM's output contains nested keys and values, mention the 'what' as the high-level key that is broken, and specify the nested field and its value in the 'why' that deviates. You must be specific with what is broken, and give reason as to why. 
 </RULES>
 """
 
@@ -322,8 +309,8 @@ def build_extraction_validation_user_prompt(*, scraped_pages: AnalysisInput, llm
                 llm_output.model_dump_json(indent=2)
     )
 
-def build_swot_validation_user_prompt(*, comparison_input: ComparisonInput, llm_response: SWOTAnalysisByIndex):
+def build_swot_validation_user_prompt(*, comparison_input: ComparisonInputByIndex, llm_response: SWOTAnalysisByIndex):
     """
     Builds and returns a user prompt for the LLM to validate the SWOT analysis done in the final stage of the pipeline.
     """
-    return SWOT_VALIDATION_USER_PROMPT.format(comparison_input.scadable.model_dump_json(indent=2), comparison_input.competitors.model_dump_json(indent=2), llm_response.model_dump_json(indent=2))
+    return SWOT_VALIDATION_USER_PROMPT.format(comparison_input.scadable.model_dump_json(indent=2), "\n".join(c.model_dump_json(indent=2) for c in comparison_input.competitors), llm_response.model_dump_json(indent=2))

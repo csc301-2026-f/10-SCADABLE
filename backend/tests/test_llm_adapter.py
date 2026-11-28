@@ -12,6 +12,10 @@ import pytest
 pytest.importorskip("openai")
 pytest.importorskip("pydantic_settings")
 
+from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 from llm.schemas import (  # noqa: E402
     ClaimCitedByIndex,
     FeatureScoreByIndex,
@@ -23,7 +27,7 @@ from llm.schemas import (  # noqa: E402
     SWOTEntryByIndex,
     SWOTIndex,
     CompetitorSWOTByIndex,
-    FeaturePairByIndex,
+    FeatureByIndex,
 )
 
 from app.core.baseline import get_scadable_baseline  # noqa: E402
@@ -43,27 +47,34 @@ class FakeClient:
     async def start_thread(self, *, instructions, metadata=None):
         return "conv_fake"
 
+    @contextmanager
+    def create_session(self, *, name, session_id):
+        yield MagicMock()
+
     async def generate_in_thread(
-        self, *, conversation_id, input_text, output_schema, observation_name="openai-api-thread-call"
+        self, *, session, conversation_id, input_text, output_schema,
+        observation_name="openai-api-thread-call", pre_status, post_status,
     ):
-        return await self.generate_structured(
+        response = await self.generate_response(
             input_text=input_text,
             output_schema=output_schema,
             observation_name=observation_name,
             conversation_id=conversation_id,
         )
+        return response.output_parsed
 
-    async def generate_structured(
-        self, *, instructions=None, input_text, output_schema, observation_name="openai-api-call",
-        conversation_id=None,
+    async def generate_response(
+        self, *, instructions=None, input_text, output_schema, observation_name,
+        conversation_id=None, session=None,
     ):
         self.observation_names.append(observation_name)
         name = output_schema.__name__
         if name not in self.responses and name in ("ExtractionFeedbacks", "SWOTFeedbacks"):
             # Validators default to "no problems found" so revision loops end after one pass.
-            return output_schema(feedbacks=[])
+            return SimpleNamespace(output_parsed=output_schema(feedbacks=[]))
         self.prompt_calls.append(input_text)
-        return self.responses[name]
+        return SimpleNamespace(output_parsed=self.responses[name])
+
 
     async def close(self):
         self.closed = True
@@ -352,7 +363,7 @@ def test_research_run_uses_two_stage_adapter_and_persists_scores(monkeypatch):
                 ),
                 FeatureScoreByIndex(company_index=1, feature="Automated evidence collection", score=8),
             ],
-            feature_pairs=[FeaturePairByIndex(
+            features=[FeatureByIndex(
                 company_index=1,
                 competitor_feature="Automated evidence collection",
                 scadable_feature="Continuous automated evidence collection from cloud providers and dev tools",
@@ -443,7 +454,7 @@ def test_compare_returns_cited_competitor_swot_and_explicit_pairs(fake_client):
                 FeatureScoreByIndex(company_index=0, feature="Automated evidence collection", score=6),
                 FeatureScoreByIndex(company_index=1, feature="Compliance evidence automation", score=9),
             ],
-            feature_pairs=[FeaturePairByIndex(
+            features=[FeatureByIndex(
                 company_index=1, competitor_feature="Compliance evidence automation",
                 scadable_feature="Automated evidence collection",
             )],

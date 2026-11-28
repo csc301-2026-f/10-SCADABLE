@@ -529,7 +529,7 @@ class OpenAIAdapter:
                 if entry.what.strip()
             ],
             "scores": [score.model_dump() for score in swot.scores],
-            "feature_pairs": [pair.model_dump() for pair in swot.feature_pairs],
+            "feature_pairs": [pair.model_dump() for pair in swot.features],
             "competitor_swots": competitor_swots,
             "conflicting_data": [item.model_dump(mode="json") for item in swot.conflicting_data],
             "competitor_notes": [item.model_dump(mode="json") for item in swot.competitor_notes],
