@@ -49,3 +49,15 @@ a {
   scrollbar-width: thin;
   scrollbar-color: #c9c2bf transparent;
 }
+
+/* Hide Clerk development-instance chrome (internal tool uses pk_test) */
+[data-clerk-dev-mode-notice],
+[data-clerk-dev-mode-overlay],
+.cl-footerItem:has([data-clerk-dev-mode-notice]) {
+  display: none !important;
+}
+
+/* Manage account: hide “+ Add email address” */
+.cl-profileSectionPrimaryButton__emailAddresses {
+  display: none !important;
+}

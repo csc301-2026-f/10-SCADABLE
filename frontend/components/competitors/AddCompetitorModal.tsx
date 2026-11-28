@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { competitorsApi, type CompetitorSummary } from "@/lib/api";
 import { useFocusTrap } from "@/lib/a11y/useFocusTrap";
+import { useDevDashboardBypass } from "@/lib/auth/useDevDashboardBypass";
 import { toUserFacingError } from "@/lib/errors";
 import {
   normalizeWebsiteInput,
@@ -19,6 +20,7 @@ type Props = {
 };
 
 export function AddCompetitorModal({ open, onClose }: Props) {
+  const readOnly = useDevDashboardBypass();
   const titleId = useId();
   const errorId = useId();
   const nameErrorId = useId();
@@ -73,6 +75,11 @@ export function AddCompetitorModal({ open, onClose }: Props) {
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
+
+    if (readOnly) {
+      setFormError("Sign in required to add competitors.");
+      return;
+    }
 
     const errors = validateCompetitorForm(name, website);
     setFieldErrors(errors);

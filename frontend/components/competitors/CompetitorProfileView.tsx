@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/Button";
+import { useSignInNote } from "@/components/ui/SignInNote";
 import {
   competitorsApi,
   runsApi,
@@ -15,6 +16,7 @@ import {
   type Trend,
 } from "@/lib/api";
 import { useFocusTrap } from "@/lib/a11y/useFocusTrap";
+import { useDevDashboardBypass } from "@/lib/auth/useDevDashboardBypass";
 import { toUserFacingError } from "@/lib/errors";
 import { displayWebsite, formatRelativePast, formatRefreshDate } from "@/lib/format";
 import { profilePollInterval, runsPollInterval } from "@/lib/polling";
@@ -75,6 +77,8 @@ function uniqueSources(findings: Finding[]) {
 export function CompetitorProfileView({ id }: { id: string }) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const readOnly = useDevDashboardBypass();
+  const { showSignInNote, signInNote } = useSignInNote();
   const confirmTitleId = useId();
   const deleteErrorId = useId();
   const confirmDialogRef = useRef<HTMLDivElement>(null);
@@ -293,6 +297,8 @@ export function CompetitorProfileView({ id }: { id: string }) {
         competitorName={data.name}
         activeStep={activeStep}
         rerunning={rerunMutation.isPending}
+        actionsDisabled={readOnly}
+        actionsDisabledReason="Sign in required to change research"
         onRerun={
           data.researchStatus === "failed" || data.researchStatus === "cancelled"
             ? () => {
@@ -339,7 +345,11 @@ export function CompetitorProfileView({ id }: { id: string }) {
           <section className={styles.card}>
             <h2>Feature & automation score</h2>
             {data.chartSeries.scores.length === 0 ? (
-              <p className={styles.empty}>Scores not researched yet.</p>
+              <p className={styles.empty} role="status">
+                {data.researchStatus === "success"
+                  ? "Scores are not available yet. Comparison may still be processing."
+                  : "Scores not researched yet."}
+              </p>
             ) : (
               data.chartSeries.scores.map((row) => (
                 <div key={row.label} className={styles.featureRow}>
@@ -443,7 +453,13 @@ export function CompetitorProfileView({ id }: { id: string }) {
       <div className={styles.deleteBar}>
         <Button
           variant="danger"
+          aria-disabled={readOnly || undefined}
+          title={readOnly ? "Sign in required to delete profiles" : undefined}
           onClick={() => {
+            if (readOnly) {
+              showSignInNote("Sign in required to delete profiles.");
+              return;
+            }
             setDeleteError(null);
             setConfirmOpen(true);
           }}
@@ -451,6 +467,8 @@ export function CompetitorProfileView({ id }: { id: string }) {
           Delete profile
         </Button>
       </div>
+
+      {signInNote}
 
       {confirmOpen ? (
         <div

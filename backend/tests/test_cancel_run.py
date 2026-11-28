@@ -77,7 +77,7 @@ class BlockingAnalyzer(MockOpenAIAnalyzer):
         super().__init__()
         self.started = asyncio.Event()
 
-    async def analyze(self, scraped_data, baseline_context, trace_prefix=None):
+    async def analyze(self, scraped_data, baseline_context, trace_prefix=None, session_id=None):
         self.started.set()
         await asyncio.Event().wait()
 
@@ -153,7 +153,7 @@ def test_a_cancel_saved_while_a_step_finishes_is_not_overwritten(session_factory
 
     class CancelledDuringAnalysis(MockOpenAIAnalyzer):
         # The cancel lands after the last pause, so only the saved status can stop the run
-        async def analyze(self, scraped_data, baseline_context, trace_prefix=None):
+        async def analyze(self, scraped_data, baseline_context, trace_prefix=None, session_id=None):
             with session_factory() as other:
                 update_research_run_status(other, run_id, ResearchStatus.CANCELLED)
             return await super().analyze(scraped_data, baseline_context)

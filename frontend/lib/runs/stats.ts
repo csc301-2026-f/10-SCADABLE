@@ -7,7 +7,8 @@ export type WeeklyRunStats = {
   successful: number;
   /** Sum of known run costs this week; null if no run has costUsd yet. */
   estimatedCostUsd: number | null;
-  cacheHitRatePct: number;
+  /** Null when there are no recorded cache observations. */
+  cacheHitRatePct: number | null;
 };
 
 /** Runs started in the last 7 days (weekly totals for the summary cards). */
@@ -16,7 +17,10 @@ export function filterRunsThisWeek(
   now = Date.now(),
 ): AgentRun[] {
   const cutoff = now - WEEK_MS;
-  return runs.filter((run) => new Date(run.startedAt).getTime() >= cutoff);
+  return runs.filter((run) => {
+    const started = new Date(run.startedAt).getTime();
+    return started >= cutoff && started <= now;
+  });
 }
 
 /**
@@ -96,7 +100,7 @@ export function computeWeeklyRunStats(runs: AgentRun[]): WeeklyRunStats {
     runsThisWeek: week.length,
     successful,
     estimatedCostUsd,
-    cacheHitRatePct: total === 0 ? 0 : Math.round((hits / total) * 100),
+    cacheHitRatePct: total === 0 ? null : Math.round((hits / total) * 100),
   };
 }
 

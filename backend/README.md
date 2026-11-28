@@ -1,100 +1,11 @@
 # Live SWOT backend
 
-## Run locally
+FastAPI, SQLAlchemy and PostgreSQL coordinate crawler and LLM adapters, competitor research, scheduled refresh, GitHub feature sync and costs. See [developer guide](../DEVELOPERS.md) for complete local setup, testing, configuration, deployment and troubleshooting.
 
-```bash
-cd backend
-python -m venv .venv && .venv/Scripts/pip install -r requirements.txt   # macOS/Linux: .venv/bin/pip
-cp .env.example .env   # set DATABASE_URL
-uvicorn app.main:app --reload
-```
+From the repository root run `./setup.sh`, then `cd backend && .venv/bin/python -m uvicorn app.main:app --reload --reload-dir app`. Use Python 3.12 and the sibling scraper and LLM packages. Interactive API documentation: `http://localhost:8000/docs`; schema: `/openapi.json`; liveness: `/health`. Research is asynchronous; a successful individual run can precede comparison and cost updates.
 
-Interactive docs: http://localhost:8000/docs
+Build with repository root context: `docker build -f Dockerfile -t live-swot-api .` (run at root). Configure Railway with the root Dockerfile and environment-specific database URL; never build with `backend/` alone as context. The startup command creates missing tables, not migrations.
 
-## Docker
+Run offline tests from `backend/` with `DATABASE_URL=sqlite:///:memory: RUN_LIVE_PIPELINE_TEST=0 .venv/bin/python -m pytest tests/ -q`. Use a disposable PostgreSQL `_test` database for integration tests as described in the developer guide.
 
-```bash
-docker build -t live-swot-api -f Dockerfile .
-docker run --env-file backend/.env -p 8000:8000 live-swot-api
-```
-
-The container installs the sibling scraper and LLM packages, Playwright Chromium,
-creates missing tables (`app.db.init_db`), and starts uvicorn on `$PORT` (default 8000). On Railway, set the service root directory
-to `backend` and add `DATABASE_URL` and `CORS_ORIGINS` as variables.
-
-## API
-
-Responses use camelCase keys and string IDs to match `frontend/lib/api/types.ts`.
-Errors are always `{"detail": "<message>"}`.
-
-| Method | Path | Returns | Errors |
-|---|---|---|---|
-| GET | `/health` | `{"status": "ok"}` | |
-| GET | `/competitors?skip=&limit=` | `CompetitorSummary[]` | 422 bad pagination |
-| GET | `/competitors/{id}` | `CompetitorProfile` | 404 |
-| POST | `/competitors` body `{name, dataSources[]}` | 201 `{competitor, queuedRunId}` | 409 duplicate site, 422 invalid input |
-| DELETE | `/competitors/{id}` | 204 | 404 |
-| POST | `/competitors/{id}/rerun` | 202 `CompetitorProfile` (status `pending`) | 404, 409 already pending/running |
-| GET | `/runs?competitorId=&limit=` | `AgentRun[]` (newest first) | 422 |
-| GET | `/runs/{id}` | `AgentRun` | 404 |
-| GET | `/swot?competitorId=` | `SwotOverview` (one competitor's latest SWOT, or the overview without `competitorId`) | 404, 422 |
-| GET | `/swot/overview` | `SwotOverview` | |
-| GET | `/company` | `CompanyProfile` | |
-
-Notes:
-- Research status `completed` in the DB is returned as `success`.
-- Only the first entry of `dataSources` is stored (as the website) for now.
-- `trend`, `chartSeries`, `openRoles`, `costUsd` are placeholders until the
-  pipeline produces that data.
-- `/swot/overview` uses the overall SWOT when one exists, otherwise it combines
-  each competitor's latest SWOT.
-
-## Tests
-
-```bash
-cd backend && .venv/Scripts/python -m pytest
-```
-
-## Automatic competitor research refreshes
-
-The backend calculates `nextRefreshAt` from persisted run history. When automatic
-refreshes are **enabled**, the profile shows the next scheduled attempt. A
-successful research run schedules the next check in 7 days by default. A failed
-run retries after 60 minutes; previous successful SWOT/analysis remains stored.
-While a run is pending/running, `nextRefreshAt` is `null`.
-
-The scheduler is **off by default** to avoid unplanned OpenAI/scraping costs.
-To enable it on Railway or locally, set:
-
-```env
-AUTO_REFRESH_ENABLED=true
-COMPETITOR_REFRESH_DAYS=7
-COMPETITOR_REFRESH_RETRY_MINUTES=60
-COMPETITOR_REFRESH_POLL_SECONDS=60
-```
-
-Keep the API running (on an always-on Railway instance); the in-process loop
-checks the PostgreSQL database every 60 seconds. It uses row locks and a
-single active run per competitor to avoid duplicate refreshes across replicas.
-Runs interrupted by a restart are marked failed after a 30-minute stale window
-and retried using the normal retry interval. No DB migration is needed;
-schedule state comes from the existing `research_runs` table. A stopped service
-cannot execute scheduled work while it is offline and will catch up on startup.
-
-The backend supports an optional `scadable_score` value per feature from the
-comparison output. Existing LLM schemas/prompts are unchanged by this work,
-so current comparison results continue returning `scadable: null` until the
-LLM team implements and supplies evidence-backed SCADABLE ratings. No scores
-are estimated or fabricated by the API.
-
-
-## GitHub App-backed SCADABLE feature baseline
-
-See [`docs/github-app-setup.md`](docs/github-app-setup.md) for installation,
-permissions, a versioned JSON feature manifest, protected API calls, webhook
-processing, worker settings, and test instructions. This is a **backend-only**
-integration: no frontend repository picker or client-side credentials are included.
-
-For the frontend and LLM teams, see
-[`docs/GITHUB_INTEGRATION_HANDOFF.md`](docs/GITHUB_INTEGRATION_HANDOFF.md).
-The GitHub integration branch changes only files inside `backend/`.
+For GitHub App setup and manifest validation see [GitHub setup](docs/github-app-setup.md). For scraper/LLM contracts see [research pipeline](../docs/research-pipeline.md). The [main README](../README.md) covers the current product workflows and NFR evidence.
