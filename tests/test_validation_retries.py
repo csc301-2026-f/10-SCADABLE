@@ -1,5 +1,6 @@
 """Reviewer retries: fixable output is corrected, broken output fails cleanly."""
 
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -16,11 +17,54 @@ from llm.schemas import (
     SWOTFeedbacks,
     SWOTIndex,
 )
-from tests.helpers import ThreadedFakeClient
 from tests.test_analyzer import one_page_export, partial_facts
 from tests.test_scores import DATA
 
 pytestmark = pytest.mark.asyncio
+
+
+class _FakeSpan:
+    def update(self, **fields):
+        pass
+
+
+class ThreadedFakeClient:
+    """The OpenAIClient thread API on top of a fake's generate_structured(**request).
+
+    Kept in this file so these retry tests do not depend on the shared helpers.
+    """
+
+    async def start_thread(self, *, instructions, metadata=None):
+        threads = self.__dict__.setdefault("_threads", {})
+        conversation_id = f"thread-{len(threads)}"
+        threads[conversation_id] = instructions
+        return conversation_id
+
+    @contextmanager
+    def create_session(self, *, name, session_id):
+        self.__dict__.setdefault("sessions", []).append({"name": name, "session_id": session_id})
+        yield _FakeSpan()
+
+    async def generate_in_thread(self, *, session, conversation_id, input_text, output_schema,
+                                 observation_name="", pre_status="", post_status=""):
+        return await self.generate_structured(
+            instructions=self._threads[conversation_id],
+            input_text=input_text,
+            output_schema=output_schema,
+            observation_name=observation_name,
+        )
+
+    async def generate_response(self, *, input_text, output_schema, observation_name,
+                                instructions=None, conversation_id=None, session=None):
+        if output_schema in (ExtractionFeedbacks, SWOTFeedbacks):
+            return SimpleNamespace(output_parsed=output_schema(feedbacks=[]))
+        parsed = await self.generate_structured(
+            instructions=instructions,
+            input_text=input_text,
+            output_schema=output_schema,
+            observation_name=observation_name,
+        )
+        return SimpleNamespace(output_parsed=parsed)
 
 
 class ScriptedClient(ThreadedFakeClient):
