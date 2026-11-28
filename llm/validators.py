@@ -3,7 +3,7 @@ from llm.client import OpenAIClient
 from llm.schemas import (SWOTEntryByIndex, 
                      FeatureScoreByIndex, 
                      CompetitorSWOTByIndex, 
-                     FeaturePairByIndex, 
+                     FeatureByIndex, 
                      SWOTFeedbacks, 
                      ExtractionFeedbacks)
 
@@ -60,7 +60,7 @@ def competitor_swot_violations(
 
 def feature_pair_violations(
     company_count: int, scores: list[FeatureScoreByIndex],
-    pairs: list[FeaturePairByIndex],
+    pairs: list[FeatureByIndex],
 ) -> list[str]:
     violations = []
     scored = {(s.company_index, s.feature) for s in scores}

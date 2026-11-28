@@ -63,7 +63,7 @@ output:
     - SWOT_entries (list[SWOTEntryByIndex]): strengths/weaknesses about THIS competitor, and market opportunities/threats affecting THIS competitor.
       Every entry requires citations. For a competitor strength/weakness cite at least one claim or job posting from that competitor's company_index.
       Omit unsupported SWOT components rather than asserting that missing data means a weakness.
-- feature_pairs (list[FeaturePairByIndex]): one entry for each scored COMPETITOR feature.
+- features (list[FeatureByIndex]): one entry for each scored COMPETITOR feature.
     - company_index: the competitor's index, never 0.
     - competitor_feature (string): EXACT feature name used in that company's scores output.
     - scadable_feature (string or null): EXACT SCADABLE feature name from the scores output if genuinely comparable, otherwise null.
@@ -128,8 +128,8 @@ them from their own perspectives.
 - An opportunity or a threat must cite the competitor claim(s) or job posting(s) it comes from.
 - If you cannot support an entry with a citation, leave the entry out.
 - Score every "feature" claim of SCADABLE and of each competitor exactly once, no matter how relevant it may seem.
-- Keep the feature string in scores exactly equal to the underlying feature claim; use the same exact string in feature_pairs.
-- Emit a feature_pairs entry for every scored competitor feature. Pair only substantively comparable capabilities; use null when unmatched.
+- Keep the feature string in scores exactly equal to the underlying feature claim; use the same exact string in features.
+- Emit a features entry for every scored competitor feature. Pair only substantively comparable capabilities; use null when unmatched.
 - Emit one competitor_swots block per competitor. Keep its findings separate from SCADABLE's overall SWOT_entries. Keep findings concise (at most two grounded entries per quadrant per competitor) to control output tokens.
 - For competitor SWOT strengths and weaknesses, talk about the COMPETITOR, not SCADABLE. For opportunities and threats, discuss the competitor's market circumstances, not SCADABLE's own opportunities/threats.
 - Include only citations that correspond to actual input claims or job postings from the indicated company.
