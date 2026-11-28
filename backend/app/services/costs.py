@@ -1,17 +1,22 @@
-"""Look up what a research run's OpenAI calls cost, as recorded in Langfuse.
+"""Look up what a research run cost, as recorded in Langfuse.
 
-The analyzer names each call "{prefix}:{step}" and the backend picks the prefix,
-so run 42 for Vanta records "run-42:vanta:extraction" and "run-42:comparison".
-The Observations V2 API reads them back in real time,
-but Langfuse can take a few minutes to ingest a call's cost, so callers wait
-before looking it up.
+Every analysis call a run triggers, including the reviewer calls and retries in
+extraction and comparison, is recorded in one Langfuse session: "run-42" for
+run 42. Calls keep step names like "run-42:vanta:extraction-1" or
+"run-42:comparison-validation-2", so the backend can check that every expected
+step has arrived before trusting the total. Langfuse can take a few minutes to
+ingest a call's cost, so callers wait before looking it up.
+
+The scraper's Decisions calls are tracked separately (fetch_decisions_cost).
 """
 
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
-from typing import Any
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any, AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -19,14 +24,25 @@ REQUEST_TIMEOUT_SECONDS = 30.0
 MAX_PAGES_PER_NAME = 10
 DEFAULT_BASE_URL = "https://cloud.langfuse.com"  # the Langfuse SDK's default
 
+# Only calls started around this run count. Run numbers repeat across
+# deployments that share a Langfuse project (dev and prod both have a "run-42")
+# and after a database reset, so the session name alone is not enough.
+WINDOW_BEFORE = timedelta(minutes=3)
+WINDOW_AFTER = timedelta(minutes=2)
+
 
 @dataclass
-class CallCost:
-    """Calls recorded under one name and their total cost."""
+class SessionCost:
+    """Analysis calls recorded in one run's session and their total cost."""
 
     found: int
-    # None when Langfuse has no price for at least one of the calls
+    # None when Langfuse has no price for at least one call or the scan was cut short
     usd: float | None
+    names: list[str] = field(default_factory=list)
+
+    def has_step(self, step: str) -> bool:
+        """True once at least one call for this step ("run-42:comparison") has arrived."""
+        return any(name == step or name.startswith(f"{step}-") for name in self.names)
 
 
 def company_slug(company_name: str) -> str:
@@ -41,12 +57,9 @@ def run_trace_prefix(run_id: int, company_name: str | None = None) -> str:
     return f"run-{run_id}:{company_slug(company_name)}"
 
 
-def run_call_names(run_id: int, company_name: str) -> list[str]:
-    competitor_prefix = run_trace_prefix(run_id, company_name)
-    return [
-        f"{competitor_prefix}:extraction",
-        f"{run_trace_prefix(run_id)}:comparison",
-    ]
+def run_session_id(run_id: int) -> str:
+    """The Langfuse session holding every analysis call run 42 triggers: "run-42"."""
+    return f"run-{run_id}"
 
 
 def _langfuse_settings() -> Any | None:
@@ -68,52 +81,8 @@ def is_cost_tracking_configured() -> bool:
     return _langfuse_settings() is not None
 
 
-async def _cost_for_name(api: Any, name: str) -> CallCost:
-    found = 0
-    total = 0.0
-    priced = True
-    cursor = None
-    seen: set[str] = set()
-    for _ in range(MAX_PAGES_PER_NAME):
-        page = await asyncio.wait_for(
-            api.observations.get_many(
-                name=name,
-                type="GENERATION",
-                fields="basic,usage",
-                limit=100,
-                cursor=cursor,
-            ),
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-        for observation in page.data:
-            if observation.name != name:
-                continue
-            observation_id = getattr(observation, "id", None)
-            if observation_id is not None:
-                if observation_id in seen:
-                    continue
-                seen.add(observation_id)
-            found += 1
-            if observation.total_cost is None:
-                priced = False
-            else:
-                total += float(observation.total_cost)
-        # An empty page can still have a continuation cursor (Langfuse v2).
-        cursor = page.meta.cursor
-        if not cursor:
-            break
-    else:
-        # Do not mistake a truncated lookup for a complete sum.
-        priced = False
-    return CallCost(found=found, usd=total if priced else None)
-
-
-async def fetch_call_costs(names: list[str]) -> dict[str, CallCost] | None:
-    """Cost of the calls recorded under each name; None if Langfuse isn't configured."""
-    settings = _langfuse_settings()
-    if settings is None:
-        return None
-
+@asynccontextmanager
+async def _langfuse_api(settings: Any) -> AsyncIterator[Any]:
     import httpx
     from langfuse.api import AsyncLangfuseAPI
 
@@ -121,14 +90,89 @@ async def fetch_call_costs(names: list[str]) -> dict[str, CallCost] | None:
     # across the process, and shutting it down would stop the analyzer's calls
     # from being recorded.
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as http:
-        api = AsyncLangfuseAPI(
+        yield AsyncLangfuseAPI(
             base_url=settings.langfuse_base_url or DEFAULT_BASE_URL,
             username=settings.langfuse_public_key,
             password=settings.langfuse_secret_key.get_secret_value(),
             x_langfuse_public_key=settings.langfuse_public_key,
             httpx_client=http,
         )
-        return {name: await _cost_for_name(api, name) for name in names}
+
+
+def _observation_field(value: Any, field: str) -> Any:
+    return value.get(field) if isinstance(value, dict) else getattr(value, field, None)
+
+
+def _time_window(started_at: Any) -> tuple[datetime, datetime]:
+    """From shortly before the run started until shortly after now."""
+    now = datetime.now(timezone.utc)
+    if isinstance(started_at, str):
+        try:
+            started_at = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        except ValueError:
+            started_at = None
+    if not isinstance(started_at, datetime):
+        started_at = now
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    return started_at - WINDOW_BEFORE, now + WINDOW_AFTER
+
+
+async def _session_cost_from_api(api: Any, session_id: str, started_at: Any) -> SessionCost:
+    lower, upper = _time_window(started_at)
+    names: list[str] = []
+    total = 0.0
+    priced = True
+    cursor = None
+    seen: set[str] = set()
+    for _ in range(MAX_PAGES_PER_NAME):
+        page = await asyncio.wait_for(
+            api.observations.get_many(
+                session_id=session_id,
+                type="GENERATION",
+                fields="basic,usage",
+                from_start_time=lower,
+                to_start_time=upper,
+                limit=100,
+                cursor=cursor,
+            ),
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        for observation in page.data:
+            observed_session = _observation_field(observation, "session_id")
+            if observed_session is not None and observed_session != session_id:
+                continue
+            name = _observation_field(observation, "name") or ""
+            if name.startswith("scraper.decisions"):
+                continue  # counted by fetch_decisions_cost
+            observation_id = _observation_field(observation, "id")
+            if observation_id is not None:
+                if observation_id in seen:
+                    continue
+                seen.add(observation_id)
+            names.append(name)
+            price = _observation_field(observation, "total_cost")
+            if price is None:
+                priced = False
+            else:
+                total += float(price)
+        # An empty page can still have a continuation cursor (Langfuse v2).
+        cursor = _observation_field(page.meta, "cursor")
+        if not cursor:
+            break
+    else:
+        # Do not mistake a truncated lookup for a complete sum.
+        priced = False
+    return SessionCost(found=len(names), usd=round(total, 9) if priced else None, names=names)
+
+
+async def fetch_session_cost(session_id: str, *, started_at: Any) -> SessionCost | None:
+    """Cost of every analysis call in the session; None if Langfuse isn't configured."""
+    settings = _langfuse_settings()
+    if settings is None:
+        return None
+    async with _langfuse_api(settings) as api:
+        return await _session_cost_from_api(api, session_id, started_at)
 
 
 @dataclass
@@ -139,10 +183,6 @@ class DecisionsCost:
     usd: float | None
     complete: bool
     expected: int | None
-
-
-def _observation_field(value: Any, field: str) -> Any:
-    return value.get(field) if isinstance(value, dict) else getattr(value, field, None)
 
 
 async def _fetch_decisions_from_api(
@@ -160,20 +200,7 @@ async def _fetch_decisions_from_api(
     All queries are time-bounded and cursor-paginated; a truncated scan cannot
     become a complete zero-dollar result.
     """
-    from datetime import datetime, timedelta, timezone
-
-    now = datetime.now(timezone.utc)
-    if isinstance(started_at, str):
-        try:
-            started_at = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-        except ValueError:
-            started_at = None
-    if not isinstance(started_at, datetime):
-        started_at = now
-    if started_at.tzinfo is None:
-        started_at = started_at.replace(tzinfo=timezone.utc)
-    lower = started_at - timedelta(minutes=3)
-    upper = now + timedelta(minutes=2)
+    lower, upper = _time_window(started_at)
     # Use only known safe identifiers, never a broad unbounded trace scan.
     reference = reference if isinstance(reference, dict) else {}
     trace = reference.get("trace_id")
@@ -266,17 +293,7 @@ async def fetch_decisions_cost(
     if settings is None:
         return DecisionsCost(0, None, False, expected_requests)
 
-    import httpx
-    from langfuse.api import AsyncLangfuseAPI
-
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as http:
-        api = AsyncLangfuseAPI(
-            base_url=settings.langfuse_base_url or DEFAULT_BASE_URL,
-            username=settings.langfuse_public_key,
-            password=settings.langfuse_secret_key.get_secret_value(),
-            x_langfuse_public_key=settings.langfuse_public_key,
-            httpx_client=http,
-        )
+    async with _langfuse_api(settings) as api:
         return await _fetch_decisions_from_api(
             api, run_id=run_id,
             reference=reference,

@@ -49,10 +49,10 @@ from app.db.repository import (
     update_research_run_status,
 )
 from app.services.costs import (
-    fetch_call_costs,
     fetch_decisions_cost,
+    fetch_session_cost,
     is_cost_tracking_configured,
-    run_call_names,
+    run_session_id,
     run_trace_prefix,
 )
 from app.services.crawler import (
@@ -75,6 +75,25 @@ ANALYSIS_POLICY_VERSION = os.getenv("ANALYSIS_POLICY_VERSION", "2026-11-06-scrap
 # Bump when the overall comparison prompt or its interpretation changes. This
 # invalidates saved SWOT contributions without recrawling competitor websites.
 COMPARISON_POLICY_VERSION = "2026-11-23-weakness-evidence-v1"
+# Extraction and comparison each make up to OPENAI_CALL_LIMIT answer and review
+# calls (6 by default), so they need far longer than a crawl. Users can cancel.
+DEFAULT_LLM_STEP_TIMEOUT_SECONDS = 300.0
+
+
+class StepTimeout(TimeoutError):
+    """A research step ran past its own limit, which may differ from the crawl's."""
+
+    def __init__(self, seconds: float) -> None:
+        super().__init__(f"Step timed out after {seconds:g} seconds")
+        self.seconds = seconds
+
+
+def _llm_step_timeout(env_name: str, timeout_seconds: float) -> float:
+    """Seconds an AI step may take: the env value, else at least the default."""
+    value = float(os.getenv(env_name, str(max(timeout_seconds, DEFAULT_LLM_STEP_TIMEOUT_SECONDS))))
+    if value <= 0:
+        raise ValueError(f"{env_name} must be positive")
+    return value
 
 
 
@@ -248,8 +267,14 @@ async def refresh_overall_swot(
     timeout_seconds: float = 90.0,
     only_if_missing: bool = False,
     trace_prefix: str | None = None,
+    session_id: str | None = None,
+    comparison_calls: list[str] | None = None,
 ) -> None:
     """Incrementally maintain SCADABLE-relative SWOT per researched competitor.
+
+    session_id groups the comparison's paid calls under the run that started it.
+    The paid calls each comparison reports are added to comparison_calls, so the
+    run's cost is not treated as complete before those calls are priced.
 
     A newly changed competitor triggers an LLM comparison ONLY for itself.
     Existing snapshots for unrelated competitors are reused byte-for-byte.
@@ -302,9 +327,7 @@ async def refresh_overall_swot(
             publish_overall_swot(db, [], revision)
             return
 
-        comparison_timeout = float(os.getenv("OVERALL_SWOT_TIMEOUT_SECONDS", str(timeout_seconds)))
-        if comparison_timeout <= 0:
-            raise ValueError("OVERALL_SWOT_TIMEOUT_SECONDS must be positive")
+        comparison_timeout = _llm_step_timeout("OVERALL_SWOT_TIMEOUT_SECONDS", timeout_seconds)
 
         contributions: dict[int, list[dict[str, Any]]] = {}
         updates: dict[int, dict[str, Any]] = {}
@@ -330,9 +353,15 @@ async def refresh_overall_swot(
 
             logger.info("Comparing SCADABLE against %s only (timeout=%ss)", competitor.name, comparison_timeout)
             comparison = await asyncio.wait_for(
-                analyzer.compare(baseline, [profile], trace_prefix=trace_prefix),
+                analyzer.compare(
+                    baseline, [profile], trace_prefix=trace_prefix, session_id=session_id
+                ),
                 timeout=comparison_timeout,
             )
+            if comparison_calls is not None and isinstance(comparison, dict):
+                comparison_calls.extend(
+                    name for name in comparison.get("llm_calls", []) if isinstance(name, str)
+                )
             grouped = _scores_by_company(
                 comparison.get("scores") if isinstance(comparison, dict) else None,
                 comparison.get("feature_pairs") if isinstance(comparison, dict) else None,
@@ -555,14 +584,45 @@ async def _reuse_completed_analysis(
 
     completed_run = update_research_run_status(db, run_id, ResearchStatus.COMPLETED)
     # Nothing changed, so only compare if no overall SWOT exists yet
-    await refresh_overall_swot(
-        db,
-        active_analyzer,
-        timeout_seconds,
-        only_if_missing=True,
-        trace_prefix=run_trace_prefix(run_id),
+    await _refresh_overall_swot_for_run(
+        db, run_id, active_analyzer, timeout_seconds, only_if_missing=True
     )
     return completed_run
+
+
+async def _refresh_overall_swot_for_run(
+    db: Session, run_id: int, analyzer: AnalyzerProtocol, timeout_seconds: float,
+    only_if_missing: bool = False,
+) -> None:
+    """Refresh the overall SWOT, billing its comparisons to this run's session."""
+    comparison_calls: list[str] = []
+    await refresh_overall_swot(
+        db,
+        analyzer,
+        timeout_seconds,
+        only_if_missing=only_if_missing,
+        trace_prefix=run_trace_prefix(run_id),
+        session_id=run_session_id(run_id),
+        comparison_calls=comparison_calls,
+    )
+    if comparison_calls:
+        _expect_llm_calls(db, run_id, comparison_calls)
+
+
+def _expect_llm_calls(db: Session, run_id: int, names: list[str]) -> None:
+    """Add paid call steps to the run's llm_calls so cost lookups wait for them."""
+    try:
+        run = get_research_run(db, run_id)
+        if run is None:
+            return
+        db.refresh(run)
+        analysis = run.analysis_result if isinstance(run.analysis_result, dict) else {}
+        made = [name for name in analysis.get("llm_calls", []) if isinstance(name, str)]
+        save_analysis_result(db, run_id, {**analysis, "llm_calls": list(dict.fromkeys(made + names))})
+    except Exception:
+        # Cost bookkeeping must never fail research that already completed.
+        db.rollback()
+        logger.exception("Unable to record comparison calls for run %s", run_id)
 
 
 async def _analyze_and_publish_research(
@@ -573,14 +633,19 @@ async def _analyze_and_publish_research(
     # Step 5: Feed competitor Markdown + SCADABLE baseline profile to LLM
     baseline_profile = get_scadable_baseline(db)
     logger.info("Invoking LLM SWOT synthesis for %s", competitor.name)
-    analysis_result = await asyncio.wait_for(
-        active_analyzer.analyze(
-            scraped_data,
-            baseline_profile,
-            trace_prefix=run_trace_prefix(run_id, competitor.name),
-        ),
-        timeout=timeout_seconds,
-    )
+    analysis_timeout = _llm_step_timeout("ANALYSIS_TIMEOUT_SECONDS", timeout_seconds)
+    try:
+        analysis_result = await asyncio.wait_for(
+            active_analyzer.analyze(
+                scraped_data,
+                baseline_profile,
+                trace_prefix=run_trace_prefix(run_id, competitor.name),
+                session_id=run_session_id(run_id),
+            ),
+            timeout=analysis_timeout,
+        )
+    except asyncio.TimeoutError as exc:
+        raise StepTimeout(analysis_timeout) from exc
 
     # Step 6: Save raw LLM analysis output
     save_analysis_result(db, run_id, {
@@ -605,9 +670,7 @@ async def _analyze_and_publish_research(
     logger.info("Successfully completed research run %s for %s", run_id, competitor.name)
 
     # Step 9: Refresh SCADABLE's overall SWOT now that this competitor changed
-    await refresh_overall_swot(
-        db, active_analyzer, timeout_seconds, trace_prefix=run_trace_prefix(run_id)
-    )
+    await _refresh_overall_swot_for_run(db, run_id, active_analyzer, timeout_seconds)
     return updated_run
 
 
@@ -664,8 +727,10 @@ async def _run_research_steps(
             db, run_id, competitor, scraped_data, active_analyzer, timeout_seconds
         )
 
-    except asyncio.TimeoutError:
-        error_msg = f"Research run timed out after {timeout_seconds} seconds."
+    except asyncio.TimeoutError as exc:
+        # Report the limit of the step that ran out (crawl or analysis).
+        seconds = exc.seconds if isinstance(exc, StepTimeout) else timeout_seconds
+        error_msg = f"Research run timed out after {seconds:g} seconds."
         logger.error("Run %s failed: %s", run_id, error_msg)
         return update_research_run_status(
             db,
@@ -702,9 +767,11 @@ async def record_run_cost(db: Session, run_id: int, final: bool = True) -> bool:
     """Combine independently measured LLM and Decisions costs for this run.
 
     Decisions may be charged even when analysis is skipped or the run fails.
-    Comparison is attributed to the research run that initiated it (not to
-    every competitor the comparison read). Never use local budget estimates
-    as measured Langfuse costs. Incomplete data stays visibly incomplete.
+    Every analysis call the run triggered (extraction, comparison, reviews and
+    retries) is read from the run's Langfuse session; the comparison is billed
+    to the run that started it, not to every competitor it read. Never use
+    local budget estimates as measured costs. Incomplete data stays visibly
+    incomplete.
     """
     run = get_research_run(db, run_id)
     if run is None:
@@ -712,11 +779,14 @@ async def record_run_cost(db: Session, run_id: int, final: bool = True) -> bool:
 
     analysis = run.analysis_result if isinstance(run.analysis_result, dict) else {}
     scrape = run.scraped_data if isinstance(run.scraped_data, dict) else {}
-    made = [name for name in analysis.get("llm_calls", []) if isinstance(name, str)]
-    names = list(dict.fromkeys(made + run_call_names(run_id, run.competitor.name)))
+    # Steps whose paid calls started, like "run-42:vanta:extraction" or "run-42:comparison"
+    expected_steps = list(dict.fromkeys(
+        name for name in analysis.get("llm_calls", []) if isinstance(name, str)
+    ))
+    started_at = run.started_at or run.created_at
 
-    costs = await fetch_call_costs(names)
-    if costs is None:
+    session = await fetch_session_cost(run_session_id(run_id), started_at=started_at)
+    if session is None:
         return True
 
     usage = scrape.get("decision_usage")
@@ -728,33 +798,38 @@ async def record_run_cost(db: Session, run_id: int, final: bool = True) -> bool:
         run_id,
         scrape.get("decision_tracking"),
         expected_requests=expected,
-        started_at=run.started_at or run.created_at,
+        started_at=started_at,
     )
-    missing = [name for name in made if name not in costs or costs[name].found == 0]
-    found = {name: item for name, item in costs.items() if item.found}
-    unpriced = [name for name, item in found.items() if item.usd is None]
-    pending = bool(missing or unpriced or not decisions.complete)
+    # Each step must have arrived, not just some call: extraction can be
+    # ingested minutes before the comparison that followed it.
+    missing = [step for step in expected_steps if not session.has_step(step)]
+    pending = bool(missing or session.usd is None or not decisions.complete)
     if pending and not final:
         logger.info("Run %s cost telemetry incomplete; retrying later", run_id)
         return False
 
-    llm_total = sum(item.usd for item in found.values() if item.usd is not None)
+    llm_total = session.usd
     decisions_total = decisions.usd
     # A partial sum is useful for audit, but not a reliable dashboard total.
     complete = not pending
-    total = round(llm_total + decisions_total, 6) if complete and decisions_total is not None else None
+    total = (
+        round(llm_total + decisions_total, 6)
+        if complete and llm_total is not None and decisions_total is not None
+        else None
+    )
     db.refresh(run)
     latest = run.analysis_result if isinstance(run.analysis_result, dict) else {}
     save_analysis_result(db, run_id, {
         **latest,
         "cost": {
             "usd": total,
-            "analysis_usd": round(llm_total, 6),
+            "analysis_usd": round(llm_total, 6) if llm_total is not None else None,
+            "analysis_calls": session.found,
+            "analysis_missing_steps": missing,
             "decisions_usd": round(decisions_total, 6) if decisions_total is not None else None,
             "decisions_found": decisions.found,
             "decisions_expected": decisions.expected,
             "decisions_complete": decisions.complete,
-            "calls": {name: item.usd for name, item in found.items()},
             "complete": complete,
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         },

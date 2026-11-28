@@ -41,13 +41,13 @@ def db():
 
 
 class EmptySwotAnalyzer(MockOpenAIAnalyzer):
-    async def compare(self, baseline_context, competitors, trace_prefix=None):
+    async def compare(self, baseline_context, competitors, trace_prefix=None, session_id=None):
         result = await super().compare(baseline_context, competitors)
         return {**result, "swot_entries": []}
 
 
 class FailedComparisonAnalyzer(MockOpenAIAnalyzer):
-    async def compare(self, baseline_context, competitors, trace_prefix=None):
+    async def compare(self, baseline_context, competitors, trace_prefix=None, session_id=None):
         raise RuntimeError("simulated comparison failure")
 
 
@@ -138,7 +138,7 @@ def test_unchanged_run_preserves_conflict_and_role_data_without_another_analysis
     class CountingAnalyzer(MockOpenAIAnalyzer):
         calls = 0
 
-        async def analyze(self, scraped_data, baseline_context, trace_prefix=None):
+        async def analyze(self, scraped_data, baseline_context, trace_prefix=None, session_id=None):
             self.calls += 1
             result = await super().analyze(scraped_data, baseline_context, trace_prefix)
             return {**result, "open_roles": 0, "conflicting_data": {"conflicts": []}}

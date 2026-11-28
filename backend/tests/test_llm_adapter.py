@@ -43,18 +43,21 @@ class FakeClient:
         self.closed = False
         self.observation_names = []
         self.prompt_calls = []
+        self.sessions = []
 
     async def start_thread(self, *, instructions, metadata=None):
         return "conv_fake"
 
     @contextmanager
     def create_session(self, *, name, session_id):
+        self.sessions.append({"name": name, "session_id": session_id})
         yield MagicMock()
 
     async def generate_in_thread(
         self, *, session, conversation_id, input_text, output_schema,
         observation_name="openai-api-thread-call", pre_status, post_status,
     ):
+        assert session is not None, "task calls must run inside the run's session"
         response = await self.generate_response(
             input_text=input_text,
             output_schema=output_schema,
@@ -417,6 +420,11 @@ def test_research_run_uses_two_stage_adapter_and_persists_scores(monkeypatch):
             ]
             assert len(get_overall_swot(db)) == 1
             assert get_overall_swot(db)[0].source_url == "https://vanta.com/features"
+            # Extraction and comparison both bill to this run's Langfuse session,
+            # and both steps are expected before the run's cost counts as complete.
+            session_name = f"run-{run.id}"
+            assert [s["session_id"] for c in clients for s in c.sessions] == [session_name, session_name]
+            assert analysis["llm_calls"] == [f"run-{run.id}:vanta:extraction", f"run-{run.id}:comparison"]
 
             # An unchanged refresh must reuse the facts and chart scores, not
             # pay for another extraction or comparison.
